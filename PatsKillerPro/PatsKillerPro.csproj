@@ -3,62 +3,43 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    
-    <!-- Application metadata -->
+    <Nullable>enable</Nullable>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <AssemblyName>PatsKillerPro</AssemblyName>
     <RootNamespace>PatsKillerPro</RootNamespace>
     <Version>2.0.0</Version>
     <Company>PatsKiller</Company>
     <Product>PatsKiller Pro</Product>
-    <Description>Ford PATS Key Programming &amp; Diagnostics</Description>
-    <Copyright>© 2026 PatsKiller</Copyright>
-    
-    <!-- Application icon -->
-    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
-    
-    <!-- NativeAOT Configuration (Layer 2 Protection) -->
-    <!-- Uncomment for production builds -->
-    <!-- <PublishAot>true</PublishAot> -->
-    <!-- <OptimizationPreference>Size</OptimizationPreference> -->
-    
-    <!-- Single file output for easier distribution -->
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    
-    <!-- Windows-specific -->
-    <SupportedOSPlatform>windows</SupportedOSPlatform>
+    <Authors>PatsKiller</Authors>
+    <Description>Ford &amp; Lincoln PATS Key Programming Solution</Description>
+    <Copyright>© 2026 PatsKiller. All rights reserved.</Copyright>
+    <PackageProjectUrl>https://patskiller.com</PackageProjectUrl>
+    <StartupObject>PatsKillerPro.Program</StartupObject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PlatformTarget>AnyCPU</PlatformTarget>
   </PropertyGroup>
 
-  <!-- NuGet Packages -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <DefineConstants>TRACE</DefineConstants>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <!-- System.Text.Json is built into .NET 8 - no packages needed -->
+
   <ItemGroup>
-    <!-- For WMI queries (machine ID) -->
-    <PackageReference Include="System.Management" Version="8.0.0" />
-    
-    <!-- JSON serialization -->
-    <PackageReference Include="System.Text.Json" Version="8.0.0" />
-    
-    <!-- HTTP client -->
-    <PackageReference Include="System.Net.Http.Json" Version="8.0.0" />
-    
-    <!-- Windows Registry access -->
-    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
-    
-    <!-- Visual Basic runtime for InputBox (temporary) -->
-    <PackageReference Include="Microsoft.VisualBasic" Version="10.3.0" />
-    
-    <!-- WebView2 for login (Phase 1 - uncomment when needed) -->
-    <!-- <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2420.47" /> -->
+    <Using Include="Microsoft.VisualBasic" />
   </ItemGroup>
 
-  <!-- Resources -->
   <ItemGroup>
-    <Content Include="Resources\app.ico" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Resources\logo.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Resources\app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

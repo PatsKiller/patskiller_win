@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Newtonsoft.Json;
+using System.Text.Json;
 
 namespace PatsKillerPro.Utils
 {
@@ -12,13 +12,10 @@ namespace PatsKillerPro.Utils
     public static class Settings
     {
         private static readonly object _lock = new();
-        private static Dictionary<string, object> _settings = new();
+        private static Dictionary<string, JsonElement> _settings = new();
         private static string _settingsFile = "";
         private static bool _loaded = false;
 
-        /// <summary>
-        /// Gets the settings file path
-        /// </summary>
         private static string SettingsFile
         {
             get
@@ -37,9 +34,6 @@ namespace PatsKillerPro.Utils
             }
         }
 
-        /// <summary>
-        /// Loads settings from file
-        /// </summary>
         private static void Load()
         {
             if (_loaded) return;
@@ -53,30 +47,37 @@ namespace PatsKillerPro.Utils
                     if (File.Exists(SettingsFile))
                     {
                         var json = File.ReadAllText(SettingsFile);
-                        _settings = JsonConvert.DeserializeObject<Dictionary<string, object>>(json) 
-                                    ?? new Dictionary<string, object>();
+                        var doc = JsonDocument.Parse(json);
+                        _settings = new Dictionary<string, JsonElement>();
+                        foreach (var prop in doc.RootElement.EnumerateObject())
+                        {
+                            _settings[prop.Name] = prop.Value.Clone();
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
                     Logger.Warning($"Failed to load settings: {ex.Message}");
-                    _settings = new Dictionary<string, object>();
+                    _settings = new Dictionary<string, JsonElement>();
                 }
 
                 _loaded = true;
             }
         }
 
-        /// <summary>
-        /// Saves settings to file
-        /// </summary>
         public static void Save()
         {
             lock (_lock)
             {
                 try
                 {
-                    var json = JsonConvert.SerializeObject(_settings, Formatting.Indented);
+                    var options = new JsonSerializerOptions { WriteIndented = true };
+                    var toSave = new Dictionary<string, object?>();
+                    foreach (var kvp in _settings)
+                    {
+                        toSave[kvp.Key] = JsonElementToObject(kvp.Value);
+                    }
+                    var json = JsonSerializer.Serialize(toSave, options);
                     File.WriteAllText(SettingsFile, json);
                 }
                 catch (Exception ex)
@@ -86,9 +87,19 @@ namespace PatsKillerPro.Utils
             }
         }
 
-        /// <summary>
-        /// Gets a string setting
-        /// </summary>
+        private static object? JsonElementToObject(JsonElement element)
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Null => null,
+                _ => element.ToString()
+            };
+        }
+
         public static string GetString(string key, string defaultValue = "")
         {
             Load();
@@ -96,27 +107,22 @@ namespace PatsKillerPro.Utils
             {
                 if (_settings.TryGetValue(key, out var value))
                 {
-                    return value?.ToString() ?? defaultValue;
+                    return value.ValueKind == JsonValueKind.String ? value.GetString() ?? defaultValue : value.ToString();
                 }
                 return defaultValue;
             }
         }
 
-        /// <summary>
-        /// Sets a string setting
-        /// </summary>
         public static void SetString(string key, string value)
         {
             Load();
             lock (_lock)
             {
-                _settings[key] = value;
+                using var doc = JsonDocument.Parse($"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"");
+                _settings[key] = doc.RootElement.Clone();
             }
         }
 
-        /// <summary>
-        /// Gets a boolean setting
-        /// </summary>
         public static bool GetBool(string key, bool defaultValue = false)
         {
             Load();
@@ -124,11 +130,9 @@ namespace PatsKillerPro.Utils
             {
                 if (_settings.TryGetValue(key, out var value))
                 {
-                    if (value is bool boolValue)
-                    {
-                        return boolValue;
-                    }
-                    if (bool.TryParse(value?.ToString(), out bool parsed))
+                    if (value.ValueKind == JsonValueKind.True) return true;
+                    if (value.ValueKind == JsonValueKind.False) return false;
+                    if (bool.TryParse(value.ToString(), out bool parsed))
                     {
                         return parsed;
                     }
@@ -137,21 +141,16 @@ namespace PatsKillerPro.Utils
             }
         }
 
-        /// <summary>
-        /// Sets a boolean setting
-        /// </summary>
         public static void SetBool(string key, bool value)
         {
             Load();
             lock (_lock)
             {
-                _settings[key] = value;
+                using var doc = JsonDocument.Parse(value ? "true" : "false");
+                _settings[key] = doc.RootElement.Clone();
             }
         }
 
-        /// <summary>
-        /// Gets an integer setting
-        /// </summary>
         public static int GetInt(string key, int defaultValue = 0)
         {
             Load();
@@ -159,15 +158,11 @@ namespace PatsKillerPro.Utils
             {
                 if (_settings.TryGetValue(key, out var value))
                 {
-                    if (value is int intValue)
+                    if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int result))
                     {
-                        return intValue;
+                        return result;
                     }
-                    if (value is long longValue)
-                    {
-                        return (int)longValue;
-                    }
-                    if (int.TryParse(value?.ToString(), out int parsed))
+                    if (int.TryParse(value.ToString(), out int parsed))
                     {
                         return parsed;
                     }
@@ -176,21 +171,16 @@ namespace PatsKillerPro.Utils
             }
         }
 
-        /// <summary>
-        /// Sets an integer setting
-        /// </summary>
         public static void SetInt(string key, int value)
         {
             Load();
             lock (_lock)
             {
-                _settings[key] = value;
+                using var doc = JsonDocument.Parse(value.ToString());
+                _settings[key] = doc.RootElement.Clone();
             }
         }
 
-        /// <summary>
-        /// Removes a setting
-        /// </summary>
         public static void Remove(string key)
         {
             Load();
@@ -200,9 +190,6 @@ namespace PatsKillerPro.Utils
             }
         }
 
-        /// <summary>
-        /// Checks if a setting exists
-        /// </summary>
         public static bool Contains(string key)
         {
             Load();
@@ -212,9 +199,6 @@ namespace PatsKillerPro.Utils
             }
         }
 
-        /// <summary>
-        /// Resets all settings to defaults
-        /// </summary>
         public static void Reset()
         {
             lock (_lock)

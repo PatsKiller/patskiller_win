@@ -1,234 +1,69 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.Threading.Tasks;
+using System.IO;
 using System.Windows.Forms;
 using PatsKillerPro.J2534;
 using PatsKillerPro.Vehicle;
 using PatsKillerPro.Communication;
 using PatsKillerPro.Utils;
-using PatsKillerPro.Services;
-using PatsKillerPro.Models;
 
 namespace PatsKillerPro
 {
     public partial class MainForm : Form
     {
-        #region Fields
-        
-        // J2534 Components
+        // State
         private J2534DeviceManager? _deviceManager;
         private J2534Device? _connectedDevice;
         private J2534Channel? _hsCanChannel;
         private J2534Channel? _msCanChannel;
-        
-        // State
         private VehicleInfo? _detectedVehicle;
         private bool _isConnectedToDevice = false;
         private bool _isConnectedToVehicle = false;
-        private bool _incodeVerified = false;
-        private bool _sessionActive = false;
-        private int _sessionSecondsRemaining = 0;
-        private bool _is2020Plus = false;
         private string _currentOutcode = "";
-        private string _currentIncode = "";
-        private string _currentVin = "";
-        
-        // Parameter Reset State
-        private bool _paramResetActive = false;
-        private int _currentParamResetStep = 0;
-        private bool _skipAbs = false;
-        private bool _absOnCan2 = false;
-        
-        // Services (for future API integration)
-        private AuthService? _authService;
-        private ApiClient? _apiClient;
         
         // Settings
         private bool _autoDisableAlarm = true;
         
-        // Timers
-        private System.Windows.Forms.Timer? _sessionTimer;
-        
+        // UI Colors
+        private readonly Color _colorBackground = Color.FromArgb(240, 240, 240);
+        private readonly Color _colorPanelBg = Color.White;
+        private readonly Color _colorSuccess = Color.FromArgb(34, 197, 94);
+        private readonly Color _colorWarning = Color.FromArgb(245, 158, 11);
+        private readonly Color _colorError = Color.FromArgb(239, 68, 68);
+        private readonly Color _colorPrimary = Color.FromArgb(59, 130, 246);
+        private readonly Color _colorOrange = Color.FromArgb(249, 115, 22);
+
         // Tooltip manager
         private ToolTip _toolTip = new ToolTip();
 
-        #endregion
-
-        #region UI Colors
-
-        private static class AppColors
-        {
-            // Header
-            public static Color HeaderBackground = Color.FromArgb(30, 64, 175);     // Blue-800
-            public static Color HeaderText = Color.White;
-            public static Color BadgeBlue = Color.FromArgb(59, 130, 246);           // Blue-500
-            
-            // Session Banner
-            public static Color SessionBannerBg = Color.FromArgb(34, 197, 94);      // Green-500
-            public static Color SessionBannerText = Color.White;
-            
-            // Tokens
-            public static Color PurchaseTokenBg = Color.FromArgb(34, 197, 94);      // Green-500
-            public static Color PromoTokenBg = Color.FromArgb(134, 239, 172);       // Green-300 (fluorescent)
-            public static Color PromoTokenText = Color.Black;
-            
-            // Panels
-            public static Color PanelBackground = Color.White;
-            public static Color FormBackground = Color.FromArgb(229, 231, 235);     // Gray-200
-            
-            // Input backgrounds
-            public static Color OutcodeBg = Color.FromArgb(254, 249, 195);          // Yellow-100
-            public static Color IncodeBg = Color.FromArgb(220, 252, 231);           // Green-100
-            public static Color ParamResetBg = Color.FromArgb(219, 234, 254);       // Blue-100
-            public static Color GatewayBg = Color.FromArgb(254, 243, 199);          // Amber-100
-            public static Color VehicleInfoBg = Color.FromArgb(220, 252, 231);      // Green-100
-            
-            // Buttons
-            public static Color ButtonPrimary = Color.FromArgb(59, 130, 246);       // Blue-500
-            public static Color ButtonSuccess = Color.FromArgb(34, 197, 94);        // Green-500
-            public static Color ButtonDanger = Color.FromArgb(239, 68, 68);         // Red-500
-            public static Color ButtonWarning = Color.FromArgb(245, 158, 11);       // Amber-500
-            public static Color ButtonDisabled = Color.FromArgb(209, 213, 219);     // Gray-300
-            
-            // Status
-            public static Color Success = Color.FromArgb(22, 163, 74);              // Green-600
-            public static Color Warning = Color.FromArgb(202, 138, 4);              // Yellow-600
-            public static Color Error = Color.FromArgb(220, 38, 38);                // Red-600
-            public static Color Info = Color.FromArgb(107, 114, 128);               // Gray-500
-            
-            // Activity Log
-            public static Color LogBackground = Color.Black;
-            public static Color LogSuccess = Color.FromArgb(74, 222, 128);          // Green-400
-            public static Color LogWarning = Color.FromArgb(250, 204, 21);          // Yellow-400
-            public static Color LogError = Color.FromArgb(248, 113, 113);           // Red-400
-            public static Color LogInfo = Color.FromArgb(156, 163, 175);            // Gray-400
-        }
-
-        #endregion
-
-        #region UI Components
-
-        // Header
-        private Panel? _headerPanel;
-        private Label? _lblTitle;
-        private Label? _lblBadge;
-        private Label? _lblUserEmail;
-        private Label? _lblPurchaseTokens;
-        private Label? _lblPromoTokens;
-        private Button? _btnAccount;
-        
-        // Session Banner
-        private Panel? _sessionBanner;
-        private Label? _lblSessionStatus;
-        private Label? _lblSessionTimer;
-        
-        // Tab Control
-        private TabControl? _tabControl;
-        private TabPage? _tabPats;
-        private TabPage? _tabUtility;
-        private TabPage? _tabFree;
-        
-        // PATS Tab - Device Connection
-        private ComboBox? _cmbDevices;
-        private Button? _btnScan;
-        private Button? _btnConnect;
-        
-        // PATS Tab - Vehicle
-        private Button? _btnReadVehicle;
-        private Panel? _vehicleInfoPanel;
-        private Label? _lblVehicleInfo;
-        private CheckBox? _chkKeyless;
-        private CheckBox? _chkRfaOnly;
-        
-        // PATS Tab - Outcode/Incode
-        private Panel? _outcodePanel;
-        private TextBox? _txtOutcode;
-        private Panel? _incodePanel;
-        private TextBox? _txtIncode;
-        private Button? _btnSubmitIncode;
-        private Label? _lblIncodeStatus;
-        
-        // PATS Tab - Key Operations
-        private Panel? _keyOperationsPanel;
-        private Button? _btnEraseKeys;
-        private Button? _btnProgramKeys;
-        private Label? _lblKeyOpsFree;
-        
-        // PATS Tab - Parameter Reset
-        private Panel? _paramResetPanel;
-        private CheckBox? _chkAbsOnCan2;
-        private CheckBox? _chkSkipAbs;
-        private Button? _btnStartParamReset;
-        private Panel? _paramResetProgressPanel;
-        private Label? _lblParamResetProgress;
-        private TextBox? _txtParamResetOutcode;
-        private TextBox? _txtParamResetIncode;
-        private Button? _btnParamResetSubmit;
-        private Button? _btnParamResetCancel;
-        
-        // PATS Tab - Gateway
-        private Panel? _gatewayPanel;
-        private Button? _btnGatewayUnlock;
-        
-        // PATS Tab - Other Actions
-        private Button? _btnInitEscl;
-        private Button? _btnDisableBcm;
-        
-        // Activity Log
-        private RichTextBox? _rtbLog;
-        
-        // Status Bar
-        private StatusStrip? _statusBar;
-        private ToolStripStatusLabel? _lblStatus;
-        private ToolStripStatusLabel? _lblVersion;
-
-        #endregion
-
-        #region Constructor
-
         public MainForm()
         {
-            _deviceManager = new J2534DeviceManager();
-            _authService = new AuthService();
-            _apiClient = new ApiClient();
-            
             InitializeComponent();
-            SetupTooltips();
+            _deviceManager = new J2534DeviceManager();
             LoadSettings();
-            
-            AddLog("info", "PatsKiller Pro v2.0 started");
-            AddLog("info", "Click Scan to detect J2534 devices");
+            SetupTooltips();
         }
-
-        #endregion
-
-        #region Initialization
 
         private void InitializeComponent()
         {
             this.SuspendLayout();
             
             // Form settings
-            this.Text = "PatsKiller Pro v2.0";
-            this.Size = new Size(700, 900);
-            this.MinimumSize = new Size(650, 800);
+            this.Text = "PatsKiller Pro 2026 ( Ford & Lincoln PATS Solution )";
+            this.Size = new Size(850, 750);
+            this.MinimumSize = new Size(800, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.BackColor = AppColors.FormBackground;
-            this.Font = new Font("Segoe UI", 9F);
+            this.BackColor = _colorBackground;
+            this.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
             this.FormClosing += MainForm_FormClosing;
+            this.Load += MainForm_Load;
+
+            // Create menu strip
+            CreateMenuStrip();
             
-            // Build UI components
-            BuildHeader();
-            BuildSessionBanner();
-            BuildTabControl();
-            BuildActivityLog();
-            BuildStatusBar();
-            
-            // Initialize timer
-            _sessionTimer = new System.Windows.Forms.Timer();
-            _sessionTimer.Interval = 1000;
-            _sessionTimer.Tick += SessionTimer_Tick;
+            // Create main layout
+            CreateMainLayout();
             
             this.ResumeLayout(false);
             this.PerformLayout();
@@ -242,922 +77,643 @@ namespace PatsKillerPro
             _toolTip.ShowAlways = true;
         }
 
-        #endregion
-
-        #region UI Building - Header
-
-        private void BuildHeader()
+        private void CreateMenuStrip()
         {
-            _headerPanel = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 45,
-                BackColor = AppColors.HeaderBackground
-            };
-
-            // Title with key icon
-            _lblTitle = new Label
-            {
-                Text = "🔑 PatsKiller Pro v2.0",
-                ForeColor = AppColors.HeaderText,
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(15, 12)
-            };
-
-            // FORD PATS badge
-            _lblBadge = new Label
-            {
-                Text = "FORD PATS",
-                ForeColor = AppColors.HeaderText,
-                BackColor = AppColors.BadgeBlue,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                Padding = new Padding(8, 3, 8, 3),
-                AutoSize = true,
-                Location = new Point(200, 14)
-            };
-
-            // User email (right side)
-            _lblUserEmail = new Label
-            {
-                Text = "👤 john@bestratemotors.com",
-                ForeColor = AppColors.HeaderText,
-                Font = new Font("Segoe UI", 9),
-                AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(340, 14)
-            };
-
-            // Purchase tokens badge (green)
-            _lblPurchaseTokens = new Label
-            {
-                Text = "47",
-                ForeColor = AppColors.HeaderText,
-                BackColor = AppColors.PurchaseTokenBg,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Padding = new Padding(10, 4, 10, 4),
-                AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(540, 10)
-            };
-            _toolTip.SetToolTip(_lblPurchaseTokens, "Purchased tokens");
-
-            // Promo tokens badge (fluorescent green)
-            _lblPromoTokens = new Label
-            {
-                Text = "12 promo",
-                ForeColor = AppColors.PromoTokenText,
-                BackColor = AppColors.PromoTokenBg,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Padding = new Padding(8, 4, 8, 4),
-                AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(595, 10),
-                Visible = true
-            };
-            _toolTip.SetToolTip(_lblPromoTokens, "Promo tokens - expires 3/31/2026");
-
-            _headerPanel.Controls.AddRange(new Control[] {
-                _lblTitle, _lblBadge, _lblUserEmail, _lblPurchaseTokens, _lblPromoTokens
-            });
+            var menuStrip = new MenuStrip();
+            menuStrip.BackColor = Color.FromArgb(255, 214, 0); // Yellow title bar
             
-            this.Controls.Add(_headerPanel);
+            // File menu
+            var fileMenu = new ToolStripMenuItem("File");
+            fileMenu.DropDownItems.Add("Exit", null, (s, e) => this.Close());
+            menuStrip.Items.Add(fileMenu);
+            
+            // Help menu (Log folder hidden but still writes to file)
+            var helpMenu = new ToolStripMenuItem("Help");
+            helpMenu.DropDownItems.Add("Software Tutorial", null, (s, e) => OpenUrl("https://patskiller.com/faqs"));
+            helpMenu.DropDownItems.Add("Visit patskiller.com", null, (s, e) => OpenUrl("https://patskiller.com"));
+            helpMenu.DropDownItems.Add(new ToolStripSeparator());
+            helpMenu.DropDownItems.Add("About PatsKiller Pro", null, ShowAbout_Click);
+            menuStrip.Items.Add(helpMenu);
+            
+            this.MainMenuStrip = menuStrip;
+            this.Controls.Add(menuStrip);
         }
 
-        #endregion
+        private TabControl? _tabControl;
+        private ComboBox? _cmbDevices;
+        private Button? _btnScan;
+        private Button? _btnConnect;
+        private Label? _lblDeviceStatus;
+        private ComboBox? _cmbVehicles;
+        private Button? _btnReadVehicle;
+        private CheckBox? _chkKeyless;
+        private CheckBox? _chkRfaOnly;
+        private CheckBox? _chkAutoDisableAlarm;
+        private Label? _lblVehicleInfo;
+        private TextBox? _txtOutcode;
+        private TextBox? _txtIncode;
+        private Button? _btnCopyOutcode;
+        private Button? _btnGetIncode;
+        private Button? _btnProgramKeys;
+        private Button? _btnEraseKeys;
+        private Button? _btnParameterReset;
+        private Button? _btnInitEscl;
+        private Button? _btnDisableBcm;
+        private Panel? _vehicleInfoPanel;
+        private Label? _lblStatusBar;
 
-        #region UI Building - Session Banner
-
-        private void BuildSessionBanner()
+        private void CreateMainLayout()
         {
-            _sessionBanner = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 35,
-                BackColor = AppColors.SessionBannerBg,
-                Visible = false
-            };
+            int yPos = 30; // Below menu
+            int padding = 10;
+            int panelWidth = this.ClientSize.Width - (padding * 2);
 
-            _lblSessionStatus = new Label
-            {
-                Text = "🔓 Gateway Session Active - Key programming is FREE!",
-                ForeColor = AppColors.SessionBannerText,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(15, 7)
-            };
-
-            _lblSessionTimer = new Label
-            {
-                Text = "10:00",
-                ForeColor = AppColors.SessionBannerText,
-                Font = new Font("Consolas", 12, FontStyle.Bold),
-                AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(600, 6)
-            };
-
-            _sessionBanner.Controls.AddRange(new Control[] {
-                _lblSessionStatus, _lblSessionTimer
-            });
+            // Tab Control
+            _tabControl = new TabControl();
+            _tabControl.Location = new Point(padding, yPos);
+            _tabControl.Size = new Size(panelWidth, 630);
+            _tabControl.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             
-            this.Controls.Add(_sessionBanner);
-            _sessionBanner.BringToFront();
+            // PATS Functions Tab
+            var patsTab = new TabPage("PATS Functions");
+            patsTab.BackColor = _colorPanelBg;
+            patsTab.Padding = new Padding(10);
+            CreatePatsTabContent(patsTab);
+            _tabControl.TabPages.Add(patsTab);
+            
+            // Other Functions Tab
+            var otherTab = new TabPage("Other Functions");
+            otherTab.BackColor = _colorPanelBg;
+            otherTab.Padding = new Padding(10);
+            otherTab.AutoScroll = true;
+            CreateOtherTabContent(otherTab);
+            _tabControl.TabPages.Add(otherTab);
+            
+            this.Controls.Add(_tabControl);
+
+            // Status Bar
+            _lblStatusBar = new Label();
+            _lblStatusBar.Text = "Status: Ready";
+            _lblStatusBar.Location = new Point(0, this.ClientSize.Height - 25);
+            _lblStatusBar.Size = new Size(this.ClientSize.Width, 25);
+            _lblStatusBar.BackColor = Color.FromArgb(209, 213, 219);
+            _lblStatusBar.TextAlign = ContentAlignment.MiddleLeft;
+            _lblStatusBar.Padding = new Padding(10, 0, 0, 0);
+            _lblStatusBar.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            this.Controls.Add(_lblStatusBar);
+            
+            _toolTip.SetToolTip(_lblStatusBar, "Shows the current operation status and any errors");
         }
 
-        #endregion
-
-        #region UI Building - Tab Control
-
-        private void BuildTabControl()
-        {
-            _tabControl = new TabControl
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Padding = new Point(12, 4),
-                Margin = new Padding(10)
-            };
-
-            // PATS Operations Tab
-            _tabPats = new TabPage
-            {
-                Text = "🔑 PATS Operations",
-                BackColor = AppColors.PanelBackground,
-                Padding = new Padding(10),
-                AutoScroll = true
-            };
-            BuildPatsTab();
-            
-            // Utility Tab
-            _tabUtility = new TabPage
-            {
-                Text = "🔧 Utility (1 token)",
-                BackColor = AppColors.PanelBackground,
-                Padding = new Padding(10),
-                AutoScroll = true
-            };
-            BuildUtilityTab();
-            
-            // Free Functions Tab
-            _tabFree = new TabPage
-            {
-                Text = "⚙️ Free Functions",
-                BackColor = AppColors.PanelBackground,
-                Padding = new Padding(10),
-                AutoScroll = true
-            };
-            BuildFreeTab();
-
-            _tabControl.TabPages.AddRange(new TabPage[] {
-                _tabPats, _tabUtility, _tabFree
-            });
-
-            // Wrap in panel with padding
-            var contentPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(10, 5, 10, 5)
-            };
-            contentPanel.Controls.Add(_tabControl);
-            
-            this.Controls.Add(contentPanel);
-        }
-
-        private void BuildPatsTab()
+        private void CreatePatsTabContent(TabPage tab)
         {
             int yPos = 10;
-            int fullWidth = 640;
+            int xPos = 10;
+            int fullWidth = tab.ClientSize.Width - 40;
 
-            // 1. Device Connection Section
-            var devicePanel = CreateGroupPanel("J2534 Device Connection", 10, yPos, fullWidth, 80);
-            
-            _cmbDevices = new ComboBox
-            {
-                Location = new Point(10, 25),
-                Size = new Size(430, 28),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 9)
-            };
-            _cmbDevices.Items.Add("-- Click Scan to detect J2534 devices --");
-            _cmbDevices.SelectedIndex = 0;
-            _cmbDevices.SelectedIndexChanged += CmbDevices_SelectedIndexChanged;
-            devicePanel.Controls.Add(_cmbDevices);
-            _toolTip.SetToolTip(_cmbDevices, "Select your J2534 pass-thru device");
+            // Session ID Row
+            var lblSession = new Label();
+            lblSession.Text = "Session: Connected to patskiller.com";
+            lblSession.Location = new Point(xPos, yPos);
+            lblSession.AutoSize = true;
+            lblSession.ForeColor = _colorSuccess;
+            tab.Controls.Add(lblSession);
+            _toolTip.SetToolTip(lblSession, "Your patskiller.com session status - tokens are charged from your account");
 
-            _btnScan = CreateButton("Scan", AppColors.ButtonPrimary, new Size(70, 28));
-            _btnScan.Location = new Point(450, 25);
-            _btnScan.Click += BtnScan_Click;
-            devicePanel.Controls.Add(_btnScan);
-            _toolTip.SetToolTip(_btnScan, "Scan for installed J2534 devices");
+            var lblJ2534Only = new Label();
+            lblJ2534Only.Text = "● J2534 v2 Only";
+            lblJ2534Only.Location = new Point(fullWidth - 100, yPos);
+            lblJ2534Only.AutoSize = true;
+            lblJ2534Only.ForeColor = _colorPrimary;
+            lblJ2534Only.Font = new Font(this.Font, FontStyle.Bold);
+            tab.Controls.Add(lblJ2534Only);
+            _toolTip.SetToolTip(lblJ2534Only, "This application only supports J2534 v2 compliant pass-thru devices");
 
-            _btnConnect = CreateButton("Connect", AppColors.ButtonWarning, new Size(100, 28));
-            _btnConnect.Location = new Point(530, 25);
-            _btnConnect.Enabled = false;
-            _btnConnect.Click += BtnConnect_Click;
-            devicePanel.Controls.Add(_btnConnect);
-            _toolTip.SetToolTip(_btnConnect, "Connect to selected device");
-
-            _tabPats.Controls.Add(devicePanel);
-            yPos += 90;
-
-            // 2. Read Vehicle Button
-            _btnReadVehicle = CreateButton("🔍 Read Vehicle (Auto-Detect from VIN)", AppColors.ButtonPrimary, new Size(fullWidth, 40));
-            _btnReadVehicle.Location = new Point(10, yPos);
-            _btnReadVehicle.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-            _btnReadVehicle.Enabled = false;
-            _btnReadVehicle.Click += BtnReadVehicle_Click;
-            _tabPats.Controls.Add(_btnReadVehicle);
-            _toolTip.SetToolTip(_btnReadVehicle, "Read VIN and auto-detect vehicle - FREE");
-            yPos += 50;
-
-            // 3. Vehicle Info Panel (hidden initially)
-            _vehicleInfoPanel = CreateGroupPanel("✅ Connected Vehicle", 10, yPos, fullWidth, 90);
-            _vehicleInfoPanel.BackColor = AppColors.VehicleInfoBg;
-            _vehicleInfoPanel.Visible = false;
-            
-            _lblVehicleInfo = new Label
-            {
-                Location = new Point(10, 22),
-                Size = new Size(620, 60),
-                Font = new Font("Consolas", 9)
-            };
-            _vehicleInfoPanel.Controls.Add(_lblVehicleInfo);
-            
-            // Checkboxes
-            _chkKeyless = new CheckBox
-            {
-                Text = "Keyless",
-                Location = new Point(450, 22),
-                AutoSize = true
-            };
-            _vehicleInfoPanel.Controls.Add(_chkKeyless);
-            
-            _chkRfaOnly = new CheckBox
-            {
-                Text = "RFA Only",
-                Location = new Point(530, 22),
-                AutoSize = true
-            };
-            _vehicleInfoPanel.Controls.Add(_chkRfaOnly);
-            
-            _tabPats.Controls.Add(_vehicleInfoPanel);
-            yPos += 100;
-
-            // 4. Outcode Panel (hidden initially)
-            _outcodePanel = CreateGroupPanel("OUTCODE", 10, yPos, fullWidth, 90);
-            _outcodePanel.BackColor = AppColors.OutcodeBg;
-            _outcodePanel.Visible = false;
-            
-            var btnCopyOutcode = new LinkLabel
-            {
-                Text = "📋 Copy",
-                Location = new Point(580, 5),
-                AutoSize = true
-            };
-            btnCopyOutcode.Click += BtnCopyOutcode_Click;
-            _outcodePanel.Controls.Add(btnCopyOutcode);
-            
-            _txtOutcode = new TextBox
-            {
-                Location = new Point(10, 28),
-                Size = new Size(620, 32),
-                Font = new Font("Consolas", 14, FontStyle.Bold),
-                TextAlign = HorizontalAlignment.Center,
-                ReadOnly = true,
-                BackColor = Color.White
-            };
-            _outcodePanel.Controls.Add(_txtOutcode);
-            
-            var lnkCalculator = new LinkLabel
-            {
-                Text = "🔗 Get Incode at patskiller.com/calculator",
-                Location = new Point(200, 65),
-                AutoSize = true
-            };
-            lnkCalculator.Click += (s, e) => OpenUrl("https://patskiller.com/calculator");
-            _outcodePanel.Controls.Add(lnkCalculator);
-            
-            _tabPats.Controls.Add(_outcodePanel);
-            yPos += 100;
-
-            // 5. Incode Panel with SUBMIT button (hidden initially)
-            _incodePanel = CreateGroupPanel("INCODE", 10, yPos, fullWidth, 75);
-            _incodePanel.BackColor = AppColors.IncodeBg;
-            _incodePanel.Visible = false;
-            
-            _txtIncode = new TextBox
-            {
-                Location = new Point(10, 28),
-                Size = new Size(510, 32),
-                Font = new Font("Consolas", 14, FontStyle.Bold),
-                TextAlign = HorizontalAlignment.Center,
-                CharacterCasing = CharacterCasing.Upper,
-                BackColor = Color.White
-            };
-            _txtIncode.TextChanged += TxtIncode_TextChanged;
-            _incodePanel.Controls.Add(_txtIncode);
-            
-            _btnSubmitIncode = CreateButton("Submit", AppColors.ButtonPrimary, new Size(100, 32));
-            _btnSubmitIncode.Location = new Point(530, 28);
-            _btnSubmitIncode.Enabled = false;
-            _btnSubmitIncode.Click += BtnSubmitIncode_Click;
-            _incodePanel.Controls.Add(_btnSubmitIncode);
-            _toolTip.SetToolTip(_btnSubmitIncode, "Verify incode to unlock operations");
-            
-            _lblIncodeStatus = new Label
-            {
-                Text = "",
-                ForeColor = AppColors.Success,
-                Font = new Font("Segoe UI", 8),
-                Location = new Point(10, 62),
-                AutoSize = true,
-                Visible = false
-            };
-            _incodePanel.Controls.Add(_lblIncodeStatus);
-            
-            _tabPats.Controls.Add(_incodePanel);
-            yPos += 85;
-
-            // 6. Key Operations Panel (hidden initially)
-            _keyOperationsPanel = new Panel
-            {
-                Location = new Point(10, yPos),
-                Size = new Size(fullWidth, 100),
-                Visible = false
-            };
-            
-            var lblKeyOps = new Label
-            {
-                Text = "🔑 Key Operations",
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Location = new Point(0, 0),
-                AutoSize = true
-            };
-            _keyOperationsPanel.Controls.Add(lblKeyOps);
-            
-            _lblKeyOpsFree = new Label
-            {
-                Text = "FREE during session!",
-                ForeColor = AppColors.Success,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                Location = new Point(140, 2),
-                AutoSize = true,
-                Visible = false
-            };
-            _keyOperationsPanel.Controls.Add(_lblKeyOpsFree);
-            
-            _btnEraseKeys = CreateButton("🗑️ Erase All Keys\n1 token", AppColors.ButtonDanger, new Size(310, 60));
-            _btnEraseKeys.Location = new Point(0, 30);
-            _btnEraseKeys.Enabled = false;
-            _btnEraseKeys.Click += BtnEraseKeys_Click;
-            _keyOperationsPanel.Controls.Add(_btnEraseKeys);
-            _toolTip.SetToolTip(_btnEraseKeys, "⚠️ Erases ALL programmed keys from BCM");
-            
-            _btnProgramKeys = CreateButton("🔑 Program New Keys\n1 token", AppColors.ButtonSuccess, new Size(310, 60));
-            _btnProgramKeys.Location = new Point(320, 30);
-            _btnProgramKeys.Enabled = false;
-            _btnProgramKeys.Click += BtnProgramKeys_Click;
-            _keyOperationsPanel.Controls.Add(_btnProgramKeys);
-            _toolTip.SetToolTip(_btnProgramKeys, "Program new transponder keys to vehicle");
-            
-            _tabPats.Controls.Add(_keyOperationsPanel);
-            yPos += 110;
-
-            // 7. Parameter Reset Panel (hidden initially)
-            _paramResetPanel = CreateGroupPanel("🔄 Parameter Reset", 10, yPos, fullWidth, 150);
-            _paramResetPanel.BackColor = AppColors.ParamResetBg;
-            _paramResetPanel.Visible = false;
-            
-            // Description
-            var lblParamDesc = new Label
-            {
-                Text = "Iterative process: Each module (BCM, ABS, PCM) requires its own outcode/incode cycle.",
-                Font = new Font("Segoe UI", 8),
-                ForeColor = Color.FromArgb(30, 64, 175),
-                Location = new Point(10, 22),
-                Size = new Size(620, 18)
-            };
-            _paramResetPanel.Controls.Add(lblParamDesc);
-            
-            // Troubleshooting options
-            var optionsPanel = new Panel
-            {
-                Location = new Point(10, 45),
-                Size = new Size(620, 55),
-                BackColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle
-            };
-            
-            var lblOptions = new Label
-            {
-                Text = "Troubleshooting Options:",
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                ForeColor = AppColors.Info,
-                Location = new Point(5, 5),
-                AutoSize = true
-            };
-            optionsPanel.Controls.Add(lblOptions);
-            
-            _chkAbsOnCan2 = new CheckBox
-            {
-                Text = "ABS on CAN 2",
-                Location = new Point(5, 28),
-                AutoSize = true
-            };
-            _chkAbsOnCan2.CheckedChanged += ChkAbsOnCan2_CheckedChanged;
-            optionsPanel.Controls.Add(_chkAbsOnCan2);
-            _toolTip.SetToolTip(_chkAbsOnCan2, "Use if ABS communication fails - routes to MS-CAN");
-            
-            _chkSkipAbs = new CheckBox
-            {
-                Text = "Skip ABS (2 modules only)",
-                Location = new Point(130, 28),
-                AutoSize = true
-            };
-            _chkSkipAbs.CheckedChanged += ChkSkipAbs_CheckedChanged;
-            optionsPanel.Controls.Add(_chkSkipAbs);
-            _toolTip.SetToolTip(_chkSkipAbs, "USA vehicles where ABS doesn't participate in PATS");
-            
-            var lblSaves = new Label
-            {
-                Text = "Saves tokens!",
-                ForeColor = AppColors.Success,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                Location = new Point(310, 30),
-                AutoSize = true
-            };
-            optionsPanel.Controls.Add(lblSaves);
-            
-            _paramResetPanel.Controls.Add(optionsPanel);
-            
-            _btnStartParamReset = CreateButton("🔄 Start Parameter Reset (3-4 tokens)", AppColors.ButtonPrimary, new Size(620, 40));
-            _btnStartParamReset.Location = new Point(10, 105);
-            _btnStartParamReset.Enabled = false;
-            _btnStartParamReset.Click += BtnStartParamReset_Click;
-            _paramResetPanel.Controls.Add(_btnStartParamReset);
-            
-            _tabPats.Controls.Add(_paramResetPanel);
-            yPos += 160;
-
-            // 8. Parameter Reset Progress Panel (hidden, shown during reset)
-            _paramResetProgressPanel = CreateGroupPanel("🔄 PARAMETER RESET IN PROGRESS", 10, yPos - 160, fullWidth, 200);
-            _paramResetProgressPanel.BackColor = Color.FromArgb(254, 243, 199);
-            _paramResetProgressPanel.Visible = false;
-            
-            // Progress indicator
-            _lblParamResetProgress = new Label
-            {
-                Text = "[1 BCM] ──→ [2 ABS] ──→ [3 PCM]\n    ●              ○              ○",
-                Font = new Font("Consolas", 11, FontStyle.Bold),
-                ForeColor = AppColors.ButtonPrimary,
-                Location = new Point(150, 25),
-                Size = new Size(400, 40),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            _paramResetProgressPanel.Controls.Add(_lblParamResetProgress);
-            
-            // Current module outcode
-            var lblModuleOutcode = new Label
-            {
-                Text = "BCM OUTCODE:",
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Location = new Point(10, 75),
-                AutoSize = true
-            };
-            _paramResetProgressPanel.Controls.Add(lblModuleOutcode);
-            
-            _txtParamResetOutcode = new TextBox
-            {
-                Location = new Point(10, 95),
-                Size = new Size(620, 28),
-                Font = new Font("Consolas", 12, FontStyle.Bold),
-                TextAlign = HorizontalAlignment.Center,
-                ReadOnly = true,
-                BackColor = Color.White
-            };
-            _paramResetProgressPanel.Controls.Add(_txtParamResetOutcode);
-            
-            // Current module incode input
-            var lblModuleIncode = new Label
-            {
-                Text = "BCM INCODE:",
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Location = new Point(10, 128),
-                AutoSize = true
-            };
-            _paramResetProgressPanel.Controls.Add(lblModuleIncode);
-            
-            _txtParamResetIncode = new TextBox
-            {
-                Location = new Point(10, 148),
-                Size = new Size(510, 28),
-                Font = new Font("Consolas", 12, FontStyle.Bold),
-                TextAlign = HorizontalAlignment.Center,
-                CharacterCasing = CharacterCasing.Upper
-            };
-            _paramResetProgressPanel.Controls.Add(_txtParamResetIncode);
-            
-            _btnParamResetSubmit = CreateButton("Submit", AppColors.ButtonSuccess, new Size(100, 28));
-            _btnParamResetSubmit.Location = new Point(530, 148);
-            _btnParamResetSubmit.Click += BtnParamResetSubmit_Click;
-            _paramResetProgressPanel.Controls.Add(_btnParamResetSubmit);
-            
-            _btnParamResetCancel = CreateButton("Cancel", AppColors.ButtonDanger, new Size(80, 25));
-            _btnParamResetCancel.Location = new Point(550, 5);
-            _btnParamResetCancel.Click += BtnParamResetCancel_Click;
-            _paramResetProgressPanel.Controls.Add(_btnParamResetCancel);
-            
-            _tabPats.Controls.Add(_paramResetProgressPanel);
-
-            // 9. Other PATS Buttons
-            var otherPatsPanel = new Panel
-            {
-                Location = new Point(10, yPos),
-                Size = new Size(fullWidth, 45),
-                Visible = false
-            };
-            otherPatsPanel.Name = "otherPatsPanel";
-            
-            _btnInitEscl = CreateButton("Initialize ESCL (1 token)", Color.White, new Size(200, 35));
-            _btnInitEscl.Location = new Point(0, 5);
-            _btnInitEscl.ForeColor = Color.Black;
-            _btnInitEscl.FlatStyle = FlatStyle.Flat;
-            _btnInitEscl.FlatAppearance.BorderColor = AppColors.Info;
-            _btnInitEscl.Enabled = false;
-            _btnInitEscl.Click += BtnInitEscl_Click;
-            otherPatsPanel.Controls.Add(_btnInitEscl);
-            _toolTip.SetToolTip(_btnInitEscl, "Initialize Electronic Steering Column Lock");
-            
-            _btnDisableBcm = CreateButton("Disable BCM Security", Color.White, new Size(200, 35));
-            _btnDisableBcm.Location = new Point(210, 5);
-            _btnDisableBcm.ForeColor = Color.Black;
-            _btnDisableBcm.FlatStyle = FlatStyle.Flat;
-            _btnDisableBcm.FlatAppearance.BorderColor = AppColors.Info;
-            _btnDisableBcm.Enabled = false;
-            _btnDisableBcm.Click += BtnDisableBcm_Click;
-            otherPatsPanel.Controls.Add(_btnDisableBcm);
-            _toolTip.SetToolTip(_btnDisableBcm, "For ALL KEYS LOST situations");
-            
-            _tabPats.Controls.Add(otherPatsPanel);
-            yPos += 55;
-
-            // 10. Gateway Unlock Panel (hidden, shown for 2020+ vehicles)
-            _gatewayPanel = CreateGroupPanel("🔐 Gateway Unlock 2020+", 10, yPos, fullWidth, 100);
-            _gatewayPanel.BackColor = AppColors.GatewayBg;
-            _gatewayPanel.Visible = false;
-            
-            var lblGatewayDesc = new Label
-            {
-                Text = "✨ Unlock Security Gateway to get FREE key programming for 10 minutes!",
-                Font = new Font("Segoe UI", 9),
-                ForeColor = Color.FromArgb(146, 64, 14),
-                Location = new Point(10, 25),
-                Size = new Size(620, 20)
-            };
-            _gatewayPanel.Controls.Add(lblGatewayDesc);
-            
-            _btnGatewayUnlock = CreateButton("🔓 Gateway Unlock (1 token) - Get FREE Key Ops!", AppColors.ButtonWarning, new Size(620, 45));
-            _btnGatewayUnlock.Location = new Point(10, 50);
-            _btnGatewayUnlock.Enabled = false;
-            _btnGatewayUnlock.Click += BtnGatewayUnlock_Click;
-            _gatewayPanel.Controls.Add(_btnGatewayUnlock);
-            _toolTip.SetToolTip(_btnGatewayUnlock, "Unlock security gateway for 10-minute FREE key programming session");
-            
-            _tabPats.Controls.Add(_gatewayPanel);
-        }
-
-        private void BuildUtilityTab()
-        {
-            int yPos = 15;
-            int fullWidth = 620;
-            
-            var lblHeader = new Label
-            {
-                Text = "🔧 Utility Operations (1 token each)",
-                Font = new Font("Segoe UI", 11, FontStyle.Bold),
-                Location = new Point(15, yPos),
-                AutoSize = true
-            };
-            _tabUtility.Controls.Add(lblHeader);
-            yPos += 25;
-            
-            var lblDesc = new Label
-            {
-                Text = "Each operation uses the same flow: Connect → Outcode → Incode → Submit",
-                Font = new Font("Segoe UI", 8),
-                ForeColor = AppColors.Info,
-                Location = new Point(15, yPos),
-                AutoSize = true
-            };
-            _tabUtility.Controls.Add(lblDesc);
             yPos += 30;
 
-            // Create 2x2 grid of utility buttons
-            var btnClearP160A = CreateUtilityButton(
-                "🔧 Clear P160A - PCM",
-                "Theft Detected - Vehicle Immobilized",
-                "1 token",
-                BtnClearP160A_Click);
-            btnClearP160A.Location = new Point(15, yPos);
-            _tabUtility.Controls.Add(btnClearP160A);
-            _toolTip.SetToolTip(btnClearP160A, "Clears P160A theft code from PCM - use after key programming or BCM replacement");
-            
-            var btnClearB10A2 = CreateUtilityButton(
-                "🚗 Clear B10A2 - BCM",
-                "Crash Input Failure",
-                "1 token",
-                BtnClearB10A2_Click);
-            btnClearB10A2.Location = new Point(335, yPos);
-            _tabUtility.Controls.Add(btnClearB10A2);
-            _toolTip.SetToolTip(btnClearB10A2, "Clears B10A2 configuration incompatible code from BCM");
-            yPos += 110;
-            
-            var btnClearCrash = CreateUtilityButton(
-                "⚠️ Clear Crash Event - BCM",
-                "Collision/Accident Flag (DID 5B17)",
-                "1 token",
-                BtnClearCrashEvent_Click);
-            btnClearCrash.Location = new Point(15, yPos);
-            _tabUtility.Controls.Add(btnClearCrash);
-            _toolTip.SetToolTip(btnClearCrash, "Clears crash/collision event flag from BCM");
-            
-            var btnBcmDefaults = CreateUtilityButton(
-                "🔄 BCM Factory Defaults",
-                "Restore BCM config (NOT PATS)",
-                "1 token",
-                BtnBcmFactoryDefaults_Click);
-            btnBcmDefaults.Location = new Point(335, yPos);
-            _tabUtility.Controls.Add(btnBcmDefaults);
-            _toolTip.SetToolTip(btnBcmDefaults, "Restores BCM configuration to factory defaults - does NOT reset PATS");
+            // J2534 Device Section
+            var devicePanel = CreateGroupPanel("J2534 Device", xPos, yPos, fullWidth, 110);
+            tab.Controls.Add(devicePanel);
+
+            int innerY = 25;
+            _cmbDevices = new ComboBox();
+            _cmbDevices.Location = new Point(10, innerY);
+            _cmbDevices.Size = new Size(fullWidth - 120, 25);
+            _cmbDevices.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cmbDevices.Items.Add("-- Click Scan to detect J2534 devices --");
+            _cmbDevices.SelectedIndex = 0;
+            devicePanel.Controls.Add(_cmbDevices);
+            _toolTip.SetToolTip(_cmbDevices, "Select your J2534 pass-thru device from the list after scanning");
+
+            _btnScan = new Button();
+            _btnScan.Text = "Scan";
+            _btnScan.Location = new Point(fullWidth - 100, innerY);
+            _btnScan.Size = new Size(80, 25);
+            _btnScan.Click += BtnScan_Click;
+            devicePanel.Controls.Add(_btnScan);
+            _toolTip.SetToolTip(_btnScan, "Scan Windows registry for installed J2534 devices");
+
+            innerY += 35;
+            _btnConnect = new Button();
+            _btnConnect.Text = "Connect to Device";
+            _btnConnect.Location = new Point(10, innerY);
+            _btnConnect.Size = new Size(fullWidth - 20, 35);
+            _btnConnect.BackColor = _colorOrange;
+            _btnConnect.ForeColor = Color.White;
+            _btnConnect.FlatStyle = FlatStyle.Flat;
+            _btnConnect.Font = new Font(this.Font.FontFamily, 10, FontStyle.Bold);
+            _btnConnect.Click += BtnConnect_Click;
+            _btnConnect.Enabled = false;
+            devicePanel.Controls.Add(_btnConnect);
+            _toolTip.SetToolTip(_btnConnect, "Connect to the selected J2534 device via USB");
+
+            yPos += 120;
+
+            // Vehicle Detection Section
+            var vehiclePanel = CreateGroupPanel("Vehicle Detection", xPos, yPos, fullWidth, 150);
+            tab.Controls.Add(vehiclePanel);
+
+            innerY = 25;
+            _btnReadVehicle = new Button();
+            _btnReadVehicle.Text = "🔍 Read Vehicle (Auto-Detect from VIN)";
+            _btnReadVehicle.Location = new Point(10, innerY);
+            _btnReadVehicle.Size = new Size(fullWidth - 20, 35);
+            _btnReadVehicle.BackColor = _colorPrimary;
+            _btnReadVehicle.ForeColor = Color.White;
+            _btnReadVehicle.FlatStyle = FlatStyle.Flat;
+            _btnReadVehicle.Font = new Font(this.Font.FontFamily, 10, FontStyle.Bold);
+            _btnReadVehicle.Click += BtnReadVehicle_Click;
+            _btnReadVehicle.Enabled = false;
+            vehiclePanel.Controls.Add(_btnReadVehicle);
+            _toolTip.SetToolTip(_btnReadVehicle, "Automatically reads VIN from vehicle CAN bus and identifies the vehicle model - FREE");
+
+            innerY += 45;
+            var lblManual = new Label();
+            lblManual.Text = "Or select manually:";
+            lblManual.Location = new Point(10, innerY);
+            lblManual.AutoSize = true;
+            vehiclePanel.Controls.Add(lblManual);
+
+            innerY += 20;
+            _cmbVehicles = new ComboBox();
+            _cmbVehicles.Location = new Point(10, innerY);
+            _cmbVehicles.Size = new Size(fullWidth - 20, 25);
+            _cmbVehicles.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cmbVehicles.Enabled = false;
+            PopulateVehicleList();
+            vehiclePanel.Controls.Add(_cmbVehicles);
+            _toolTip.SetToolTip(_cmbVehicles, "Manually select your vehicle if auto-detection fails");
+
+            innerY += 35;
+            _chkKeyless = new CheckBox();
+            _chkKeyless.Text = "Keyless";
+            _chkKeyless.Location = new Point(10, innerY);
+            _chkKeyless.AutoSize = true;
+            _chkKeyless.Enabled = false;
+            vehiclePanel.Controls.Add(_chkKeyless);
+            _toolTip.SetToolTip(_chkKeyless, "Check if vehicle has keyless push-button start");
+
+            _chkRfaOnly = new CheckBox();
+            _chkRfaOnly.Text = "RFA only";
+            _chkRfaOnly.Location = new Point(100, innerY);
+            _chkRfaOnly.AutoSize = true;
+            _chkRfaOnly.Enabled = false;
+            vehiclePanel.Controls.Add(_chkRfaOnly);
+            _toolTip.SetToolTip(_chkRfaOnly, "Check if vehicle uses RFA (Remote Function Actuator) only mode");
+
+            _chkAutoDisableAlarm = new CheckBox();
+            _chkAutoDisableAlarm.Text = "Auto-disable alarm before programming (recommended)";
+            _chkAutoDisableAlarm.Location = new Point(200, innerY);
+            _chkAutoDisableAlarm.AutoSize = true;
+            _chkAutoDisableAlarm.Checked = _autoDisableAlarm;
+            _chkAutoDisableAlarm.CheckedChanged += (s, e) => _autoDisableAlarm = _chkAutoDisableAlarm.Checked;
+            vehiclePanel.Controls.Add(_chkAutoDisableAlarm);
+            _toolTip.SetToolTip(_chkAutoDisableAlarm, "Automatically disables the vehicle alarm before key programming to prevent false triggers - FREE");
+
+            yPos += 160;
+
+            // Vehicle Info Panel (hidden until connected)
+            _vehicleInfoPanel = CreateGroupPanel("Connected Vehicle", xPos, yPos, fullWidth, 80);
+            _vehicleInfoPanel.Visible = false;
+            tab.Controls.Add(_vehicleInfoPanel);
+
+            _lblVehicleInfo = new Label();
+            _lblVehicleInfo.Location = new Point(10, 20);
+            _lblVehicleInfo.Size = new Size(fullWidth - 20, 50);
+            _lblVehicleInfo.Font = new Font("Consolas", 9);
+            _vehicleInfoPanel.Controls.Add(_lblVehicleInfo);
+            _toolTip.SetToolTip(_lblVehicleInfo, "Shows connected vehicle information including VIN, BCM part number, battery voltage, and programmed key count");
+
+            // Outcode/Incode Section
+            var codePanel = CreateGroupPanel("PATS Codes", xPos, yPos, fullWidth, 130);
+            codePanel.Visible = false;
+            codePanel.Name = "codePanel";
+            tab.Controls.Add(codePanel);
+
+            innerY = 20;
+            var lblOutcode = new Label();
+            lblOutcode.Text = "OUTCODE:";
+            lblOutcode.Location = new Point(10, innerY);
+            lblOutcode.AutoSize = true;
+            lblOutcode.Font = new Font(this.Font, FontStyle.Bold);
+            codePanel.Controls.Add(lblOutcode);
+            _toolTip.SetToolTip(lblOutcode, "The 12-character security outcode read from the vehicle's BCM");
+
+            _btnCopyOutcode = new Button();
+            _btnCopyOutcode.Text = "Copy";
+            _btnCopyOutcode.Location = new Point(fullWidth - 60, innerY - 3);
+            _btnCopyOutcode.Size = new Size(50, 23);
+            _btnCopyOutcode.Click += BtnCopyOutcode_Click;
+            codePanel.Controls.Add(_btnCopyOutcode);
+            _toolTip.SetToolTip(_btnCopyOutcode, "Copy outcode to clipboard");
+
+            innerY += 22;
+            _txtOutcode = new TextBox();
+            _txtOutcode.Location = new Point(10, innerY);
+            _txtOutcode.Size = new Size(fullWidth - 20, 28);
+            _txtOutcode.Font = new Font("Consolas", 14, FontStyle.Bold);
+            _txtOutcode.TextAlign = HorizontalAlignment.Center;
+            _txtOutcode.ReadOnly = true;
+            _txtOutcode.BackColor = Color.FromArgb(254, 249, 195);
+            codePanel.Controls.Add(_txtOutcode);
+            _toolTip.SetToolTip(_txtOutcode, "Vehicle outcode - Copy this and enter at patskiller.com/calculator to get the incode");
+
+            innerY += 32;
+            _btnGetIncode = new Button();
+            _btnGetIncode.Text = "🔗 Get Incode at patskiller.com/calculator (1 token)";
+            _btnGetIncode.Location = new Point(10, innerY);
+            _btnGetIncode.Size = new Size(fullWidth - 20, 25);
+            _btnGetIncode.ForeColor = _colorPrimary;
+            _btnGetIncode.FlatStyle = FlatStyle.Flat;
+            _btnGetIncode.Click += BtnGetIncode_Click;
+            codePanel.Controls.Add(_btnGetIncode);
+            _toolTip.SetToolTip(_btnGetIncode, "Opens patskiller.com/calculator to convert outcode to incode - Costs 1 token per calculation");
+
+            innerY += 30;
+            var lblIncode = new Label();
+            lblIncode.Text = "INCODE:";
+            lblIncode.Location = new Point(10, innerY);
+            lblIncode.AutoSize = true;
+            lblIncode.Font = new Font(this.Font, FontStyle.Bold);
+            codePanel.Controls.Add(lblIncode);
+            _toolTip.SetToolTip(lblIncode, "Enter the incode received from patskiller.com/calculator");
+
+            innerY += 22;
+            _txtIncode = new TextBox();
+            _txtIncode.Location = new Point(10, innerY);
+            _txtIncode.Size = new Size(fullWidth - 20, 28);
+            _txtIncode.Font = new Font("Consolas", 14, FontStyle.Bold);
+            _txtIncode.TextAlign = HorizontalAlignment.Center;
+            _txtIncode.BackColor = Color.FromArgb(220, 252, 231);
+            _txtIncode.CharacterCasing = CharacterCasing.Upper;
+            codePanel.Controls.Add(_txtIncode);
+            _toolTip.SetToolTip(_txtIncode, "Paste the incode from patskiller.com here - Same incode allows unlimited key programming until outcode changes");
+
+            // Action Buttons Panel
+            var actionPanel = CreateGroupPanel("Actions", xPos, yPos + 140, fullWidth, 120);
+            actionPanel.Visible = false;
+            actionPanel.Name = "actionPanel";
+            tab.Controls.Add(actionPanel);
+
+            int btnWidth = (fullWidth - 50) / 2;
+            _btnEraseKeys = new Button();
+            _btnEraseKeys.Text = "Erase all keys (1 token)";
+            _btnEraseKeys.Location = new Point(10, 25);
+            _btnEraseKeys.Size = new Size(btnWidth, 40);
+            _btnEraseKeys.BackColor = _colorError;
+            _btnEraseKeys.ForeColor = Color.White;
+            _btnEraseKeys.FlatStyle = FlatStyle.Flat;
+            _btnEraseKeys.Font = new Font(this.Font, FontStyle.Bold);
+            _btnEraseKeys.Click += BtnEraseKeys_Click;
+            actionPanel.Controls.Add(_btnEraseKeys);
+            _toolTip.SetToolTip(_btnEraseKeys, "⚠️ WARNING: Erases ALL programmed keys from BCM. You must program at least 2 new keys after. Costs 1 token.");
+
+            _btnProgramKeys = new Button();
+            _btnProgramKeys.Text = "Program new keys (FREE*)";
+            _btnProgramKeys.Location = new Point(10, 70);
+            _btnProgramKeys.Size = new Size(btnWidth, 40);
+            _btnProgramKeys.BackColor = _colorSuccess;
+            _btnProgramKeys.ForeColor = Color.White;
+            _btnProgramKeys.FlatStyle = FlatStyle.Flat;
+            _btnProgramKeys.Font = new Font(this.Font, FontStyle.Bold);
+            _btnProgramKeys.Click += BtnProgramKeys_Click;
+            actionPanel.Controls.Add(_btnProgramKeys);
+            _toolTip.SetToolTip(_btnProgramKeys, "Program new transponder keys - FREE after incode obtained (same incode = unlimited keys until outcode changes)");
+
+            _btnParameterReset = new Button();
+            _btnParameterReset.Text = "Parameter reset (FREE)";
+            _btnParameterReset.Location = new Point(btnWidth + 20, 25);
+            _btnParameterReset.Size = new Size(btnWidth, 35);
+            _btnParameterReset.Click += BtnParameterReset_Click;
+            actionPanel.Controls.Add(_btnParameterReset);
+            _toolTip.SetToolTip(_btnParameterReset, "Syncs PATS parameters between BCM and PCM, then clears DTCs - FREE");
+
+            _btnInitEscl = new Button();
+            _btnInitEscl.Text = "Initialize ESCL (1 token)";
+            _btnInitEscl.Location = new Point(btnWidth + 20, 65);
+            _btnInitEscl.Size = new Size(btnWidth / 2 - 5, 35);
+            _btnInitEscl.Click += BtnInitEscl_Click;
+            actionPanel.Controls.Add(_btnInitEscl);
+            _toolTip.SetToolTip(_btnInitEscl, "Initialize Electronic Steering Column Lock (CEI) - Required after steering lock module replacement. Costs 1 token.");
+
+            _btnDisableBcm = new Button();
+            _btnDisableBcm.Text = "Disable BCM";
+            _btnDisableBcm.Location = new Point(btnWidth + btnWidth / 2 + 20, 65);
+            _btnDisableBcm.Size = new Size(btnWidth / 2, 35);
+            _btnDisableBcm.Click += BtnDisableBcm_Click;
+            actionPanel.Controls.Add(_btnDisableBcm);
+            _toolTip.SetToolTip(_btnDisableBcm, "Disables BCM security for ALL KEYS LOST situations - Allows key programming without existing keys");
+
+            // Tutorial Button at bottom
+            var btnTutorial = new Button();
+            btnTutorial.Text = "📖 Software tutorial";
+            btnTutorial.Location = new Point(xPos + fullWidth / 2 - 100, yPos + 270);
+            btnTutorial.Size = new Size(200, 30);
+            btnTutorial.Click += (s, e) => OpenUrl("https://patskiller.com/faqs");
+            btnTutorial.Name = "btnTutorial";
+            btnTutorial.Anchor = AnchorStyles.Bottom;
+            tab.Controls.Add(btnTutorial);
+            _toolTip.SetToolTip(btnTutorial, "Opens the online software tutorial and FAQ page");
         }
 
-        private void BuildFreeTab()
+        private void CreateOtherTabContent(TabPage tab)
         {
             int yPos = 15;
-            int fullWidth = 620;
-            
-            var lblHeader = new Label
-            {
-                Text = "⚙️ Free Functions (No tokens required)",
-                Font = new Font("Segoe UI", 11, FontStyle.Bold),
-                Location = new Point(15, yPos),
-                AutoSize = true
-            };
-            _tabFree.Controls.Add(lblHeader);
-            yPos += 35;
+            int xPos = 15;
+            int btnWidth = tab.ClientSize.Width - 50;
+            int btnHeight = 38;
+            int spacing = 45;
 
-            string[][] functions = new string[][]
-            {
-                new[] { "❌ Clear All DTCs", "FREE", "BtnClearDtc" },
-                new[] { "🔄 Vehicle Reset", "FREE", "BtnVehicleReset" },
-                new[] { "🔑 Read Keys Count", "FREE", "BtnReadKeysCount" },
-                new[] { "🔢 Read/Write Keypad Code", "FREE", "BtnKeypadCode" },
-                new[] { "📋 Read All Module Info", "FREE", "BtnReadModuleInfo" },
-                new[] { "🔕 Disarm Alarm", "FREE", "BtnDisarmAlarm" }
-            };
+            // Section: DTC Operations (FREE)
+            var lblDtcSection = new Label();
+            lblDtcSection.Text = "DTC Operations (FREE)";
+            lblDtcSection.Font = new Font(this.Font, FontStyle.Bold);
+            lblDtcSection.ForeColor = _colorSuccess;
+            lblDtcSection.Location = new Point(xPos, yPos);
+            lblDtcSection.AutoSize = true;
+            tab.Controls.Add(lblDtcSection);
+            yPos += 25;
 
-            foreach (var func in functions)
-            {
-                var btn = CreateButton($"{func[0]}    {func[1]}", Color.White, new Size(fullWidth, 45));
-                btn.Location = new Point(15, yPos);
-                btn.ForeColor = Color.Black;
-                btn.FlatStyle = FlatStyle.Flat;
-                btn.FlatAppearance.BorderColor = AppColors.Info;
-                btn.TextAlign = ContentAlignment.MiddleLeft;
-                btn.Padding = new Padding(15, 0, 0, 0);
-                btn.Enabled = false;
-                btn.Name = func[2];
-                btn.Click += FreeFunctionButton_Click;
-                _tabFree.Controls.Add(btn);
-                yPos += 55;
-            }
+            var btnClearDtc = CreateOtherButton("Clear All DTCs", BtnClearDtc_Click, 
+                "Clears all diagnostic trouble codes from BCM, PCM, TCM, and ABS modules - FREE");
+            btnClearDtc.Location = new Point(xPos, yPos);
+            btnClearDtc.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnClearDtc);
+
+            var btnClearKam = CreateOtherButton("Clear KAM (FREE)", BtnClearKam_Click,
+                "Clears Keep Alive Memory - Resets PCM adaptive learning parameters like idle speed and fuel trim - FREE");
+            btnClearKam.Location = new Point(xPos + btnWidth / 2 + 5, yPos);
+            btnClearKam.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnClearKam);
+            yPos += spacing;
+
+            // Section: Vehicle Operations (FREE)
+            var lblVehicleSection = new Label();
+            lblVehicleSection.Text = "Vehicle Operations (FREE)";
+            lblVehicleSection.Font = new Font(this.Font, FontStyle.Bold);
+            lblVehicleSection.ForeColor = _colorSuccess;
+            lblVehicleSection.Location = new Point(xPos, yPos);
+            lblVehicleSection.AutoSize = true;
+            tab.Controls.Add(lblVehicleSection);
+            yPos += 25;
+
+            var btnVehicleReset = CreateOtherButton("Vehicle Reset (BCM+PCM+ABS)", BtnVehicleReset_Click,
+                "Soft reset BCM + PCM + ABS together - Does NOT erase keys, DTCs, or configuration - FREE");
+            btnVehicleReset.Location = new Point(xPos, yPos);
+            btnVehicleReset.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnVehicleReset);
+
+            var btnReadKeysCount = CreateOtherButton("Read Keys Count", BtnReadKeysCount_Click,
+                "Reads the number of transponder keys currently programmed to the vehicle (0-8) - FREE");
+            btnReadKeysCount.Location = new Point(xPos + btnWidth / 2 + 5, yPos);
+            btnReadKeysCount.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnReadKeysCount);
+            yPos += spacing;
+
+            var btnReadModuleInfo = CreateOtherButton("Read All Module Info", BtnReadModuleInfo_Click,
+                "Reads part numbers and software versions from BCM, PCM, IPC, and ABS modules - FREE");
+            btnReadModuleInfo.Location = new Point(xPos, yPos);
+            btnReadModuleInfo.Size = new Size(btnWidth, btnHeight);
+            tab.Controls.Add(btnReadModuleInfo);
+            yPos += spacing + 10;
+
+            // Section: Token Operations (Costs Tokens)
+            var lblTokenSection = new Label();
+            lblTokenSection.Text = "Token Operations (Costs Tokens from patskiller.com)";
+            lblTokenSection.Font = new Font(this.Font, FontStyle.Bold);
+            lblTokenSection.ForeColor = _colorWarning;
+            lblTokenSection.Location = new Point(xPos, yPos);
+            lblTokenSection.AutoSize = true;
+            tab.Controls.Add(lblTokenSection);
+            yPos += 25;
+
+            var btnKeypadCode = CreateOtherButton("Read/Write Keypad Code (1 token each)", BtnKeypadCode_Click,
+                "Read or write the 5-digit door keypad entry code - Each operation costs 1 token");
+            btnKeypadCode.Location = new Point(xPos, yPos);
+            btnKeypadCode.Size = new Size(btnWidth, btnHeight);
+            tab.Controls.Add(btnKeypadCode);
+            yPos += spacing;
+
+            var btnClearP160A = CreateOtherButton("Clear P160A from PCM (1 token)", BtnClearP160A_Click,
+                "Clears 'Calibration Parameter Reset Required' - Use if vehicle won't start after key programming");
+            btnClearP160A.Location = new Point(xPos, yPos);
+            btnClearP160A.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnClearP160A);
+
+            var btnClearB10A2 = CreateOtherButton("Clear B10A2 from BCM (1 token)", BtnClearB10A2_Click,
+                "Clears 'Configuration Incompatible' DTC from BCM - Fixes BCM/module mismatch errors");
+            btnClearB10A2.Location = new Point(xPos + btnWidth / 2 + 5, yPos);
+            btnClearB10A2.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnClearB10A2);
+            yPos += spacing;
+
+            var btnClearCrush = CreateOtherButton("Clear Crush Event (1 token)", BtnClearCrush_Click,
+                "Clears crash/collision flag from BCM - Required after collision repairs");
+            btnClearCrush.Location = new Point(xPos, yPos);
+            btnClearCrush.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnClearCrush);
+
+            var btnGateway = CreateOtherButton("Gateway Unlock 2020+ (1 token)", BtnGatewayUnlock_Click,
+                "Unlocks security gateway on 2020+ vehicles - Required before any diagnostic operations on newer vehicles");
+            btnGateway.Location = new Point(xPos + btnWidth / 2 + 5, yPos);
+            btnGateway.Size = new Size(btnWidth / 2 - 5, btnHeight);
+            tab.Controls.Add(btnGateway);
+            yPos += spacing + 10;
+
+            // Section: BCM Factory Operations (High Cost)
+            var lblBcmSection = new Label();
+            lblBcmSection.Text = "⚠️ BCM Factory Operations (2-3 Tokens - Requires Scanner After)";
+            lblBcmSection.Font = new Font(this.Font, FontStyle.Bold);
+            lblBcmSection.ForeColor = _colorError;
+            lblBcmSection.Location = new Point(xPos, yPos);
+            lblBcmSection.AutoSize = true;
+            tab.Controls.Add(lblBcmSection);
+            yPos += 25;
+
+            var btnBcmFactory = CreateOtherButton("BCM Factory Defaults (2-3 tokens)", BtnBcmFactoryDefaults_Click,
+                "⚠️ WARNING: Resets ALL BCM settings! Requires 2-3 incodes. Vehicle MUST be adapted with scanner (IDS/FDRS) after!");
+            btnBcmFactory.BackColor = Color.FromArgb(254, 226, 226);
+            btnBcmFactory.Location = new Point(xPos, yPos);
+            btnBcmFactory.Size = new Size(btnWidth, btnHeight);
+            tab.Controls.Add(btnBcmFactory);
         }
 
-        #endregion
-
-        #region UI Building - Activity Log & Status Bar
-
-        private void BuildActivityLog()
+        private Button CreateOtherButton(string text, EventHandler handler, string tooltip)
         {
-            var logPanel = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 130,
-                Padding = new Padding(10, 5, 10, 5)
-            };
-
-            var lblLog = new Label
-            {
-                Text = "Activity Log",
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Dock = DockStyle.Top,
-                Height = 20
-            };
-            logPanel.Controls.Add(lblLog);
-
-            _rtbLog = new RichTextBox
-            {
-                Dock = DockStyle.Fill,
-                BackColor = AppColors.LogBackground,
-                ForeColor = AppColors.LogInfo,
-                Font = new Font("Consolas", 9),
-                ReadOnly = true,
-                BorderStyle = BorderStyle.None
-            };
-            logPanel.Controls.Add(_rtbLog);
-            
-            this.Controls.Add(logPanel);
+            var btn = new Button();
+            btn.Text = text;
+            btn.Click += handler;
+            btn.Enabled = false;
+            btn.Tag = "otherFunction";
+            _toolTip.SetToolTip(btn, tooltip);
+            return btn;
         }
-
-        private void BuildStatusBar()
-        {
-            _statusBar = new StatusStrip
-            {
-                BackColor = Color.FromArgb(209, 213, 219)
-            };
-
-            _lblStatus = new ToolStripStatusLabel
-            {
-                Text = "Status: Ready",
-                Spring = true,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-
-            _lblVersion = new ToolStripStatusLabel
-            {
-                Text = "v2.0.0"
-            };
-
-            _statusBar.Items.AddRange(new ToolStripItem[] { _lblStatus, _lblVersion });
-            this.Controls.Add(_statusBar);
-        }
-
-        #endregion
-
-        #region UI Helper Methods
 
         private Panel CreateGroupPanel(string title, int x, int y, int width, int height)
         {
-            var panel = new Panel
-            {
-                Location = new Point(x, y),
-                Size = new Size(width, height),
-                BorderStyle = BorderStyle.FixedSingle
-            };
+            var panel = new Panel();
+            panel.Location = new Point(x, y);
+            panel.Size = new Size(width, height);
+            panel.BorderStyle = BorderStyle.FixedSingle;
+            panel.BackColor = Color.FromArgb(249, 250, 251);
 
-            var lblTitle = new Label
-            {
-                Text = title,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Location = new Point(10, 3),
-                AutoSize = true
-            };
+            var lblTitle = new Label();
+            lblTitle.Text = title;
+            lblTitle.Location = new Point(5, 3);
+            lblTitle.AutoSize = true;
+            lblTitle.Font = new Font(this.Font, FontStyle.Bold);
+            lblTitle.ForeColor = Color.FromArgb(75, 85, 99);
             panel.Controls.Add(lblTitle);
 
             return panel;
         }
 
-        private Button CreateButton(string text, Color backColor, Size size)
+        private void PopulateVehicleList()
         {
-            var btn = new Button
+            if (_cmbVehicles == null) return;
+            
+            _cmbVehicles.Items.Clear();
+            _cmbVehicles.Items.Add("-- Select Vehicle Manually --");
+            
+            foreach (var vehicle in VehiclePlatforms.GetAllVehicles())
             {
-                Text = text,
-                BackColor = backColor,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Size = size,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            btn.FlatAppearance.BorderSize = 0;
-            return btn;
+                _cmbVehicles.Items.Add(vehicle.DisplayName);
+            }
+            
+            _cmbVehicles.SelectedIndex = 0;
         }
 
-        private Button CreateUtilityButton(string title, string desc, string cost, EventHandler onClick)
+        #region Token Cost Helpers
+
+        private bool ConfirmTokenCost(int tokenCost, string operation, string details = "")
         {
-            var btn = new Button
+            if (tokenCost == 0) return true;
+
+            var costText = tokenCost == 1 ? "1 token" : $"{tokenCost} tokens";
+            var message = $"This operation will cost {costText} from your patskiller.com account.\n\n" +
+                         $"Operation: {operation}\n" +
+                         (string.IsNullOrEmpty(details) ? "" : $"\n{details}\n") +
+                         $"\nDo you want to continue?";
+
+            var result = MessageBox.Show(message, $"Token Cost: {costText}",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+            return result == DialogResult.Yes;
+        }
+
+        private void ShowError(string title, string message, Exception? ex = null)
+        {
+            var fullMessage = message;
+            if (ex != null)
             {
-                Size = new Size(305, 100),
-                BackColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                TextAlign = ContentAlignment.TopLeft,
-                Padding = new Padding(10),
-                Enabled = false
-            };
-            btn.FlatAppearance.BorderColor = Color.FromArgb(209, 213, 219);
-            btn.Text = $"{title}\n\n{desc}\n{cost}";
-            btn.Font = new Font("Segoe UI", 9);
-            btn.Click += onClick;
-            return btn;
+                fullMessage += $"\n\nError details: {ex.Message}";
+                
+                // Add helpful tips based on error type
+                if (ex.Message.Contains("Security access denied"))
+                {
+                    fullMessage += "\n\n💡 Tip: Wait 10 minutes for anti-scan lockout to expire, then try again.";
+                }
+                else if (ex.Message.Contains("No response"))
+                {
+                    fullMessage += "\n\n💡 Tip: Check that ignition is ON and OBD cable is connected securely.";
+                }
+                else if (ex.Message.Contains("incode"))
+                {
+                    fullMessage += "\n\n💡 Tip: Verify the incode was entered correctly from patskiller.com/calculator.";
+                }
+            }
+            
+            MessageBox.Show(fullMessage, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Logger.Error($"{title}: {message}", ex);
         }
 
         #endregion
 
-        #region Logging
+        #region Event Handlers
 
-        private void AddLog(string level, string message)
+        private void MainForm_Load(object? sender, EventArgs e)
         {
-            if (_rtbLog == null) return;
-            
-            if (_rtbLog.InvokeRequired)
-            {
-                _rtbLog.Invoke(() => AddLog(level, message));
-                return;
-            }
-
-            Color color = level switch
-            {
-                "success" => AppColors.LogSuccess,
-                "warning" => AppColors.LogWarning,
-                "error" => AppColors.LogError,
-                _ => AppColors.LogInfo
-            };
-
-            _rtbLog.SelectionStart = _rtbLog.TextLength;
-            _rtbLog.SelectionColor = color;
-            _rtbLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\n");
-            _rtbLog.ScrollToCaret();
-            
-            // Also log to file
-            Logger.Info(message);
+            Logger.Info("MainForm loaded");
+            UpdateStatus("Ready - Click Scan to detect J2534 devices");
         }
 
-        private void UpdateStatus(string message)
+        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
         {
-            if (_lblStatus != null)
-            {
-                if (this.InvokeRequired)
-                {
-                    this.Invoke(() => _lblStatus.Text = $"Status: {message}");
-                }
-                else
-                {
-                    _lblStatus.Text = $"Status: {message}";
-                }
-            }
+            DisconnectDevice();
+            SaveSettings();
         }
 
-        #endregion
-
-        #region Event Handlers - Device Connection
-
-        private void BtnScan_Click(object? sender, EventArgs e)
+        private async void BtnScan_Click(object? sender, EventArgs e)
         {
-            AddLog("info", "Scanning for J2534 devices...");
-            UpdateStatus("Scanning...");
+            if (_cmbDevices == null || _btnScan == null || _btnConnect == null) return;
             
+            _btnScan.Enabled = false;
+            _btnScan.Text = "Scanning...";
+            UpdateStatus("Scanning Windows registry for J2534 devices...");
+            Logger.Info("Scanning for J2534 devices");
+
             try
             {
-                if (_cmbDevices == null || _deviceManager == null) return;
+                await Task.Run(() => _deviceManager?.ScanForDevices());
                 
                 _cmbDevices.Items.Clear();
-                _cmbDevices.Items.Add("-- Scanning... --");
-                _cmbDevices.SelectedIndex = 0;
-                _cmbDevices.Enabled = false;
-                
-                var devices = _deviceManager.GetAvailableDevices();
-                
-                _cmbDevices.Items.Clear();
+                var devices = _deviceManager?.GetDeviceNames() ?? new List<string>();
                 
                 if (devices.Count == 0)
                 {
                     _cmbDevices.Items.Add("-- No J2534 devices found --");
-                    AddLog("warning", "No J2534 devices found");
+                    UpdateStatus("No J2534 devices found. Please install device drivers.");
+                    Logger.Warning("No J2534 devices found");
                 }
                 else
                 {
+                    _cmbDevices.Items.Add($"-- Select from {devices.Count} device(s) --");
                     foreach (var device in devices)
                     {
                         _cmbDevices.Items.Add(device);
                     }
-                    AddLog("success", $"Found {devices.Count} device(s)");
+                    UpdateStatus($"Found {devices.Count} J2534 device(s)");
+                    Logger.Info($"Found {devices.Count} J2534 devices");
                 }
                 
                 _cmbDevices.SelectedIndex = 0;
-                _cmbDevices.Enabled = true;
-                UpdateStatus("Ready");
+                _cmbDevices.SelectedIndexChanged += CmbDevices_SelectedIndexChanged;
             }
             catch (Exception ex)
             {
-                AddLog("error", $"Scan failed: {ex.Message}");
-                _cmbDevices?.Items.Clear();
-                _cmbDevices?.Items.Add("-- Scan failed --");
-                if (_cmbDevices != null)
-                {
-                    _cmbDevices.SelectedIndex = 0;
-                    _cmbDevices.Enabled = true;
-                }
+                ShowError("Scan Error", "Error scanning for devices", ex);
+            }
+            finally
+            {
+                _btnScan.Text = "Scan";
+                _btnScan.Enabled = true;
             }
         }
 
         private void CmbDevices_SelectedIndexChanged(object? sender, EventArgs e)
         {
-            if (_btnConnect != null && _cmbDevices != null)
-            {
-                var selectedText = _cmbDevices.SelectedItem?.ToString() ?? "";
-                _btnConnect.Enabled = !selectedText.StartsWith("--");
-            }
+            if (_cmbDevices == null || _btnConnect == null) return;
+            _btnConnect.Enabled = _cmbDevices.SelectedIndex > 0;
         }
 
         private async void BtnConnect_Click(object? sender, EventArgs e)
@@ -1168,56 +724,830 @@ namespace PatsKillerPro
                 return;
             }
 
-            var deviceName = _cmbDevices?.SelectedItem?.ToString();
-            if (string.IsNullOrEmpty(deviceName) || deviceName.StartsWith("--")) return;
+            if (_cmbDevices == null || _btnConnect == null || _btnReadVehicle == null) return;
+            if (_cmbDevices.SelectedIndex <= 0) return;
 
-            AddLog("info", $"Connecting to {deviceName}...");
-            UpdateStatus("Connecting...");
-            
-            if (_btnConnect != null) _btnConnect.Enabled = false;
-            if (_cmbDevices != null) _cmbDevices.Enabled = false;
-            if (_btnScan != null) _btnScan.Enabled = false;
+            var deviceName = _cmbDevices.SelectedItem?.ToString();
+            if (string.IsNullOrEmpty(deviceName)) return;
+
+            _btnConnect.Enabled = false;
+            _btnConnect.Text = "Connecting...";
+            UpdateStatus($"Connecting to {deviceName}...");
 
             try
             {
-                _connectedDevice = _deviceManager?.OpenDevice(deviceName);
-                
-                if (_connectedDevice == null)
+                await Task.Run(() =>
                 {
-                    throw new Exception("Failed to open device");
-                }
+                    _connectedDevice = _deviceManager?.ConnectToDevice(deviceName);
+                });
 
-                // Open HS-CAN channel
-                _hsCanChannel = _connectedDevice.OpenChannel(
-                    J2534Definitions.ProtocolId.CAN,
-                    J2534Definitions.BaudRate.CAN_500K,
-                    J2534Definitions.ConnectFlags.CAN_29BIT_ID);
-
-                _isConnectedToDevice = true;
-                
-                if (_btnConnect != null)
+                if (_connectedDevice != null)
                 {
-                    _btnConnect.Text = "✓ Connected";
-                    _btnConnect.BackColor = AppColors.Success;
-                    _btnConnect.Enabled = true;
+                    _isConnectedToDevice = true;
+                    _btnConnect.Text = "✓ Connected - Click to Disconnect";
+                    _btnConnect.BackColor = _colorSuccess;
+                    _btnReadVehicle.Enabled = true;
+                    _cmbVehicles!.Enabled = true;
+                    _cmbDevices.Enabled = false;
+                    _btnScan!.Enabled = false;
+                    UpdateStatus($"Connected to {deviceName} - Click Read Vehicle to continue");
+                    Logger.Info($"Connected to device: {deviceName}");
                 }
-                if (_btnReadVehicle != null) _btnReadVehicle.Enabled = true;
-
-                AddLog("success", $"Connected to {deviceName}");
-                UpdateStatus("Device connected - Read vehicle to continue");
             }
             catch (Exception ex)
             {
-                AddLog("error", $"Connection failed: {ex.Message}");
-                DisconnectDevice();
-                
-                if (_btnConnect != null) _btnConnect.Enabled = true;
-                if (_cmbDevices != null) _cmbDevices.Enabled = true;
-                if (_btnScan != null) _btnScan.Enabled = true;
-                
-                UpdateStatus("Connection failed");
+                ShowError("Connection Error", "Error connecting to device", ex);
+                _btnConnect.Text = "Connect to Device";
+                _btnConnect.BackColor = _colorOrange;
+            }
+            finally
+            {
+                _btnConnect.Enabled = true;
             }
         }
+
+        private async void BtnReadVehicle_Click(object? sender, EventArgs e)
+        {
+            if (_connectedDevice == null || _btnReadVehicle == null) return;
+
+            _btnReadVehicle.Enabled = false;
+            _btnReadVehicle.Text = "Reading vehicle...";
+            UpdateStatus("Reading vehicle VIN from CAN bus...");
+            Logger.Info("Reading vehicle VIN");
+
+            try
+            {
+                _hsCanChannel = await Task.Run(() => 
+                    _connectedDevice.OpenChannel(Protocol.ISO15765, 500000));
+
+                if (_hsCanChannel == null)
+                {
+                    throw new Exception("Failed to open CAN channel");
+                }
+
+                var uds = new UdsService(_hsCanChannel);
+                var vin = await Task.Run(() => uds.ReadVIN());
+
+                if (string.IsNullOrEmpty(vin))
+                {
+                    UpdateStatus("Could not read VIN - Please select vehicle manually");
+                    Logger.Warning("Could not read VIN from vehicle");
+                    _cmbVehicles!.Focus();
+                    return;
+                }
+
+                Logger.Info($"VIN Read: {vin}");
+
+                var decoded = VinDecoder.Decode(vin);
+                
+                if (decoded != null)
+                {
+                    _detectedVehicle = decoded;
+                    await ConnectToVehicle(decoded);
+                }
+                else
+                {
+                    UpdateStatus($"VIN: {vin} - Unknown vehicle, please select manually");
+                    Logger.Warning($"Could not decode VIN: {vin}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Read Error", "Error reading vehicle", ex);
+                UpdateStatus("Error reading vehicle - Please select manually");
+            }
+            finally
+            {
+                _btnReadVehicle.Text = "🔍 Read Vehicle (Auto-Detect from VIN)";
+                _btnReadVehicle.Enabled = true;
+            }
+        }
+
+        private async Task ConnectToVehicle(VehicleInfo vehicle)
+        {
+            UpdateStatus($"Detected: {vehicle.DisplayName}");
+            Logger.Info($"Auto-detected vehicle: {vehicle.DisplayName}");
+
+            _chkKeyless!.Checked = vehicle.SupportsKeyless;
+            
+            UpdateStatus("Reading BCM module data...");
+            
+            try
+            {
+                var uds = new UdsService(_hsCanChannel!);
+                
+                var bcmPart = await Task.Run(() => uds.ReadPartNumber(ModuleAddresses.BCM_TX));
+                var voltage = await Task.Run(() => _connectedDevice!.ReadBatteryVoltage());
+                var keysCount = await Task.Run(() => uds.ReadKeysCount());
+                
+                UpdateStatus("Reading PATS outcode...");
+                _currentOutcode = await Task.Run(() => uds.ReadOutcode());
+
+                _isConnectedToVehicle = true;
+                ShowVehicleConnectedUI(vehicle, vehicle.VIN, bcmPart, voltage, keysCount);
+                
+                Logger.Info($"Vehicle connected - Outcode: {_currentOutcode}");
+                UpdateStatus($"Ready - Outcode: {_currentOutcode}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Error reading vehicle data: {ex.Message}", ex);
+                throw;
+            }
+        }
+
+        private void ShowVehicleConnectedUI(VehicleInfo vehicle, string vin, string bcmPart, 
+            double voltage, int keysCount)
+        {
+            _vehicleInfoPanel!.Visible = true;
+            _lblVehicleInfo!.Text = $"Vehicle: {vehicle.DisplayName}\n" +
+                                   $"VIN: {vin}  |  BCM: {bcmPart}  |  " +
+                                   $"Battery: {voltage:F1}V  |  Keys: {keysCount}";
+
+            var codePanel = _tabControl?.TabPages[0].Controls["codePanel"] as Panel;
+            var actionPanel = _tabControl?.TabPages[0].Controls["actionPanel"] as Panel;
+            
+            if (codePanel != null)
+            {
+                codePanel.Visible = true;
+                codePanel.Location = new Point(codePanel.Location.X, 
+                    _vehicleInfoPanel.Location.Y + _vehicleInfoPanel.Height + 10);
+            }
+            
+            if (actionPanel != null)
+            {
+                actionPanel.Visible = true;
+                actionPanel.Location = new Point(actionPanel.Location.X,
+                    codePanel!.Location.Y + codePanel.Height + 10);
+            }
+
+            _txtOutcode!.Text = _currentOutcode;
+            
+            // Enable other functions
+            foreach (Control ctrl in _tabControl!.TabPages[1].Controls)
+            {
+                if (ctrl.Tag?.ToString() == "otherFunction")
+                {
+                    ctrl.Enabled = true;
+                }
+            }
+
+            var btnTutorial = _tabControl.TabPages[0].Controls["btnTutorial"] as Button;
+            if (btnTutorial != null && actionPanel != null)
+            {
+                btnTutorial.Location = new Point(btnTutorial.Location.X,
+                    actionPanel.Location.Y + actionPanel.Height + 10);
+            }
+        }
+
+        private void BtnCopyOutcode_Click(object? sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(_currentOutcode))
+            {
+                Clipboard.SetText(_currentOutcode);
+                UpdateStatus("Outcode copied to clipboard");
+                Logger.Info("Outcode copied to clipboard");
+            }
+        }
+
+        private void BtnGetIncode_Click(object? sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(_currentOutcode))
+            {
+                Clipboard.SetText(_currentOutcode);
+            }
+            OpenUrl("https://patskiller.com/calculator");
+            Logger.Info("Opened patskiller.com/calculator");
+        }
+
+        private async void BtnProgramKeys_Click(object? sender, EventArgs e)
+        {
+            var incode = _txtIncode?.Text?.Trim();
+            if (string.IsNullOrEmpty(incode))
+            {
+                MessageBox.Show("Please enter the incode from patskiller.com/calculator",
+                    "Incode Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (_hsCanChannel == null)
+            {
+                MessageBox.Show("Vehicle not connected", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var result = MessageBox.Show(
+                "Ready to program new keys.\n\n" +
+                "✅ Key programming is FREE after incode obtained\n" +
+                "(Same incode = unlimited keys until outcode changes)\n\n" +
+                "IMPORTANT:\n" +
+                "• Turn ignition ON\n" +
+                "• Insert the key to be programmed\n" +
+                "• Keep key inserted until programming completes\n\n" +
+                "Continue?",
+                "Program New Keys",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes) return;
+
+            try
+            {
+                _btnProgramKeys!.Enabled = false;
+                UpdateStatus("Programming keys...");
+                Logger.Info($"Starting key programming with incode: {incode}");
+
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+
+                if (_autoDisableAlarm)
+                {
+                    UpdateStatus("Disabling alarm...");
+                    await Task.Run(() => pats.DisableAlarm());
+                }
+
+                UpdateStatus("Writing key data...");
+                var success = await Task.Run(() => pats.ProgramKeys(incode));
+
+                if (success)
+                {
+                    Logger.Info("Key programming successful");
+                    MessageBox.Show(
+                        "✅ Key programming successful!\n\n" +
+                        "You can program additional keys by repeating this process.\n" +
+                        "(Same incode works until outcode changes)",
+                        "Success",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    UpdateStatus("Key programming completed successfully");
+                }
+                else
+                {
+                    throw new Exception("Key programming failed - vehicle did not confirm");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Programming Error", "Key programming failed", ex);
+                UpdateStatus("Key programming failed");
+            }
+            finally
+            {
+                _btnProgramKeys!.Enabled = true;
+            }
+        }
+
+        private async void BtnEraseKeys_Click(object? sender, EventArgs e)
+        {
+            var incode = _txtIncode?.Text?.Trim();
+            if (string.IsNullOrEmpty(incode))
+            {
+                MessageBox.Show("Please enter the incode from patskiller.com/calculator",
+                    "Incode Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_KEY_ERASE, "Erase All Keys",
+                "⚠️ WARNING: This will ERASE ALL KEYS!\nAfter erasing, you must program at least 2 new keys."))
+                return;
+
+            try
+            {
+                _btnEraseKeys!.Enabled = false;
+                UpdateStatus("Erasing all keys...");
+                Logger.Info("Starting key erase operation");
+
+                var uds = new UdsService(_hsCanChannel!);
+                var pats = new PatsOperations(uds);
+
+                if (_autoDisableAlarm)
+                {
+                    UpdateStatus("Disabling alarm...");
+                    await Task.Run(() => pats.DisableAlarm());
+                }
+
+                var success = await Task.Run(() => pats.EraseAllKeys(incode));
+
+                if (success)
+                {
+                    Logger.Info("Keys erased successfully");
+                    MessageBox.Show(
+                        "All keys have been erased.\n\n" +
+                        "You must now program at least 2 new keys to start the vehicle.",
+                        "Keys Erased",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    UpdateStatus("Keys erased - Program new keys to continue");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Erase Error", "Key erase failed", ex);
+            }
+            finally
+            {
+                _btnEraseKeys!.Enabled = true;
+            }
+        }
+
+        private async void BtnParameterReset_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            try
+            {
+                UpdateStatus("Performing parameter reset...");
+                Logger.Info("Starting parameter reset");
+
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+
+                await Task.Run(() => pats.ParameterReset());
+
+                Logger.Info("Parameter reset completed");
+                MessageBox.Show("Parameter reset completed successfully.",
+                    "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("Parameter reset completed");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Parameter Reset Error", "Parameter reset failed", ex);
+            }
+        }
+
+        private async void BtnInitEscl_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_ESCL_INIT, "Initialize ESCL",
+                "Initializes the Electronic Steering Column Lock (CEI)\nRequired after steering lock module replacement"))
+                return;
+
+            try
+            {
+                UpdateStatus("Initializing ESCL...");
+                Logger.Info("Starting ESCL initialization");
+
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+
+                await Task.Run(() => pats.InitializeESCL());
+
+                Logger.Info("ESCL initialization completed");
+                MessageBox.Show("ESCL initialized successfully.",
+                    "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("ESCL initialization completed");
+            }
+            catch (Exception ex)
+            {
+                ShowError("ESCL Error", "ESCL initialization failed", ex);
+            }
+        }
+
+        private async void BtnDisableBcm_Click(object? sender, EventArgs e)
+        {
+            var result = MessageBox.Show(
+                "⚠️ DISABLE BCM SECURITY\n\n" +
+                "This function is for ALL KEYS LOST situations only.\n" +
+                "It will disable the BCM security to allow key programming.\n\n" +
+                "Continue?",
+                "Disable BCM Security",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (result != DialogResult.Yes) return;
+
+            try
+            {
+                UpdateStatus("Disabling BCM security...");
+                Logger.Info("Starting BCM security disable");
+
+                var uds = new UdsService(_hsCanChannel!);
+                var pats = new PatsOperations(uds);
+
+                await Task.Run(() => pats.DisableBcmSecurity());
+
+                Logger.Info("BCM security disabled");
+                MessageBox.Show("BCM security disabled.\nYou can now program new keys.",
+                    "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("BCM security disabled - Ready to program keys");
+            }
+            catch (Exception ex)
+            {
+                ShowError("BCM Disable Error", "Failed to disable BCM security", ex);
+            }
+        }
+
+        private async void BtnClearDtc_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            try
+            {
+                UpdateStatus("Clearing DTCs...");
+                var uds = new UdsService(_hsCanChannel);
+                await Task.Run(() => uds.ClearDTCs());
+                MessageBox.Show("DTCs cleared successfully from all modules.", "Success",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("DTCs cleared");
+                Logger.Info("DTCs cleared");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Clear DTC Error", "Failed to clear DTCs", ex);
+            }
+        }
+
+        private async void BtnVehicleReset_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            try
+            {
+                UpdateStatus("Performing vehicle reset (BCM + PCM + ABS)...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                
+                await Task.Run(() => pats.VehicleReset());
+                
+                MessageBox.Show("Vehicle reset completed.\nBCM, PCM, and ABS have been soft reset.", "Success",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("Vehicle reset completed");
+                Logger.Info("Vehicle reset completed");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Vehicle Reset Error", "Vehicle reset failed", ex);
+            }
+        }
+
+        private async void BtnReadKeysCount_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            try
+            {
+                var uds = new UdsService(_hsCanChannel);
+                var count = await Task.Run(() => uds.ReadKeysCount());
+                MessageBox.Show($"Keys programmed: {count}", "Keys Count",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Logger.Info($"Keys count: {count}");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Read Keys Error", "Failed to read keys count", ex);
+            }
+        }
+
+        private async void BtnKeypadCode_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            var choice = MessageBox.Show(
+                "Door Keypad Code Operation\n\n" +
+                "Click YES to READ the current code (1 token)\n" +
+                "Click NO to WRITE a new code (1 token)\n" +
+                "Click Cancel to abort",
+                "Keypad Code",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (choice == DialogResult.Cancel) return;
+
+            if (choice == DialogResult.Yes)
+            {
+                // READ keypad code
+                if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_KEYPAD_READ, "Read Keypad Code"))
+                    return;
+
+                try
+                {
+                    UpdateStatus("Reading keypad code...");
+                    var uds = new UdsService(_hsCanChannel);
+                    var pats = new PatsOperations(uds);
+                    
+                    var code = await Task.Run(() => pats.ReadKeypadCode());
+                    
+                    MessageBox.Show($"Door Keypad Code: {code}\n\n(Digits 1-9 only)", "Keypad Code",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateStatus($"Keypad code: {code}");
+                    Logger.Info($"Keypad code read: {code}");
+                }
+                catch (Exception ex)
+                {
+                    ShowError("Read Keypad Error", "Failed to read keypad code", ex);
+                }
+            }
+            else
+            {
+                // WRITE keypad code
+                var inputCode = Microsoft.VisualBasic.Interaction.InputBox(
+                    "Enter new 5-digit keypad code (digits 1-9 only):",
+                    "Write Keypad Code", "");
+
+                if (string.IsNullOrEmpty(inputCode)) return;
+
+                if (inputCode.Length != 5)
+                {
+                    MessageBox.Show("Keypad code must be exactly 5 digits", "Invalid Code",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                foreach (char c in inputCode)
+                {
+                    if (c < '1' || c > '9')
+                    {
+                        MessageBox.Show("Keypad code digits must be 1-9 only (no zeros)", "Invalid Code",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
+
+                if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_KEYPAD_WRITE, "Write Keypad Code",
+                    $"New code: {inputCode}"))
+                    return;
+
+                try
+                {
+                    UpdateStatus("Writing keypad code...");
+                    var uds = new UdsService(_hsCanChannel);
+                    var pats = new PatsOperations(uds);
+                    
+                    await Task.Run(() => pats.WriteKeypadCode(inputCode));
+                    
+                    MessageBox.Show($"Keypad code set to: {inputCode}", "Success",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    UpdateStatus("Keypad code written");
+                    Logger.Info($"Keypad code written: {inputCode}");
+                }
+                catch (Exception ex)
+                {
+                    ShowError("Write Keypad Error", "Failed to write keypad code", ex);
+                }
+            }
+        }
+
+        private async void BtnReadModuleInfo_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            try
+            {
+                UpdateStatus("Reading module info...");
+                var uds = new UdsService(_hsCanChannel);
+                
+                var info = await Task.Run(() => uds.ReadAllModuleInfo());
+                
+                var msg = "MODULE INFORMATION\n" +
+                         "==================\n\n" + info;
+                
+                MessageBox.Show(msg, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Logger.Info("Module info read");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Read Module Error", "Failed to read module info", ex);
+            }
+        }
+
+        private async void BtnClearP160A_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_CLEAR_P160A, "Clear P160A from PCM",
+                "Clears 'Calibration Parameter Reset Required' DTC\nUse this if vehicle won't start after key programming"))
+                return;
+
+            try
+            {
+                UpdateStatus("Clearing P160A from PCM...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                
+                await Task.Run(() => pats.ClearP160A());
+                
+                MessageBox.Show("P160A cleared from PCM.\n\nPerform ignition cycle:\n• ON 5 sec → OFF 15 sec → ON", 
+                    "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("P160A cleared");
+                Logger.Info("P160A cleared");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Clear P160A Error", "Failed to clear P160A", ex);
+            }
+        }
+
+        private async void BtnClearB10A2_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_CLEAR_B10A2, "Clear B10A2 from BCM",
+                "Clears 'Configuration Incompatible' DTC from BCM"))
+                return;
+
+            try
+            {
+                UpdateStatus("Clearing B10A2 from BCM...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                
+                await Task.Run(() => pats.ClearB10A2());
+                
+                MessageBox.Show("B10A2 cleared from BCM.", "Success",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("B10A2 cleared");
+                Logger.Info("B10A2 cleared");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Clear B10A2 Error", "Failed to clear B10A2", ex);
+            }
+        }
+
+        private async void BtnClearCrush_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_CLEAR_CRUSH, "Clear Crush Event",
+                "Clears crash/collision flag from BCM\nRequired after collision repairs"))
+                return;
+
+            try
+            {
+                UpdateStatus("Clearing crush event...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                
+                await Task.Run(() => pats.ClearCrushEvent());
+                
+                MessageBox.Show("Crush event cleared from BCM.", "Success",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("Crush event cleared");
+                Logger.Info("Crush event cleared");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Clear Crush Error", "Failed to clear crush event", ex);
+            }
+        }
+
+        private async void BtnClearKam_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            try
+            {
+                UpdateStatus("Clearing KAM...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                
+                await Task.Run(() => pats.ClearKAM());
+                
+                MessageBox.Show("Keep Alive Memory cleared.\n\nPCM will re-learn adaptive parameters.", 
+                    "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("KAM cleared");
+                Logger.Info("KAM cleared");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Clear KAM Error", "Failed to clear KAM", ex);
+            }
+        }
+
+        private async void BtnGatewayUnlock_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            // First check if gateway exists
+            UpdateStatus("Checking for security gateway...");
+            var uds = new UdsService(_hsCanChannel);
+            var pats = new PatsOperations(uds);
+            
+            var hasGateway = await Task.Run(() => pats.DetectGateway());
+            
+            if (!hasGateway)
+            {
+                MessageBox.Show("No security gateway detected.\n\nThis vehicle does not require gateway unlock.",
+                    "No Gateway", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("No gateway detected");
+                return;
+            }
+
+            var incode = _txtIncode?.Text?.Trim();
+            if (string.IsNullOrEmpty(incode))
+            {
+                MessageBox.Show("Please enter the incode from patskiller.com/calculator",
+                    "Incode Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_GATEWAY_UNLOCK, "Unlock Security Gateway",
+                "Unlocks 2020+ security gateway for diagnostic access"))
+                return;
+
+            try
+            {
+                UpdateStatus("Unlocking gateway...");
+                
+                await Task.Run(() => pats.UnlockGateway(incode));
+                
+                MessageBox.Show("Security gateway unlocked.\n\nYou can now perform diagnostic operations.",
+                    "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("Gateway unlocked");
+                Logger.Info("Gateway unlocked");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Gateway Unlock Error", "Failed to unlock gateway", ex);
+            }
+        }
+
+        private async void BtnBcmFactoryDefaults_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) return;
+
+            // Big warning
+            var warning = MessageBox.Show(
+                "⚠️ BCM FACTORY DEFAULTS - CRITICAL WARNING ⚠️\n\n" +
+                "This operation will RESET ALL BCM CONFIGURATION including:\n" +
+                "• Window positions and settings\n" +
+                "• Door lock settings\n" +
+                "• Lighting configurations\n" +
+                "• Remote start settings\n" +
+                "• All personalization options\n\n" +
+                "⚡ REQUIRES 2-3 INCODES (2-3 tokens)\n" +
+                "⚡ Vehicle MUST be adapted with scanner (IDS/FDRS) after!\n\n" +
+                "Are you ABSOLUTELY SURE you want to continue?",
+                "BCM Factory Defaults - WARNING",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (warning != DialogResult.Yes) return;
+
+            // Get incodes
+            var incode1 = Microsoft.VisualBasic.Interaction.InputBox(
+                "Enter FIRST incode (Level 1):", "BCM Factory Defaults", "");
+            if (string.IsNullOrEmpty(incode1)) return;
+
+            var incode2 = Microsoft.VisualBasic.Interaction.InputBox(
+                "Enter SECOND incode (Level 2):", "BCM Factory Defaults", "");
+            if (string.IsNullOrEmpty(incode2)) return;
+
+            var incode3 = Microsoft.VisualBasic.Interaction.InputBox(
+                "Enter THIRD incode (Level 3) or leave blank if not needed:", 
+                "BCM Factory Defaults", "");
+
+            var incodes = string.IsNullOrEmpty(incode3) 
+                ? new[] { incode1, incode2 } 
+                : new[] { incode1, incode2, incode3 };
+
+            if (!ConfirmTokenCost(incodes.Length, "BCM Factory Defaults",
+                "⚠️ This resets ALL BCM settings!\nVehicle requires scanner adaptation after!"))
+                return;
+
+            try
+            {
+                UpdateStatus("Performing BCM Factory Defaults...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                
+                await Task.Run(() => pats.BcmFactoryDefaults(incodes));
+                
+                MessageBox.Show(
+                    "BCM Factory Defaults completed!\n\n" +
+                    "⚠️ IMPORTANT: Vehicle MUST be adapted with\n" +
+                    "a factory scanner (IDS/FDRS) to restore\n" +
+                    "proper BCM functionality.",
+                    "BCM Reset Complete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                UpdateStatus("BCM Factory Defaults completed - SCANNER ADAPTATION REQUIRED");
+                Logger.Info("BCM Factory Defaults completed");
+            }
+            catch (Exception ex)
+            {
+                ShowError("BCM Factory Defaults Error", "BCM Factory Defaults failed", ex);
+            }
+        }
+
+        private void ShowAbout_Click(object? sender, EventArgs e)
+        {
+            MessageBox.Show(
+                "PatsKiller Pro v2.0.0\n\n" +
+                "Ford & Lincoln PATS Key Programming Solution\n\n" +
+                "© 2026 PatsKiller. All rights reserved.\n\n" +
+                "Website: https://patskiller.com\n" +
+                "Support: support@patskiller.com",
+                "About PatsKiller Pro",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        #endregion
+
+        #region Helper Methods
 
         private void DisconnectDevice()
         {
@@ -1234,710 +1564,35 @@ namespace PatsKillerPro
             _connectedDevice = null;
             _isConnectedToDevice = false;
             _isConnectedToVehicle = false;
-            _incodeVerified = false;
 
             if (_btnConnect != null)
             {
-                _btnConnect.Text = "Connect";
-                _btnConnect.BackColor = AppColors.ButtonWarning;
-                _btnConnect.Enabled = true;
+                _btnConnect.Text = "Connect to Device";
+                _btnConnect.BackColor = _colorOrange;
             }
             if (_btnReadVehicle != null) _btnReadVehicle.Enabled = false;
             if (_cmbDevices != null) _cmbDevices.Enabled = true;
             if (_btnScan != null) _btnScan.Enabled = true;
+            if (_cmbVehicles != null) _cmbVehicles.Enabled = false;
 
-            HideAllPanels();
-            
-            AddLog("info", "Device disconnected");
             UpdateStatus("Disconnected");
+            Logger.Info("Device disconnected");
         }
 
-        #endregion
-
-        #region Event Handlers - Vehicle Operations
-
-        private async void BtnReadVehicle_Click(object? sender, EventArgs e)
+        private void UpdateStatus(string message)
         {
-            if (_hsCanChannel == null) return;
-
-            AddLog("info", "Reading vehicle VIN from CAN bus...");
-            UpdateStatus("Reading vehicle...");
-            
-            if (_btnReadVehicle != null) _btnReadVehicle.Enabled = false;
-
-            try
+            if (_lblStatusBar != null && !_lblStatusBar.IsDisposed)
             {
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-                
-                // Read VIN
-                var vin = await Task.Run(() => pats.ReadVin());
-                AddLog("info", $"VIN: {vin}");
-                
-                // Decode VIN
-                _detectedVehicle = VinDecoder.Decode(vin);
-                _currentVin = vin;
-                _is2020Plus = _detectedVehicle?.Year >= 2020;
-                
-                AddLog("success", $"Auto-detected: {_detectedVehicle?.Year} Ford {_detectedVehicle?.Model}");
-                
-                if (_is2020Plus)
+                if (_lblStatusBar.InvokeRequired)
                 {
-                    AddLog("warning", "2020+ vehicle - Gateway Unlock recommended for free key operations");
+                    _lblStatusBar.Invoke(() => _lblStatusBar.Text = $"Status: {message}");
                 }
-                
-                // Read PATS status
-                var status = await Task.Run(() => pats.ReadPatsStatus());
-                _currentOutcode = status.Outcode;
-                
-                // Display vehicle info
-                ShowVehicleInfo(vin, _detectedVehicle, status);
-                ShowOutcode(status.Outcode);
-                ShowIncode();
-                
-                _isConnectedToVehicle = true;
-                UpdateStatus("Enter incode and click Submit");
-            }
-            catch (Exception ex)
-            {
-                AddLog("error", $"Failed to read vehicle: {ex.Message}");
-                UpdateStatus("Failed to read vehicle");
-                if (_btnReadVehicle != null) _btnReadVehicle.Enabled = true;
-            }
-        }
-
-        private void ShowVehicleInfo(string vin, VehicleInfo? vehicle, PatsStatus status)
-        {
-            if (_vehicleInfoPanel == null || _lblVehicleInfo == null) return;
-
-            var info = $"VIN: {vin}    |    Year: {vehicle?.Year ?? 0}    |    Model: {vehicle?.Model ?? "Unknown"}\n";
-            info += $"BCM: {status.BcmPartNumber}    |    Battery: {status.BatteryVoltage:F1}V    |    Keys: {status.KeyCount}";
-            
-            _lblVehicleInfo.Text = info;
-            _vehicleInfoPanel.Visible = true;
-            
-            if (_is2020Plus)
-            {
-                // Add 2020+ badge
-                var badge = new Label
+                else
                 {
-                    Text = "2020+",
-                    BackColor = AppColors.GatewayBg,
-                    ForeColor = Color.FromArgb(146, 64, 14),
-                    Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                    Padding = new Padding(5, 2, 5, 2),
-                    AutoSize = true,
-                    Location = new Point(400, 22),
-                    Name = "badge2020"
-                };
-                _vehicleInfoPanel.Controls.Add(badge);
-            }
-        }
-
-        private void ShowOutcode(string outcode)
-        {
-            if (_outcodePanel == null || _txtOutcode == null) return;
-            
-            _txtOutcode.Text = outcode;
-            _outcodePanel.Visible = true;
-        }
-
-        private void ShowIncode()
-        {
-            if (_incodePanel == null) return;
-            
-            _incodePanel.Visible = true;
-            _txtIncode?.Focus();
-        }
-
-        private void HideAllPanels()
-        {
-            if (_vehicleInfoPanel != null) _vehicleInfoPanel.Visible = false;
-            if (_outcodePanel != null) _outcodePanel.Visible = false;
-            if (_incodePanel != null) _incodePanel.Visible = false;
-            if (_keyOperationsPanel != null) _keyOperationsPanel.Visible = false;
-            if (_paramResetPanel != null) _paramResetPanel.Visible = false;
-            if (_gatewayPanel != null) _gatewayPanel.Visible = false;
-            
-            var otherPanel = _tabPats?.Controls.Find("otherPatsPanel", false).FirstOrDefault();
-            if (otherPanel != null) otherPanel.Visible = false;
-        }
-
-        #endregion
-
-        #region Event Handlers - Incode Submit
-
-        private void TxtIncode_TextChanged(object? sender, EventArgs e)
-        {
-            if (_btnSubmitIncode == null || _txtIncode == null) return;
-            
-            _btnSubmitIncode.Enabled = _txtIncode.Text.Length >= 4;
-            
-            // Reset verification if incode changed
-            if (_incodeVerified)
-            {
-                _incodeVerified = false;
-                _btnSubmitIncode.Text = "Submit";
-                _btnSubmitIncode.BackColor = AppColors.ButtonPrimary;
-                _btnSubmitIncode.Enabled = true;
-                _txtIncode.Enabled = true;
-                if (_lblIncodeStatus != null) _lblIncodeStatus.Visible = false;
-                
-                DisableOperations();
-            }
-        }
-
-        private async void BtnSubmitIncode_Click(object? sender, EventArgs e)
-        {
-            if (_txtIncode == null || _btnSubmitIncode == null) return;
-            
-            _currentIncode = _txtIncode.Text.Trim().ToUpper();
-            
-            AddLog("info", "Validating incode...");
-            _btnSubmitIncode.Enabled = false;
-            _btnSubmitIncode.Text = "Validating...";
-            
-            // Simulate validation (in Phase 2, this will call API)
-            await Task.Delay(500);
-            
-            _incodeVerified = true;
-            _btnSubmitIncode.Text = "✓ Verified";
-            _btnSubmitIncode.BackColor = AppColors.Success;
-            _txtIncode.Enabled = false;
-            
-            if (_lblIncodeStatus != null)
-            {
-                _lblIncodeStatus.Text = "✓ Verified - Operations unlocked!";
-                _lblIncodeStatus.Visible = true;
-            }
-            
-            AddLog("success", "Incode verified! Operations unlocked.");
-            
-            if (_is2020Plus)
-            {
-                AddLog("warning", "2020+ vehicle - Gateway Unlock recommended for FREE key operations");
-            }
-            
-            EnableOperations();
-            UpdateStatus("Ready for operations");
-        }
-
-        private void EnableOperations()
-        {
-            // Key operations
-            if (_keyOperationsPanel != null) _keyOperationsPanel.Visible = true;
-            if (_btnEraseKeys != null) _btnEraseKeys.Enabled = true;
-            if (_btnProgramKeys != null) _btnProgramKeys.Enabled = true;
-            
-            // Parameter reset
-            if (_paramResetPanel != null) _paramResetPanel.Visible = true;
-            if (_btnStartParamReset != null) _btnStartParamReset.Enabled = true;
-            
-            // Gateway (only for 2020+)
-            if (_is2020Plus)
-            {
-                if (_gatewayPanel != null) _gatewayPanel.Visible = true;
-                if (_btnGatewayUnlock != null) _btnGatewayUnlock.Enabled = true;
-            }
-            
-            // Other PATS buttons
-            var otherPanel = _tabPats?.Controls.Find("otherPatsPanel", false).FirstOrDefault();
-            if (otherPanel != null) otherPanel.Visible = true;
-            if (_btnInitEscl != null) _btnInitEscl.Enabled = true;
-            if (_btnDisableBcm != null) _btnDisableBcm.Enabled = true;
-            
-            // Utility tab buttons
-            foreach (Control ctrl in _tabUtility?.Controls ?? new Control.ControlCollection(this))
-            {
-                if (ctrl is Button btn) btn.Enabled = true;
-            }
-            
-            // Free tab buttons
-            foreach (Control ctrl in _tabFree?.Controls ?? new Control.ControlCollection(this))
-            {
-                if (ctrl is Button btn) btn.Enabled = true;
-            }
-        }
-
-        private void DisableOperations()
-        {
-            if (_keyOperationsPanel != null) _keyOperationsPanel.Visible = false;
-            if (_paramResetPanel != null) _paramResetPanel.Visible = false;
-            if (_gatewayPanel != null) _gatewayPanel.Visible = false;
-            
-            var otherPanel = _tabPats?.Controls.Find("otherPatsPanel", false).FirstOrDefault();
-            if (otherPanel != null) otherPanel.Visible = false;
-            
-            // Disable utility buttons
-            foreach (Control ctrl in _tabUtility?.Controls ?? new Control.ControlCollection(this))
-            {
-                if (ctrl is Button btn) btn.Enabled = false;
-            }
-            
-            // Disable free buttons
-            foreach (Control ctrl in _tabFree?.Controls ?? new Control.ControlCollection(this))
-            {
-                if (ctrl is Button btn) btn.Enabled = false;
-            }
-        }
-
-        #endregion
-
-        #region Event Handlers - Key Operations
-
-        private async void BtnEraseKeys_Click(object? sender, EventArgs e)
-        {
-            if (_hsCanChannel == null || string.IsNullOrEmpty(_currentIncode)) return;
-
-            var result = MessageBox.Show(
-                "⚠️ WARNING: This will ERASE ALL programmed keys from the BCM!\n\n" +
-                "You must program at least 2 new keys immediately after.\n\n" +
-                "Are you sure you want to continue?",
-                "Erase All Keys",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning);
-
-            if (result != DialogResult.Yes) return;
-
-            int tokenCost = _sessionActive ? 0 : 1;
-            AddLog("info", $"Erasing all keys... ({(tokenCost == 0 ? "FREE" : "1 token")})");
-            UpdateStatus("Erasing keys...");
-
-            try
-            {
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-
-                await Task.Run(() => pats.EraseAllKeys(_currentIncode));
-
-                AddLog("success", "All keys erased successfully!");
-                MessageBox.Show(
-                    "All keys have been erased.\n\nYou must now program at least 2 new keys.",
-                    "Keys Erased",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                
-                UpdateStatus("Keys erased - program new keys");
-            }
-            catch (Exception ex)
-            {
-                AddLog("error", $"Erase failed: {ex.Message}");
-                MessageBox.Show($"Failed to erase keys:\n\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private async void BtnProgramKeys_Click(object? sender, EventArgs e)
-        {
-            if (_hsCanChannel == null || string.IsNullOrEmpty(_currentIncode)) return;
-
-            int tokenCost = _sessionActive ? 0 : 1;
-            AddLog("info", $"Starting key programming... ({(tokenCost == 0 ? "FREE" : "1 token")})");
-            UpdateStatus("Programming keys...");
-
-            MessageBox.Show(
-                "Key Programming Instructions:\n\n" +
-                "1. Insert the new key into the ignition\n" +
-                "2. Turn to ON position (do not start)\n" +
-                "3. Click OK to begin programming\n" +
-                "4. Wait for the security light to go out",
-                "Program Keys",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-
-            try
-            {
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-
-                await Task.Run(() => pats.ProgramKey(_currentIncode));
-
-                AddLog("success", "Key programmed successfully!");
-                MessageBox.Show("Key programmed successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                UpdateStatus("Key programmed");
-            }
-            catch (Exception ex)
-            {
-                AddLog("error", $"Programming failed: {ex.Message}");
-                MessageBox.Show($"Failed to program key:\n\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        #endregion
-
-        #region Event Handlers - Parameter Reset
-
-        private void ChkAbsOnCan2_CheckedChanged(object? sender, EventArgs e)
-        {
-            if (_chkAbsOnCan2?.Checked == true && _chkSkipAbs != null)
-            {
-                _chkSkipAbs.Checked = false;
-            }
-            _absOnCan2 = _chkAbsOnCan2?.Checked ?? false;
-        }
-
-        private void ChkSkipAbs_CheckedChanged(object? sender, EventArgs e)
-        {
-            if (_chkSkipAbs?.Checked == true && _chkAbsOnCan2 != null)
-            {
-                _chkAbsOnCan2.Checked = false;
-            }
-            _skipAbs = _chkSkipAbs?.Checked ?? false;
-            
-            // Update button text
-            if (_btnStartParamReset != null)
-            {
-                _btnStartParamReset.Text = _skipAbs 
-                    ? "🔄 Start Parameter Reset (2 tokens)" 
-                    : "🔄 Start Parameter Reset (3-4 tokens)";
-            }
-        }
-
-        private void BtnStartParamReset_Click(object? sender, EventArgs e)
-        {
-            // Hide normal panel, show progress panel
-            if (_paramResetPanel != null) _paramResetPanel.Visible = false;
-            if (_paramResetProgressPanel != null)
-            {
-                _paramResetProgressPanel.Visible = true;
-                _paramResetProgressPanel.BringToFront();
-            }
-            
-            _paramResetActive = true;
-            _currentParamResetStep = 0;
-            
-            int moduleCount = _skipAbs ? 2 : 3;
-            AddLog("info", $"Starting Parameter Reset - {moduleCount} modules");
-            
-            ProcessNextParamResetStep();
-        }
-
-        private void ProcessNextParamResetStep()
-        {
-            string[] modules = _skipAbs 
-                ? new[] { "BCM", "PCM" } 
-                : new[] { "BCM", "ABS", "PCM" };
-
-            if (_currentParamResetStep >= modules.Length)
-            {
-                // Complete!
-                CompleteParameterReset();
-                return;
-            }
-
-            string currentModule = modules[_currentParamResetStep];
-            UpdateParamResetProgress(modules, _currentParamResetStep);
-            
-            AddLog("info", $"Reading {currentModule} outcode...");
-            
-            // Simulate reading outcode (in real implementation, call J2534)
-            Task.Delay(1000).ContinueWith(t => {
-                this.Invoke(() => {
-                    string outcode = $"{currentModule}-{Guid.NewGuid().ToString().Substring(0, 8).ToUpper()}";
-                    if (_txtParamResetOutcode != null)
-                    {
-                        _txtParamResetOutcode.Text = outcode;
-                    }
-                    AddLog("success", $"{currentModule} Outcode: {outcode}");
-                    UpdateStatus($"Enter {currentModule} incode and click Submit");
-                });
-            });
-        }
-
-        private void UpdateParamResetProgress(string[] modules, int currentStep)
-        {
-            if (_lblParamResetProgress == null) return;
-
-            var progressLine1 = "";
-            var progressLine2 = "";
-            
-            for (int i = 0; i < modules.Length; i++)
-            {
-                string arrow = i < modules.Length - 1 ? " ──→ " : "";
-                progressLine1 += $"[{i + 1} {modules[i]}]{arrow}";
-                
-                string status = i < currentStep ? "✓" : (i == currentStep ? "●" : "○");
-                progressLine2 += $"    {status}    " + (i < modules.Length - 1 ? "         " : "");
-            }
-            
-            _lblParamResetProgress.Text = progressLine1 + "\n" + progressLine2;
-        }
-
-        private void BtnParamResetSubmit_Click(object? sender, EventArgs e)
-        {
-            string incode = _txtParamResetIncode?.Text?.Trim().ToUpper() ?? "";
-            
-            if (string.IsNullOrEmpty(incode))
-            {
-                MessageBox.Show("Please enter the incode", "Incode Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            string[] modules = _skipAbs 
-                ? new[] { "BCM", "PCM" } 
-                : new[] { "BCM", "ABS", "PCM" };
-            string currentModule = modules[_currentParamResetStep];
-            
-            AddLog("info", $"Applying {currentModule} incode...");
-            UpdateStatus($"Resetting {currentModule}...");
-            
-            // Simulate applying incode
-            Task.Delay(1500).ContinueWith(t => {
-                this.Invoke(() => {
-                    AddLog("success", $"{currentModule} reset complete!");
-                    
-                    _currentParamResetStep++;
-                    if (_txtParamResetIncode != null) _txtParamResetIncode.Text = "";
-                    
-                    ProcessNextParamResetStep();
-                });
-            });
-        }
-
-        private void CompleteParameterReset()
-        {
-            _paramResetActive = false;
-            
-            int moduleCount = _skipAbs ? 2 : 3;
-            AddLog("success", $"✅ Parameter Reset COMPLETE - All {moduleCount} modules synchronized!");
-            
-            MessageBox.Show(
-                $"Parameter Reset Complete!\n\n{moduleCount} modules synchronized successfully.",
-                "Success",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-            
-            // Hide progress panel, show normal panel
-            if (_paramResetProgressPanel != null) _paramResetProgressPanel.Visible = false;
-            if (_paramResetPanel != null) _paramResetPanel.Visible = true;
-            
-            UpdateStatus("Parameter Reset complete");
-        }
-
-        private void BtnParamResetCancel_Click(object? sender, EventArgs e)
-        {
-            var result = MessageBox.Show(
-                "Cancel Parameter Reset?\n\nPartially completed modules may need to be reset again.",
-                "Cancel Reset",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning);
-            
-            if (result == DialogResult.Yes)
-            {
-                _paramResetActive = false;
-                AddLog("warning", "Parameter Reset cancelled by user");
-                
-                if (_paramResetProgressPanel != null) _paramResetProgressPanel.Visible = false;
-                if (_paramResetPanel != null) _paramResetPanel.Visible = true;
-                
-                UpdateStatus("Parameter Reset cancelled");
-            }
-        }
-
-        #endregion
-
-        #region Event Handlers - Gateway Unlock
-
-        private async void BtnGatewayUnlock_Click(object? sender, EventArgs e)
-        {
-            if (_hsCanChannel == null || string.IsNullOrEmpty(_currentIncode)) return;
-
-            AddLog("info", "Unlocking Security Gateway...");
-            UpdateStatus("Unlocking gateway...");
-            
-            if (_btnGatewayUnlock != null) _btnGatewayUnlock.Enabled = false;
-
-            try
-            {
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-
-                await Task.Run(() => pats.UnlockGateway(_currentIncode));
-
-                // Start session
-                _sessionActive = true;
-                _sessionSecondsRemaining = 600; // 10 minutes
-                
-                if (_sessionBanner != null) _sessionBanner.Visible = true;
-                if (_sessionTimer != null) _sessionTimer.Start();
-                
-                UpdateKeyOperationCosts(true);
-                
-                AddLog("success", "Security Gateway unlocked!");
-                AddLog("info", "BCM session opened - key operations FREE for 10 minutes");
-                
-                if (_btnGatewayUnlock != null)
-                {
-                    _btnGatewayUnlock.Text = "✓ Gateway Unlocked";
-                    _btnGatewayUnlock.BackColor = AppColors.Success;
-                }
-                
-                UpdateStatus("Gateway unlocked - FREE key programming for 10 minutes");
-            }
-            catch (Exception ex)
-            {
-                AddLog("error", $"Gateway unlock failed: {ex.Message}");
-                if (_btnGatewayUnlock != null) _btnGatewayUnlock.Enabled = true;
-                UpdateStatus("Gateway unlock failed");
-            }
-        }
-
-        private void SessionTimer_Tick(object? sender, EventArgs e)
-        {
-            _sessionSecondsRemaining--;
-            
-            int mins = _sessionSecondsRemaining / 60;
-            int secs = _sessionSecondsRemaining % 60;
-            
-            if (_lblSessionTimer != null)
-            {
-                _lblSessionTimer.Text = $"{mins}:{secs:D2}";
-                
-                if (_sessionSecondsRemaining <= 60)
-                {
-                    _lblSessionTimer.ForeColor = Color.Yellow;
+                    _lblStatusBar.Text = $"Status: {message}";
                 }
             }
-            
-            if (_sessionSecondsRemaining == 60)
-            {
-                AddLog("warning", "Gateway session expires in 1 minute!");
-            }
-            
-            if (_sessionSecondsRemaining <= 0)
-            {
-                _sessionTimer?.Stop();
-                _sessionActive = false;
-                
-                if (_sessionBanner != null) _sessionBanner.Visible = false;
-                
-                UpdateKeyOperationCosts(false);
-                
-                AddLog("warning", "Gateway session expired - key operations now cost tokens");
-                
-                if (_btnGatewayUnlock != null)
-                {
-                    _btnGatewayUnlock.Text = "🔓 Gateway Unlock (1 token) - Get FREE Key Ops!";
-                    _btnGatewayUnlock.BackColor = AppColors.ButtonWarning;
-                    _btnGatewayUnlock.Enabled = true;
-                }
-                
-                if (_lblSessionTimer != null)
-                {
-                    _lblSessionTimer.ForeColor = Color.White;
-                }
-                
-                UpdateStatus("Gateway session expired");
-            }
         }
-
-        private void UpdateKeyOperationCosts(bool isFree)
-        {
-            if (_btnEraseKeys != null)
-            {
-                _btnEraseKeys.Text = isFree 
-                    ? "🗑️ Erase All Keys\nFREE" 
-                    : "🗑️ Erase All Keys\n1 token";
-            }
-            
-            if (_btnProgramKeys != null)
-            {
-                _btnProgramKeys.Text = isFree 
-                    ? "🔑 Program New Keys\nFREE" 
-                    : "🔑 Program New Keys\n1 token";
-            }
-            
-            if (_lblKeyOpsFree != null)
-            {
-                _lblKeyOpsFree.Visible = isFree;
-            }
-        }
-
-        #endregion
-
-        #region Event Handlers - Other PATS Functions
-
-        private async void BtnInitEscl_Click(object? sender, EventArgs e)
-        {
-            if (_hsCanChannel == null || string.IsNullOrEmpty(_currentIncode)) return;
-            
-            AddLog("info", "Initializing ESCL...");
-            // Implementation similar to v2
-            MessageBox.Show("ESCL initialization would run here", "ESCL Init", MessageBoxButtons.OK);
-        }
-
-        private void BtnDisableBcm_Click(object? sender, EventArgs e)
-        {
-            MessageBox.Show(
-                "BCM Security Disable is for ALL KEYS LOST situations.\n\n" +
-                "This function will be available in a future update.",
-                "Disable BCM",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        }
-
-        #endregion
-
-        #region Event Handlers - Utility Tab
-
-        private void BtnClearP160A_Click(object? sender, EventArgs e)
-        {
-            AddLog("info", "Clearing P160A from PCM...");
-            MessageBox.Show("Clear P160A operation would run here", "Clear P160A", MessageBoxButtons.OK);
-        }
-
-        private void BtnClearB10A2_Click(object? sender, EventArgs e)
-        {
-            AddLog("info", "Clearing B10A2 from BCM...");
-            MessageBox.Show("Clear B10A2 operation would run here", "Clear B10A2", MessageBoxButtons.OK);
-        }
-
-        private void BtnClearCrashEvent_Click(object? sender, EventArgs e)
-        {
-            AddLog("info", "Clearing Crash Event from BCM...");
-            MessageBox.Show("Clear Crash Event operation would run here", "Clear Crash Event", MessageBoxButtons.OK);
-        }
-
-        private void BtnBcmFactoryDefaults_Click(object? sender, EventArgs e)
-        {
-            AddLog("info", "Performing BCM Factory Defaults...");
-            MessageBox.Show("BCM Factory Defaults operation would run here", "BCM Defaults", MessageBoxButtons.OK);
-        }
-
-        #endregion
-
-        #region Event Handlers - Free Functions Tab
-
-        private void FreeFunctionButton_Click(object? sender, EventArgs e)
-        {
-            if (sender is Button btn)
-            {
-                AddLog("info", $"Executing: {btn.Text.Split("    ")[0]}");
-                MessageBox.Show($"{btn.Text.Split("    ")[0]} would run here", "Free Function", MessageBoxButtons.OK);
-            }
-        }
-
-        #endregion
-
-        #region Event Handlers - Miscellaneous
-
-        private void BtnCopyOutcode_Click(object? sender, EventArgs e)
-        {
-            if (!string.IsNullOrEmpty(_currentOutcode))
-            {
-                Clipboard.SetText(_currentOutcode);
-                AddLog("info", "Outcode copied to clipboard");
-            }
-        }
-
-        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
-        {
-            SaveSettings();
-            DisconnectDevice();
-        }
-
-        #endregion
-
-        #region Helper Methods
 
         private void OpenUrl(string url)
         {
@@ -1947,7 +1602,7 @@ namespace PatsKillerPro
             }
             catch (Exception ex)
             {
-                AddLog("error", $"Failed to open URL: {ex.Message}");
+                Logger.Error($"Failed to open URL: {ex.Message}", ex);
             }
         }
 

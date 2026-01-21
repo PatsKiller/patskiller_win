@@ -1,64 +1,20 @@
 # Build results
-[Bb]in/
-[Oo]bj/
-[Dd]ebug/
-[Rr]elease/
-x64/
-x86/
-[Pp]ublish/
+bin/
+obj/
+publish/
 
-# IDE
+# Visual Studio
 .vs/
-.vscode/
 *.user
 *.suo
-*.userosscache
-*.sln.docstates
+
+# Rider
+.idea/
 
 # NuGet
 packages/
 *.nupkg
-project.lock.json
-project.fragment.lock.json
-artifacts/
 
-# Inno Setup
-Installer/Output/
-
-# Logs
-*.log
-
-# OS files
+# OS
 .DS_Store
 Thumbs.db
-
-# Test results
-[Tt]est[Rr]esult*/
-*.trx
-*.coverage
-
-# NCrunch
-*.ncrunch*
-
-# User-specific files
-*.rsuser
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
-
-# JetBrains Rider
-.idea/
-*.sln.iml
-
-# Visual Studio profiler
-*.psess
-*.vsp
-*.vspx
-*.sap
-
-# Visual Studio cache files
-*.VisualState.xml
-
-# Publish web output
-*.[Pp]ublish.xml
