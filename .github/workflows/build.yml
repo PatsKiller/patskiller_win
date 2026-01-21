@@ -33,7 +33,7 @@ jobs:
     - name: Build Release
       run: dotnet build PatsKillerPro.sln -c Release --no-restore
       
-    - name: Publish Release
+    - name: Publish Release (Self-Contained Single File)
       run: |
         dotnet publish PatsKillerPro/PatsKillerPro.csproj `
           -c Release `
@@ -43,9 +43,28 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -o ./publish
           
-    - name: Upload Build Artifact
+    - name: Install Inno Setup
+      run: |
+        choco install innosetup -y
+        
+    - name: Build Installer
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion="2.0.0" Installer/PatsKillerPro.iss
+      working-directory: ${{ github.workspace }}
+      continue-on-error: true
+          
+    - name: Upload EXE Artifact
       uses: actions/upload-artifact@v4
       with:
         name: PatsKillerPro-${{ github.sha }}
         path: ./publish/
         retention-days: 30
+        
+    - name: Upload Installer Artifact
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: PatsKillerPro-Installer-${{ github.sha }}
+        path: ./Installer/Output/*.exe
+        retention-days: 30
+        if-no-files-found: ignore

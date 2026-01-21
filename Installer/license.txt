@@ -1,0 +1,63 @@
+PATSKILLER PRO SOFTWARE LICENSE AGREEMENT
+
+IMPORTANT: PLEASE READ THIS LICENSE AGREEMENT CAREFULLY BEFORE USING THIS SOFTWARE.
+
+By installing, copying, or otherwise using PatsKiller Pro ("Software"), you agree to be bound by the terms of this License Agreement. If you do not agree to these terms, do not install or use the Software.
+
+1. LICENSE GRANT
+PatsKiller grants you a non-exclusive, non-transferable license to use the Software on a single computer for your personal or business use in conjunction with legitimate automotive locksmith and key programming services.
+
+2. INTENDED USE
+This Software is designed for use by:
+- Licensed automotive locksmiths
+- Authorized automotive dealerships
+- Automotive security professionals
+- Vehicle owners for their own vehicles
+
+3. RESTRICTIONS
+You may NOT:
+- Use this Software for any illegal purposes
+- Use this Software to steal vehicles or assist in vehicle theft
+- Reverse engineer, decompile, or disassemble the Software
+- Distribute, sell, or transfer the Software to third parties
+- Remove or alter any proprietary notices or labels on the Software
+
+4. TOKEN SYSTEM
+The Software operates using a token-based system. Tokens are:
+- Purchased separately through patskiller.com
+- Non-refundable once used
+- Subject to the terms of service at patskiller.com
+
+5. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+IN NO EVENT SHALL PATSKILLER BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+7. VEHICLE COMPATIBILITY
+The Software is designed for Ford and Lincoln vehicles with PATS (Passive Anti-Theft System). Compatibility varies by vehicle year and model. PatsKiller makes no guarantee that the Software will work with all vehicles.
+
+8. USER RESPONSIBILITY
+You are solely responsible for:
+- Verifying vehicle ownership before performing key programming
+- Maintaining appropriate business licenses for locksmith services
+- Complying with all applicable local, state, and federal laws
+- Any damage to vehicles resulting from improper use of the Software
+
+9. TERMINATION
+This license is effective until terminated. It will terminate automatically without notice if you fail to comply with any provision of this License Agreement. Upon termination, you must destroy all copies of the Software.
+
+10. GOVERNING LAW
+This Agreement shall be governed by and construed in accordance with the laws of the United States.
+
+11. ENTIRE AGREEMENT
+This License Agreement constitutes the entire agreement between you and PatsKiller relating to the Software and supersedes all prior or contemporaneous understandings.
+
+12. CONTACT INFORMATION
+For questions about this license or the Software:
+Website: https://patskiller.com
+Email: support@patskiller.com
+
+By clicking "I Accept" or by installing, copying, or using the Software, you acknowledge that you have read this Agreement, understand it, and agree to be bound by its terms and conditions.
+
+Copyright (c) 2026 PatsKiller. All rights reserved.

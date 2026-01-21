@@ -19,6 +19,10 @@
     <StartupObject>PatsKillerPro.Program</StartupObject>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PlatformTarget>AnyCPU</PlatformTarget>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -30,14 +34,15 @@
     <Optimize>true</Optimize>
   </PropertyGroup>
 
-  <!-- System.Text.Json is built into .NET 8 - no packages needed -->
-
   <ItemGroup>
     <Using Include="Microsoft.VisualBasic" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="Resources\app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\logo.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
