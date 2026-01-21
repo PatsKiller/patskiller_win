@@ -178,7 +178,7 @@ namespace PatsKillerPro.Communication
             
             if (response == null || response.Length < 2 || response[0] != (SID_DIAGNOSTIC_SESSION_CONTROL + 0x40))
             {
-                var nrc = response != null && response.Length >= 3 ? response[2] : 0;
+                var nrc = response != null && response.Length >= 3 ? response[2] : (byte)0;
                 throw new UdsException($"Failed to start session 0x{sessionType:X2}", nrc);
             }
 
@@ -324,7 +324,7 @@ namespace PatsKillerPro.Communication
 
             if (response == null || response.Length < 1 || response[0] != (SID_WRITE_DATA_BY_ID + 0x40))
             {
-                var nrc = response != null && response.Length >= 3 ? response[2] : 0;
+                var nrc = response != null && response.Length >= 3 ? response[2] : (byte)0;
                 throw new UdsException($"WriteDataByIdentifier 0x{did:X4} failed", nrc);
             }
         }
