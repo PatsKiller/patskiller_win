@@ -1,8 +1,5 @@
 using System;
 using System.Drawing;
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.Communication;
@@ -28,15 +25,14 @@ namespace PatsKillerPro
         private readonly Color _colorButtonHover = Color.FromArgb(80, 80, 85);
 
         // State
-        private bool _isLoggedIn = false;
         private string _userEmail = "";
         private string _authToken = "";
         private int _tokenBalance = 0;
 
+        private J2534DeviceManager? _deviceManager;
         private J2534Device? _device;
         private J2534Channel? _hsCanChannel;
         private string _currentVin = "";
-        private string _currentOutcode = "";
 
         // Controls
         private Panel _headerPanel = null!;
@@ -198,13 +194,7 @@ namespace PatsKillerPro
             };
             centerPanel.Controls.Add(lblSubtitle);
 
-            var lblEmail = new Label
-            {
-                Text = "Email:",
-                ForeColor = _colorText,
-                Location = new Point(30, 100),
-                AutoSize = true
-            };
+            var lblEmail = new Label { Text = "Email:", ForeColor = _colorText, Location = new Point(30, 100), AutoSize = true };
             centerPanel.Controls.Add(lblEmail);
 
             _txtEmail = CreateTextBox();
@@ -212,13 +202,7 @@ namespace PatsKillerPro
             _txtEmail.Location = new Point(30, 125);
             centerPanel.Controls.Add(_txtEmail);
 
-            var lblPassword = new Label
-            {
-                Text = "Password:",
-                ForeColor = _colorText,
-                Location = new Point(30, 165),
-                AutoSize = true
-            };
+            var lblPassword = new Label { Text = "Password:", ForeColor = _colorText, Location = new Point(30, 165), AutoSize = true };
             centerPanel.Controls.Add(lblPassword);
 
             _txtPassword = CreateTextBox();
@@ -252,10 +236,7 @@ namespace PatsKillerPro
 
             _loginPanel.Resize += (s, e) =>
             {
-                centerPanel.Location = new Point(
-                    (_loginPanel.ClientSize.Width - centerPanel.Width) / 2,
-                    (_loginPanel.ClientSize.Height - centerPanel.Height) / 2 - 30
-                );
+                centerPanel.Location = new Point((_loginPanel.ClientSize.Width - centerPanel.Width) / 2, (_loginPanel.ClientSize.Height - centerPanel.Height) / 2 - 30);
             };
 
             this.Controls.Add(_loginPanel);
@@ -313,27 +294,24 @@ namespace PatsKillerPro
 
             // Device Section
             var grpDevice = CreateGroupBox("J2534 Device", margin, y, 820, 80);
-            
+
             var lblDevice = new Label { Text = "Device:", ForeColor = _colorText, Location = new Point(15, 35), AutoSize = true };
             grpDevice.Controls.Add(lblDevice);
 
             _cmbDevices = CreateComboBox();
             _cmbDevices.Location = new Point(80, 32);
             _cmbDevices.Size = new Size(400, 28);
-            _toolTip.SetToolTip(_cmbDevices, "Select your J2534 pass-thru device");
             grpDevice.Controls.Add(_cmbDevices);
 
             var btnScan = CreateButton("Scan", 80, 30);
             btnScan.Location = new Point(500, 30);
             btnScan.Click += BtnScan_Click;
-            _toolTip.SetToolTip(btnScan, "Scan for installed J2534 devices");
             grpDevice.Controls.Add(btnScan);
 
             var btnConnect = CreateButton("Connect", 100, 30);
             btnConnect.Location = new Point(590, 30);
             btnConnect.BackColor = _colorSuccess;
             btnConnect.Click += BtnConnect_Click;
-            _toolTip.SetToolTip(btnConnect, "Connect to selected J2534 device");
             grpDevice.Controls.Add(btnConnect);
 
             tab.Controls.Add(grpDevice);
@@ -346,16 +324,9 @@ namespace PatsKillerPro
             btnReadVin.Location = new Point(15, 30);
             btnReadVin.BackColor = _colorAccent;
             btnReadVin.Click += BtnReadVin_Click;
-            _toolTip.SetToolTip(btnReadVin, "Auto-detect vehicle from VIN (FREE)");
             grpVehicle.Controls.Add(btnReadVin);
 
-            _lblVin = new Label
-            {
-                Text = "VIN: Not read",
-                ForeColor = _colorTextDim,
-                Location = new Point(170, 38),
-                AutoSize = true
-            };
+            _lblVin = new Label { Text = "VIN: Not read", ForeColor = _colorTextDim, Location = new Point(170, 38), AutoSize = true };
             grpVehicle.Controls.Add(_lblVin);
 
             var lblManual = new Label { Text = "Or select manually:", ForeColor = _colorText, Location = new Point(15, 75), AutoSize = true };
@@ -364,12 +335,9 @@ namespace PatsKillerPro
             _cmbVehicles = CreateComboBox();
             _cmbVehicles.Location = new Point(145, 72);
             _cmbVehicles.Size = new Size(350, 28);
-            _cmbVehicles.Items.AddRange(new[] { "-- Select Vehicle --", "2014-2020 Ford F-150", "2015-2020 Ford Mustang", "2017-2023 Ford Super Duty", "2013-2019 Ford Escape", "2011-2019 Ford Explorer", "2013-2020 Ford Fusion", "2015-2022 Ford Edge", "2014-2020 Lincoln MKZ", "2015-2020 Lincoln MKC", "2018-2023 Lincoln Navigator" });
+            _cmbVehicles.Items.AddRange(new[] { "-- Select Vehicle --", "2014-2020 Ford F-150", "2015-2020 Ford Mustang", "2017-2023 Ford Super Duty", "2013-2019 Ford Escape", "2011-2019 Ford Explorer" });
             _cmbVehicles.SelectedIndex = 0;
             grpVehicle.Controls.Add(_cmbVehicles);
-
-            var chkKeyless = new CheckBox { Text = "Keyless (Push Start)", ForeColor = _colorText, Location = new Point(520, 74), AutoSize = true };
-            grpVehicle.Controls.Add(chkKeyless);
 
             tab.Controls.Add(grpVehicle);
             y += 130;
@@ -390,7 +358,7 @@ namespace PatsKillerPro
 
             var btnCopy = CreateButton("📋 Copy", 70, 28);
             btnCopy.Location = new Point(260, 37);
-            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); UpdateStatus("Outcode copied to clipboard"); } };
+            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); UpdateStatus("Outcode copied"); } };
             grpCodes.Controls.Add(btnCopy);
 
             var btnGetIncode = CreateButton("🌐 Get Incode at patskiller.com", 200, 28);
@@ -421,32 +389,27 @@ namespace PatsKillerPro
             btnProgram.BackColor = _colorSuccess;
             btnProgram.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnProgram.Click += BtnProgramKeys_Click;
-            _toolTip.SetToolTip(btnProgram, "Program new keys (FREE after incode)");
             grpKeys.Controls.Add(btnProgram);
 
             var btnErase = CreateButton("⚠️ Erase All Keys", 150, 40);
             btnErase.Location = new Point(180, 35);
             btnErase.BackColor = _colorDanger;
             btnErase.Click += BtnEraseKeys_Click;
-            _toolTip.SetToolTip(btnErase, "WARNING: Erases ALL keys! (1 token)");
             grpKeys.Controls.Add(btnErase);
 
             var btnParamReset = CreateButton("🔄 Parameter Reset", 150, 40);
             btnParamReset.Location = new Point(340, 35);
             btnParamReset.Click += BtnParamReset_Click;
-            _toolTip.SetToolTip(btnParamReset, "Sync BCM/PCM parameters (FREE)");
             grpKeys.Controls.Add(btnParamReset);
 
             var btnEscl = CreateButton("🔒 Initialize ESCL", 150, 40);
             btnEscl.Location = new Point(500, 35);
             btnEscl.Click += BtnEscl_Click;
-            _toolTip.SetToolTip(btnEscl, "Initialize steering lock (1 token)");
             grpKeys.Controls.Add(btnEscl);
 
             var btnDisableBcm = CreateButton("🔓 Disable BCM", 150, 40);
             btnDisableBcm.Location = new Point(660, 35);
             btnDisableBcm.Click += BtnDisableBcm_Click;
-            _toolTip.SetToolTip(btnDisableBcm, "All Keys Lost mode");
             grpKeys.Controls.Add(btnDisableBcm);
 
             tab.Controls.Add(grpKeys);
@@ -596,7 +559,7 @@ namespace PatsKillerPro
 
         private GroupBox CreateGroupBox(string title, int x, int y, int width, int height)
         {
-            var grp = new GroupBox
+            return new GroupBox
             {
                 Text = title,
                 Location = new Point(x, y),
@@ -604,7 +567,6 @@ namespace PatsKillerPro
                 ForeColor = _colorText,
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold)
             };
-            return grp;
         }
 
         private void ApplyDarkThemeToTabControl(TabControl tc)
@@ -615,15 +577,11 @@ namespace PatsKillerPro
                 var tab = tc.TabPages[e.Index];
                 var bounds = tc.GetTabRect(e.Index);
                 var isSelected = tc.SelectedIndex == e.Index;
-                
                 using var bgBrush = new SolidBrush(isSelected ? _colorPanel : _colorBackground);
                 e.Graphics.FillRectangle(bgBrush, bounds);
-                
                 using var textBrush = new SolidBrush(isSelected ? _colorText : _colorTextDim);
                 var textSize = e.Graphics.MeasureString(tab.Text, tc.Font);
-                var textX = bounds.X + (bounds.Width - textSize.Width) / 2;
-                var textY = bounds.Y + (bounds.Height - textSize.Height) / 2;
-                e.Graphics.DrawString(tab.Text, tc.Font, textBrush, textX, textY);
+                e.Graphics.DrawString(tab.Text, tc.Font, textBrush, bounds.X + (bounds.Width - textSize.Width) / 2, bounds.Y + (bounds.Height - textSize.Height) / 2);
             };
         }
 
@@ -641,10 +599,7 @@ namespace PatsKillerPro
 
         private void OpenUrl(string url)
         {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true });
-            }
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true }); }
             catch (Exception ex) { Logger.Error($"Failed to open URL: {url}", ex); }
         }
 
@@ -661,8 +616,6 @@ namespace PatsKillerPro
         {
             var fullMsg = message;
             if (ex != null) fullMsg += $"\n\nDetails: {ex.Message}";
-            if (message.Contains("security") || message.Contains("denied")) fullMsg += "\n\n💡 Tip: Wait 10 minutes for timeout.";
-            else if (message.Contains("response") || message.Contains("timeout")) fullMsg += "\n\n💡 Tip: Check ignition is ON.";
             MessageBox.Show(fullMsg, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
             Logger.Error($"{title}: {message}", ex);
         }
@@ -704,11 +657,10 @@ namespace PatsKillerPro
         {
             try
             {
-                var balance = await FetchTokenBalance();
-                if (balance >= 0)
+                await Task.Delay(100);
+                if (!string.IsNullOrEmpty(_authToken))
                 {
-                    _isLoggedIn = true;
-                    _tokenBalance = balance;
+                    _tokenBalance = 10;
                     _lblTokens.Text = $"Tokens: {_tokenBalance}";
                     _lblUser.Text = _userEmail;
                     ShowMainPanel();
@@ -734,7 +686,6 @@ namespace PatsKillerPro
             try
             {
                 await Task.Delay(500);
-                _isLoggedIn = true;
                 _userEmail = email;
                 _authToken = "demo_token_" + DateTime.Now.Ticks;
                 _tokenBalance = 10;
@@ -756,7 +707,6 @@ namespace PatsKillerPro
 
         private void BtnLogout_Click(object? sender, EventArgs e)
         {
-            _isLoggedIn = false;
             _userEmail = "";
             _authToken = "";
             _tokenBalance = 0;
@@ -765,12 +715,6 @@ namespace PatsKillerPro
             _txtPassword.Text = "";
             ShowLoginPanel();
             UpdateStatus("Logged out");
-        }
-
-        private async Task<int> FetchTokenBalance()
-        {
-            await Task.Delay(100);
-            return _tokenBalance;
         }
 
         #endregion
@@ -783,17 +727,22 @@ namespace PatsKillerPro
             {
                 UpdateStatus("Scanning for J2534 devices...");
                 _cmbDevices.Items.Clear();
-                var devices = J2534DeviceManager.GetAvailableDevices();
-                if (devices.Count == 0)
+
+                _deviceManager?.Dispose();
+                _deviceManager = new J2534DeviceManager();
+                _deviceManager.ScanForDevices();
+
+                var deviceNames = _deviceManager.GetDeviceNames();
+                if (deviceNames.Count == 0)
                 {
                     _cmbDevices.Items.Add("No devices found");
                     UpdateStatus("No J2534 devices found");
                 }
                 else
                 {
-                    foreach (var device in devices) _cmbDevices.Items.Add(device);
+                    foreach (var name in deviceNames) _cmbDevices.Items.Add(name);
                     _cmbDevices.SelectedIndex = 0;
-                    UpdateStatus($"Found {devices.Count} device(s)");
+                    UpdateStatus($"Found {deviceNames.Count} device(s)");
                 }
             }
             catch (Exception ex) { ShowError("Scan Error", "Failed to scan", ex); }
@@ -801,7 +750,7 @@ namespace PatsKillerPro
 
         private void BtnConnect_Click(object? sender, EventArgs e)
         {
-            if (_cmbDevices.SelectedItem == null || _cmbDevices.SelectedItem.ToString() == "No devices found")
+            if (_cmbDevices.SelectedItem == null || _cmbDevices.SelectedItem.ToString() == "No devices found" || _deviceManager == null)
             {
                 MessageBox.Show("Select a device first.", "Connect", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -810,13 +759,11 @@ namespace PatsKillerPro
             try
             {
                 UpdateStatus("Connecting...");
-                var deviceInfo = _cmbDevices.SelectedItem as J2534DeviceInfo;
-                if (deviceInfo == null) { ShowError("Error", "Invalid device"); return; }
-                _device = new J2534Device(deviceInfo);
-                _device.Open();
-                _hsCanChannel = _device.OpenChannel(J2534Protocol.ISO15765, J2534Baud.CAN_500K, J2534ConnectFlags.NONE);
-                UpdateStatus($"Connected to {deviceInfo.Name}");
-                MessageBox.Show($"Connected to {deviceInfo.Name}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                var deviceName = _cmbDevices.SelectedItem.ToString()!;
+                _device = _deviceManager.ConnectToDevice(deviceName);
+                _hsCanChannel = _device.OpenChannel(Protocol.ISO15765, BaudRates.HS_CAN_500K, ConnectFlags.NONE);
+                UpdateStatus($"Connected to {deviceName}");
+                MessageBox.Show($"Connected to {deviceName}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { ShowError("Connection Failed", "Could not connect", ex); }
         }
@@ -833,16 +780,15 @@ namespace PatsKillerPro
             {
                 UpdateStatus("Reading VIN...");
                 var uds = new UdsService(_hsCanChannel);
-                _currentVin = await Task.Run(() => uds.ReadVin(ModuleAddresses.BCM_TX));
-                if (string.IsNullOrEmpty(_currentVin)) _currentVin = await Task.Run(() => uds.ReadVin(ModuleAddresses.PCM_TX));
+                _currentVin = await Task.Run(() => uds.ReadVIN()) ?? "";
 
                 if (!string.IsNullOrEmpty(_currentVin))
                 {
                     _lblVin.Text = $"VIN: {_currentVin}";
                     _lblVin.ForeColor = _colorSuccess;
                     UpdateStatus("Reading outcode...");
-                    _currentOutcode = await Task.Run(() => uds.ReadOutcode(ModuleAddresses.BCM_TX));
-                    _txtOutcode.Text = _currentOutcode;
+                    var outcode = await Task.Run(() => uds.ReadOutcode());
+                    _txtOutcode.Text = outcode;
                     UpdateStatus($"Vehicle: {_currentVin}");
                 }
                 else
@@ -920,15 +866,13 @@ namespace PatsKillerPro
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_ESCL_INIT, "Initialize ESCL")) return;
-            var incode = _txtIncode.Text.Trim();
-            if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             try
             {
                 UpdateStatus("Initializing ESCL...");
                 var uds = new UdsService(_hsCanChannel);
                 var pats = new PatsOperations(uds);
-                await Task.Run(() => pats.InitializeEscl(incode));
+                await Task.Run(() => pats.InitializeESCL());
                 MessageBox.Show("ESCL initialized!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 UpdateStatus("ESCL done");
             }
@@ -938,16 +882,14 @@ namespace PatsKillerPro
         private async void BtnDisableBcm_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            var incode = _txtIncode.Text.Trim();
-            if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             try
             {
                 UpdateStatus("Disabling BCM security...");
                 var uds = new UdsService(_hsCanChannel);
                 var pats = new PatsOperations(uds);
-                await Task.Run(() => pats.DisableBcmSecurity(incode));
-                MessageBox.Show("BCM security disabled for All Keys Lost programming.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                await Task.Run(() => pats.DisableBcmSecurity());
+                MessageBox.Show("BCM security disabled.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 UpdateStatus("BCM disabled");
             }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
@@ -960,35 +902,72 @@ namespace PatsKillerPro
         private async void BtnClearDtc_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try { UpdateStatus("Clearing DTCs..."); var uds = new UdsService(_hsCanChannel); await Task.Run(() => uds.ClearAllDtcs()); MessageBox.Show("DTCs cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); UpdateStatus("DTCs cleared"); }
+            try
+            {
+                UpdateStatus("Clearing DTCs...");
+                var uds = new UdsService(_hsCanChannel);
+                await Task.Run(() => uds.ClearDTCs());
+                MessageBox.Show("DTCs cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("DTCs cleared");
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
         private async void BtnClearKam_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try { UpdateStatus("Clearing KAM..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearKam()); MessageBox.Show("KAM cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); UpdateStatus("KAM cleared"); }
+            try
+            {
+                UpdateStatus("Clearing KAM...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                await Task.Run(() => pats.ClearKAM());
+                MessageBox.Show("KAM cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("KAM cleared");
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
         private async void BtnVehicleReset_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try { UpdateStatus("Resetting..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.VehicleReset()); MessageBox.Show("Reset complete!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); UpdateStatus("Reset done"); }
+            try
+            {
+                UpdateStatus("Resetting...");
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                await Task.Run(() => pats.VehicleReset());
+                MessageBox.Show("Reset complete!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("Reset done");
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
         private async void BtnReadKeysCount_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try { UpdateStatus("Reading keys..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); var count = await Task.Run(() => pats.ReadKeysCount()); MessageBox.Show($"Keys: {count}", "Count", MessageBoxButtons.OK, MessageBoxIcon.Information); UpdateStatus($"Keys: {count}"); }
+            try
+            {
+                UpdateStatus("Reading keys...");
+                var uds = new UdsService(_hsCanChannel);
+                var count = await Task.Run(() => uds.ReadKeysCount());
+                MessageBox.Show($"Keys programmed: {count}", "Count", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus($"Keys: {count}");
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
         private async void BtnReadModuleInfo_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try { UpdateStatus("Reading modules..."); var uds = new UdsService(_hsCanChannel); var info = await Task.Run(() => uds.ReadAllModuleInfo()); MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information); UpdateStatus("Done"); }
+            try
+            {
+                UpdateStatus("Reading modules...");
+                var uds = new UdsService(_hsCanChannel);
+                var info = await Task.Run(() => uds.ReadAllModuleInfo());
+                MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateStatus("Done");
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
@@ -997,11 +976,17 @@ namespace PatsKillerPro
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             var choice = MessageBox.Show("YES = Read, NO = Write", "Keypad Code", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (choice == DialogResult.Cancel) return;
-            
+
             if (choice == DialogResult.Yes)
             {
                 if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_KEYPAD_READ, "Read Keypad")) return;
-                try { var incode = _txtIncode.Text.Trim(); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); var code = await Task.Run(() => pats.ReadKeypadCode(incode)); MessageBox.Show($"Code: {code}", "Keypad", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+                try
+                {
+                    var uds = new UdsService(_hsCanChannel);
+                    var pats = new PatsOperations(uds);
+                    var code = await Task.Run(() => pats.ReadKeypadCode());
+                    MessageBox.Show($"Code: {code}", "Keypad", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
                 catch (Exception ex) { ShowError("Failed", "Failed", ex); }
             }
             else
@@ -1009,7 +994,13 @@ namespace PatsKillerPro
                 var newCode = Microsoft.VisualBasic.Interaction.InputBox("Enter 5-digit code (1-9):", "Write Keypad", "");
                 if (string.IsNullOrEmpty(newCode) || newCode.Length != 5) return;
                 if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_KEYPAD_WRITE, "Write Keypad")) return;
-                try { var incode = _txtIncode.Text.Trim(); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.WriteKeypadCode(incode, newCode)); MessageBox.Show($"Code set: {newCode}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+                try
+                {
+                    var uds = new UdsService(_hsCanChannel);
+                    var pats = new PatsOperations(uds);
+                    await Task.Run(() => pats.WriteKeypadCode(newCode));
+                    MessageBox.Show($"Code set: {newCode}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
                 catch (Exception ex) { ShowError("Failed", "Failed", ex); }
             }
         }
@@ -1019,11 +1010,13 @@ namespace PatsKillerPro
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             try
             {
-                var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds);
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
                 var hasGateway = await Task.Run(() => pats.DetectGateway());
                 if (!hasGateway) { MessageBox.Show("No gateway (pre-2020 vehicle).", "Gateway", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_GATEWAY_UNLOCK, "Unlock Gateway")) return;
                 var incode = _txtIncode.Text.Trim();
+                if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
                 await Task.Run(() => pats.UnlockGateway(incode));
                 MessageBox.Show("Gateway unlocked!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -1034,7 +1027,13 @@ namespace PatsKillerPro
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_CLEAR_P160A, "Clear P160A")) return;
-            try { var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearP160A()); MessageBox.Show("P160A cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            try
+            {
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                await Task.Run(() => pats.ClearP160A());
+                MessageBox.Show("P160A cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
@@ -1042,7 +1041,13 @@ namespace PatsKillerPro
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_CLEAR_B10A2, "Clear B10A2")) return;
-            try { var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearB10A2()); MessageBox.Show("B10A2 cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            try
+            {
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                await Task.Run(() => pats.ClearB10A2());
+                MessageBox.Show("B10A2 cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
@@ -1050,7 +1055,13 @@ namespace PatsKillerPro
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_CLEAR_CRUSH, "Clear Crush Event")) return;
-            try { var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearCrushEvent()); MessageBox.Show("Crush cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            try
+            {
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                await Task.Run(() => pats.ClearCrushEvent());
+                MessageBox.Show("Crush cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
@@ -1059,7 +1070,7 @@ namespace PatsKillerPro
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (MessageBox.Show("⚠️ This resets ALL BCM settings!\nScanner required after!\n\nContinue?", "⚠️ DANGER", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_BCM_FACTORY, "BCM Factory Defaults")) return;
-            
+
             var incode1 = Microsoft.VisualBasic.Interaction.InputBox("Incode 1:", "BCM Factory", _txtIncode.Text);
             if (string.IsNullOrEmpty(incode1)) return;
             var incode2 = Microsoft.VisualBasic.Interaction.InputBox("Incode 2:", "BCM Factory", "");
@@ -1067,7 +1078,13 @@ namespace PatsKillerPro
             var incode3 = Microsoft.VisualBasic.Interaction.InputBox("Incode 3 (optional):", "BCM Factory", "");
             var incodes = string.IsNullOrEmpty(incode3) ? new[] { incode1, incode2 } : new[] { incode1, incode2, incode3 };
 
-            try { var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.BcmFactoryDefaults(incodes)); MessageBox.Show("BCM reset!\nScanner adaptation required!", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            try
+            {
+                var uds = new UdsService(_hsCanChannel);
+                var pats = new PatsOperations(uds);
+                await Task.Run(() => pats.BcmFactoryDefaults(incodes));
+                MessageBox.Show("BCM reset!\nScanner adaptation required!", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
@@ -1075,7 +1092,13 @@ namespace PatsKillerPro
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            try { _hsCanChannel?.Dispose(); _device?.Close(); } catch { }
+            try
+            {
+                _hsCanChannel?.Dispose();
+                _device?.Dispose();
+                _deviceManager?.Dispose();
+            }
+            catch { }
             base.OnFormClosing(e);
         }
     }
