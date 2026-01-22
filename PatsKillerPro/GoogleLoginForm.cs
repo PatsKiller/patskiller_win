@@ -31,7 +31,8 @@ namespace PatsKillerPro
 
         // Callback URL scheme
         private const string CALLBACK_SCHEME = "patskiller://";
-        private const string LOGIN_URL = "https://patskiller.com/desktop-login?mode=embedded";
+        // Discrete desktop login page (no header/footer, not crawlable)
+        private const string LOGIN_URL = "https://patskiller.com/api/desktop-auth?mode=embedded";
 
         public GoogleLoginForm()
         {
@@ -42,10 +43,10 @@ namespace PatsKillerPro
         private void InitializeComponent()
         {
             this.Text = "Sign in with Google - PatsKiller Pro";
-            this.Size = new Size(500, 650);
-            this.MinimumSize = new Size(450, 550);
+            this.Size = new Size(700, 750);
+            this.MinimumSize = new Size(600, 650);
             this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.BackColor = _colorBackground;
