@@ -31,7 +31,7 @@ namespace PatsKillerPro
 
         // Callback URL scheme
         private const string CALLBACK_SCHEME = "patskiller://";
-        // Discrete desktop login page (no header/footer, not crawlable)
+        // Discrete desktop login page
         private const string LOGIN_URL = "https://patskiller.com/api/desktop-auth?mode=embedded";
 
         public GoogleLoginForm()
@@ -43,11 +43,11 @@ namespace PatsKillerPro
         private void InitializeComponent()
         {
             this.Text = "Sign in with Google - PatsKiller Pro";
-            this.Size = new Size(700, 750);
-            this.MinimumSize = new Size(600, 650);
+            this.Size = new Size(900, 850);
+            this.MinimumSize = new Size(800, 750);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.Sizable;
-            this.MaximizeBox = false;
+            this.MaximizeBox = true;
             this.MinimizeBox = false;
             this.BackColor = _colorBackground;
             this.ShowInTaskbar = false;
@@ -160,22 +160,56 @@ namespace PatsKillerPro
 
                 // Configure WebView2
                 _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
                 _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
+                _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+                _webView.CoreWebView2.Settings.IsWebMessageEnabled = true;
+                _webView.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = true;
+                
+                // IMPORTANT: Allow popups for OAuth
+                _webView.CoreWebView2.Settings.AreHostObjectsAllowed = true;
+                
+                // Set User-Agent to look like regular Edge browser (helps bypass Google's WebView detection)
+                _webView.CoreWebView2.Settings.UserAgent = 
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0";
 
                 // Handle navigation - intercept callback URL
                 _webView.CoreWebView2.NavigationStarting += WebView_NavigationStarting;
 
+                // Handle new window requests (for OAuth popups)
+                _webView.CoreWebView2.NewWindowRequested += (s, e) =>
+                {
+                    Logger.Info($"New window requested: {e.Uri}");
+                    // Navigate in same window instead of opening popup
+                    e.Handled = true;
+                    _webView.CoreWebView2.Navigate(e.Uri);
+                };
+
                 // Handle navigation completed
                 _webView.CoreWebView2.NavigationCompleted += (s, e) =>
                 {
+                    var url = _webView.CoreWebView2.Source;
+                    Logger.Info($"Navigation completed: {url}, Success: {e.IsSuccess}");
+                    
                     if (e.IsSuccess)
                     {
-                        _lblStatus.Text = "Sign in with your Google account";
+                        if (url.Contains("accounts.google.com"))
+                        {
+                            _lblStatus.Text = "Sign in with your Google account";
+                        }
+                        else if (url.Contains("patskiller.com"))
+                        {
+                            _lblStatus.Text = "Processing...";
+                        }
+                        else
+                        {
+                            _lblStatus.Text = "Loading...";
+                        }
                     }
                     else
                     {
-                        _lblStatus.Text = "Failed to load. Check your connection.";
+                        _lblStatus.Text = $"Failed to load. Error: {e.WebErrorStatus}";
+                        Logger.Warning($"Navigation failed: {e.WebErrorStatus}");
                     }
                 };
 
