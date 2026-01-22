@@ -769,114 +769,47 @@ namespace PatsKillerPro
             }
         }
 
-        private System.Net.HttpListener? _oauthListener;
-        private const int OAUTH_PORT = 8765;
-
         private async void BtnGoogleLogin_Click(object? sender, EventArgs e)
         {
             try
             {
-                // Start localhost HTTP server to receive callback
-                _oauthListener = new System.Net.HttpListener();
-                _oauthListener.Prefixes.Add($"http://localhost:{OAUTH_PORT}/");
-                _oauthListener.Start();
-
-                UpdateStatus("Waiting for Google login...");
-
-                // Open browser to patskiller.com desktop login page
-                var callbackUrl = $"http://localhost:{OAUTH_PORT}";
-                var loginUrl = $"https://patskiller.com/desktop-login?callback={Uri.EscapeDataString(callbackUrl)}";
-                OpenUrl(loginUrl);
-
-                // Wait for callback (with timeout)
-                var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(5));
+                UpdateStatus("Opening Google login...");
                 
-                try
+                // Show embedded WebView2 login dialog
+                using var loginForm = new GoogleLoginForm();
+                var result = loginForm.ShowDialog(this);
+                
+                if (result == DialogResult.OK && !string.IsNullOrEmpty(loginForm.AuthToken))
                 {
-                    var context = await _oauthListener.GetContextAsync().WaitAsync(cts.Token);
+                    // Success! Save credentials
+                    _authToken = loginForm.AuthToken;
+                    _userEmail = loginForm.UserEmail ?? "Google User";
+                    _tokenBalance = 10; // Will be fetched from API
                     
-                    // Parse the callback query string manually
-                    var query = context.Request.Url?.Query?.TrimStart('?') ?? "";
-                    var queryParams = new System.Collections.Generic.Dictionary<string, string>();
-                    foreach (var param in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        var parts = param.Split('=', 2);
-                        if (parts.Length == 2)
-                            queryParams[Uri.UnescapeDataString(parts[0])] = Uri.UnescapeDataString(parts[1]);
-                    }
-                    queryParams.TryGetValue("token", out var token);
-                    queryParams.TryGetValue("email", out var email);
-
-                    // Send success page to browser
-                    var responseHtml = @"
-                        <html>
-                        <head>
-                            <style>
-                                body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #fff; 
-                                       display: flex; justify-content: center; align-items: center; 
-                                       height: 100vh; margin: 0; }
-                                .container { text-align: center; }
-                                .checkmark { font-size: 64px; color: #2ecc71; }
-                                h1 { margin: 20px 0 10px; }
-                                p { color: #888; }
-                            </style>
-                        </head>
-                        <body>
-                            <div class='container'>
-                                <div class='checkmark'>✓</div>
-                                <h1>Login Successful!</h1>
-                                <p>You can close this window and return to PatsKiller Pro.</p>
-                            </div>
-                        </body>
-                        </html>";
+                    Settings.SetString("auth_token", _authToken);
+                    Settings.SetString("email", _userEmail);
+                    Settings.Save();
                     
-                    var buffer = System.Text.Encoding.UTF8.GetBytes(responseHtml);
-                    context.Response.ContentType = "text/html";
-                    context.Response.ContentLength64 = buffer.Length;
-                    await context.Response.OutputStream.WriteAsync(buffer);
-                    context.Response.Close();
-
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        // Success! Save credentials
-                        _authToken = token;
-                        _userEmail = email ?? "Google User";
-                        _tokenBalance = 10; // Will be fetched from API
-                        
-                        Settings.SetString("auth_token", _authToken);
-                        Settings.SetString("email", _userEmail);
-                        Settings.Save();
-                        
-                        _lblTokens.Text = $"Tokens: {_tokenBalance}";
-                        _lblUser.Text = _userEmail;
-                        ShowMainPanel();
-                        UpdateStatus($"Logged in as {_userEmail}");
-                        
-                        // Fetch actual token balance
-                        _ = FetchTokenBalanceAsync();
-                    }
-                    else
-                    {
-                        MessageBox.Show("Login failed - no token received.", "Login Error", 
-                            MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        UpdateStatus("Login failed");
-                    }
+                    _lblTokens.Text = $"Tokens: {_tokenBalance}";
+                    _lblUser.Text = _userEmail;
+                    ShowMainPanel();
+                    UpdateStatus($"Logged in as {_userEmail}");
+                    
+                    // Fetch actual token balance
+                    _ = FetchTokenBalanceAsync();
                 }
-                catch (OperationCanceledException)
+                else if (result == DialogResult.Cancel)
                 {
-                    MessageBox.Show("Login timed out. Please try again.", "Timeout", 
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    UpdateStatus("Login timed out");
+                    UpdateStatus("Login cancelled");
+                }
+                else
+                {
+                    UpdateStatus("Login failed");
                 }
             }
             catch (Exception ex)
             {
                 ShowError("Google Login Error", "Failed to start login process", ex);
-            }
-            finally
-            {
-                try { _oauthListener?.Stop(); } catch { }
-                _oauthListener = null;
             }
         }
 

@@ -39,6 +39,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2420.47" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="Resources\app.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
