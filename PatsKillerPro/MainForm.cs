@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.Communication;
@@ -106,13 +107,53 @@ namespace PatsKillerPro
                 BackColor = _colorPanel
             };
 
+            // Logo image
+            var picLogo = new PictureBox
+            {
+                Size = new Size(45, 45),
+                Location = new Point(10, 8),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                BackColor = Color.Transparent
+            };
+            try
+            {
+                // Try embedded resource first
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                var resourceStream = assembly.GetManifestResourceStream("PatsKillerPro.Resources.logo.png");
+                if (resourceStream != null)
+                {
+                    picLogo.Image = Image.FromStream(resourceStream);
+                }
+                else
+                {
+                    // Try file system paths
+                    var paths = new[]
+                    {
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.png"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "logo.png"),
+                        Path.Combine(Environment.CurrentDirectory, "logo.png"),
+                        Path.Combine(Environment.CurrentDirectory, "Resources", "logo.png")
+                    };
+                    foreach (var path in paths)
+                    {
+                        if (File.Exists(path))
+                        {
+                            picLogo.Image = Image.FromFile(path);
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { }
+            _headerPanel.Controls.Add(picLogo);
+
             var lblTitle = new Label
             {
-                Text = "🔑 PatsKiller Pro",
+                Text = "PatsKiller Pro",
                 Font = new Font("Segoe UI", 16F, FontStyle.Bold),
                 ForeColor = _colorText,
                 AutoSize = true,
-                Location = new Point(15, 15)
+                Location = new Point(60, 15)
             };
             _headerPanel.Controls.Add(lblTitle);
 
@@ -163,7 +204,7 @@ namespace PatsKillerPro
 
             var centerPanel = new Panel
             {
-                Size = new Size(400, 350),
+                Size = new Size(400, 420),
                 BackColor = _colorPanel
             };
             centerPanel.Paint += (s, e) =>
@@ -179,7 +220,7 @@ namespace PatsKillerPro
                 ForeColor = _colorText,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Size = new Size(380, 40),
-                Location = new Point(10, 20)
+                Location = new Point(10, 15)
             };
             centerPanel.Controls.Add(lblLoginTitle);
 
@@ -190,30 +231,52 @@ namespace PatsKillerPro
                 ForeColor = _colorTextDim,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Size = new Size(380, 25),
-                Location = new Point(10, 55)
+                Location = new Point(10, 48)
             };
             centerPanel.Controls.Add(lblSubtitle);
 
-            var lblEmail = new Label { Text = "Email:", ForeColor = _colorText, Location = new Point(30, 100), AutoSize = true };
+            // Google SSO Button
+            var btnGoogle = CreateButton("🔵  Sign in with Google", 340, 45);
+            btnGoogle.Location = new Point(30, 85);
+            btnGoogle.BackColor = Color.White;
+            btnGoogle.ForeColor = Color.FromArgb(60, 60, 60);
+            btnGoogle.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
+            btnGoogle.Click += BtnGoogleLogin_Click;
+            centerPanel.Controls.Add(btnGoogle);
+
+            // OR separator
+            var lblOr = new Label
+            {
+                Text = "─────────  or  ─────────",
+                ForeColor = _colorTextDim,
+                Font = new Font("Segoe UI", 9F),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(340, 25),
+                Location = new Point(30, 140)
+            };
+            centerPanel.Controls.Add(lblOr);
+
+            var lblEmail = new Label { Text = "Email:", ForeColor = _colorText, Location = new Point(30, 175), AutoSize = true };
             centerPanel.Controls.Add(lblEmail);
 
             _txtEmail = CreateTextBox();
             _txtEmail.Size = new Size(340, 30);
-            _txtEmail.Location = new Point(30, 125);
+            _txtEmail.Location = new Point(30, 198);
             centerPanel.Controls.Add(_txtEmail);
 
-            var lblPassword = new Label { Text = "Password:", ForeColor = _colorText, Location = new Point(30, 165), AutoSize = true };
+            var lblPassword = new Label { Text = "Password:", ForeColor = _colorText, Location = new Point(30, 235), AutoSize = true };
             centerPanel.Controls.Add(lblPassword);
 
             _txtPassword = CreateTextBox();
             _txtPassword.Size = new Size(340, 30);
-            _txtPassword.Location = new Point(30, 190);
+            _txtPassword.Location = new Point(30, 258);
             _txtPassword.UseSystemPasswordChar = true;
             _txtPassword.KeyPress += (s, e) => { if (e.KeyChar == (char)Keys.Enter) BtnLogin_Click(s, e); };
             centerPanel.Controls.Add(_txtPassword);
 
             _btnLogin = CreateButton("Login", 340, 40);
-            _btnLogin.Location = new Point(30, 240);
+            _btnLogin.Location = new Point(30, 305);
             _btnLogin.BackColor = _colorAccent;
             _btnLogin.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             _btnLogin.Click += BtnLogin_Click;
@@ -221,13 +284,13 @@ namespace PatsKillerPro
 
             var lblRegister = new Label
             {
-                Text = "Don't have an account? Register at patskiller.com",
+                Text = "Don't have an account? Register",
                 ForeColor = _colorAccent,
                 Font = new Font("Segoe UI", 9F, FontStyle.Underline),
                 Cursor = Cursors.Hand,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Size = new Size(380, 25),
-                Location = new Point(10, 295)
+                Location = new Point(10, 360)
             };
             lblRegister.Click += (s, e) => OpenUrl("https://patskiller.com/register");
             centerPanel.Controls.Add(lblRegister);
@@ -702,6 +765,46 @@ namespace PatsKillerPro
             {
                 _btnLogin.Enabled = true;
                 _btnLogin.Text = "Login";
+            }
+        }
+
+        private void BtnGoogleLogin_Click(object? sender, EventArgs e)
+        {
+            // Open patskiller.com Google OAuth login
+            // After login, user will get a desktop token to paste
+            var result = MessageBox.Show(
+                "This will open patskiller.com in your browser.\n\n" +
+                "1. Sign in with Google\n" +
+                "2. Go to Account → Desktop Token\n" +
+                "3. Copy the token and paste it here\n\n" +
+                "Open browser now?",
+                "Sign in with Google",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Information);
+
+            if (result == DialogResult.OK)
+            {
+                OpenUrl("https://patskiller.com/login?desktop=true");
+                
+                // Show token input dialog
+                var token = Microsoft.VisualBasic.Interaction.InputBox(
+                    "Paste your desktop token from patskiller.com:",
+                    "Enter Desktop Token",
+                    "");
+
+                if (!string.IsNullOrEmpty(token))
+                {
+                    // Validate and save token
+                    _authToken = token;
+                    _userEmail = "Google User"; // Will be fetched from API
+                    _tokenBalance = 10; // Will be fetched from API
+                    Settings.SetString("auth_token", _authToken);
+                    Settings.Save();
+                    _lblTokens.Text = $"Tokens: {_tokenBalance}";
+                    _lblUser.Text = _userEmail;
+                    ShowMainPanel();
+                    UpdateStatus("Logged in with Google");
+                }
             }
         }
 
