@@ -10,16 +10,16 @@ namespace PatsKillerPro
 {
     /// <summary>
     /// Embedded Google OAuth login form using WebView2
-    /// Shows patskiller.com/desktop-login inside the app
     /// </summary>
     public class GoogleLoginForm : Form
     {
-        private WebView2 _webView = null!;
+        private WebView2? _webView;
         private Label _lblStatus = null!;
         private Button _btnCancel = null!;
-        private Panel _loadingPanel = null!;
+        private Panel _contentPanel = null!;
+        private Label _lblLoading = null!;
 
-        // Dark theme colors (matching MainForm)
+        // Dark theme colors
         private readonly Color _colorBackground = Color.FromArgb(30, 30, 30);
         private readonly Color _colorPanel = Color.FromArgb(45, 45, 48);
         private readonly Color _colorText = Color.FromArgb(220, 220, 220);
@@ -29,22 +29,26 @@ namespace PatsKillerPro
         public string? AuthToken { get; private set; }
         public string? UserEmail { get; private set; }
 
-        // Callback URL scheme
-        private const string CALLBACK_SCHEME = "patskiller://";
-        // Discrete desktop login page
+        // Login URL - using the discrete API endpoint
         private const string LOGIN_URL = "https://patskiller.com/api/desktop-auth?mode=embedded";
 
         public GoogleLoginForm()
         {
             InitializeComponent();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            // Initialize WebView2 after form is shown
             _ = InitializeWebViewAsync();
         }
 
         private void InitializeComponent()
         {
             this.Text = "Sign in with Google - PatsKiller Pro";
-            this.Size = new Size(900, 850);
-            this.MinimumSize = new Size(800, 750);
+            this.Size = new Size(950, 850);
+            this.MinimumSize = new Size(800, 700);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;
@@ -55,51 +59,24 @@ namespace PatsKillerPro
             // Dark title bar
             try
             {
-                var attribute = 20;
+                var attribute = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
                 var value = 1;
                 DwmSetWindowAttribute(this.Handle, attribute, ref value, sizeof(int));
             }
             catch { }
 
-            // Loading panel (shown while WebView2 initializes)
-            _loadingPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = _colorBackground
-            };
-
-            var lblLoading = new Label
-            {
-                Text = "Loading...",
-                ForeColor = _colorText,
-                Font = new Font("Segoe UI", 12F),
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Fill
-            };
-            _loadingPanel.Controls.Add(lblLoading);
-            this.Controls.Add(_loadingPanel);
-
-            // WebView2 control
-            _webView = new WebView2
-            {
-                Dock = DockStyle.Fill,
-                Visible = false
-            };
-            this.Controls.Add(_webView);
-
-            // Bottom panel with status and cancel button
+            // Bottom panel FIRST (so it docks properly)
             var bottomPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
                 Height = 50,
                 BackColor = _colorPanel,
-                Padding = new Padding(10, 10, 10, 10)
+                Padding = new Padding(10)
             };
 
             _lblStatus = new Label
             {
-                Text = "Connecting to PatsKiller.com...",
+                Text = "Initializing...",
                 ForeColor = _colorTextDim,
                 Font = new Font("Segoe UI", 9F),
                 AutoSize = true,
@@ -114,23 +91,43 @@ namespace PatsKillerPro
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(60, 60, 65),
                 ForeColor = _colorText,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Right
             };
             _btnCancel.FlatAppearance.BorderColor = Color.FromArgb(80, 80, 85);
+            _btnCancel.Location = new Point(bottomPanel.Width - _btnCancel.Width - 10, 10);
             _btnCancel.Click += (s, e) =>
             {
                 this.DialogResult = DialogResult.Cancel;
                 this.Close();
             };
             bottomPanel.Controls.Add(_btnCancel);
-
-            // Position cancel button on right
             bottomPanel.Resize += (s, e) =>
             {
                 _btnCancel.Location = new Point(bottomPanel.Width - _btnCancel.Width - 10, 10);
             };
 
             this.Controls.Add(bottomPanel);
+
+            // Content panel that fills remaining space
+            _contentPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = _colorBackground
+            };
+            this.Controls.Add(_contentPanel);
+
+            // Loading label (centered in content panel)
+            _lblLoading = new Label
+            {
+                Text = "Loading...",
+                ForeColor = _colorText,
+                Font = new Font("Segoe UI", 14F),
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill
+            };
+            _contentPanel.Controls.Add(_lblLoading);
 
             // Handle form closing
             this.FormClosing += (s, e) =>
@@ -150,39 +147,54 @@ namespace PatsKillerPro
         {
             try
             {
-                // Initialize WebView2 with user data folder in AppData
+                _lblLoading.Text = "Initializing browser...";
+                _lblStatus.Text = "Please wait...";
+
+                // Create WebView2 user data folder
                 var userDataFolder = System.IO.Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "PatsKiller Pro", "WebView2");
+                
+                System.IO.Directory.CreateDirectory(userDataFolder);
 
+                // Create environment
+                _lblLoading.Text = "Starting browser engine...";
                 var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+
+                // Create WebView2 control
+                _webView = new WebView2
+                {
+                    Dock = DockStyle.Fill
+                };
+
+                // Initialize WebView2
+                _lblLoading.Text = "Connecting...";
                 await _webView.EnsureCoreWebView2Async(env);
 
-                // Configure WebView2
-                _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
-                _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
-                _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
-                _webView.CoreWebView2.Settings.IsWebMessageEnabled = true;
-                _webView.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = true;
+                // Configure settings
+                var settings = _webView.CoreWebView2.Settings;
+                settings.IsStatusBarEnabled = false;
+                settings.AreDefaultContextMenusEnabled = true;
+                settings.IsZoomControlEnabled = false;
+                settings.AreDevToolsEnabled = true;
+                settings.IsWebMessageEnabled = true;
+                settings.AreDefaultScriptDialogsEnabled = true;
+                settings.AreHostObjectsAllowed = true;
                 
-                // IMPORTANT: Allow popups for OAuth
-                _webView.CoreWebView2.Settings.AreHostObjectsAllowed = true;
-                
-                // Set User-Agent to look like regular Edge browser (helps bypass Google's WebView detection)
-                _webView.CoreWebView2.Settings.UserAgent = 
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0";
+                // Important: Set User-Agent to look like regular browser
+                settings.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0";
 
-                // Handle navigation - intercept callback URL
-                _webView.CoreWebView2.NavigationStarting += WebView_NavigationStarting;
-
-                // Handle new window requests (for OAuth popups)
-                _webView.CoreWebView2.NewWindowRequested += (s, e) =>
+                // Handle navigation starting
+                _webView.CoreWebView2.NavigationStarting += (s, e) =>
                 {
-                    Logger.Info($"New window requested: {e.Uri}");
-                    // Navigate in same window instead of opening popup
-                    e.Handled = true;
-                    _webView.CoreWebView2.Navigate(e.Uri);
+                    Logger.Info($"Navigating to: {e.Uri}");
+                    
+                    // Check for callback URL
+                    if (e.Uri.StartsWith("patskiller://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        e.Cancel = true;
+                        HandleCallback(e.Uri);
+                    }
                 };
 
                 // Handle navigation completed
@@ -208,33 +220,67 @@ namespace PatsKillerPro
                     }
                     else
                     {
-                        _lblStatus.Text = $"Failed to load. Error: {e.WebErrorStatus}";
+                        _lblStatus.Text = $"Error: {e.WebErrorStatus}";
                         Logger.Warning($"Navigation failed: {e.WebErrorStatus}");
                     }
                 };
 
-                // Show WebView, hide loading
-                _loadingPanel.Visible = false;
-                _webView.Visible = true;
-                _webView.BringToFront();
+                // Handle new window requests (OAuth popups)
+                _webView.CoreWebView2.NewWindowRequested += (s, e) =>
+                {
+                    Logger.Info($"Popup requested: {e.Uri}");
+                    e.Handled = true;
+                    _webView.CoreWebView2.Navigate(e.Uri);
+                };
+
+                // NOW add WebView to content panel (remove loading label first)
+                _contentPanel.Controls.Clear();
+                _contentPanel.Controls.Add(_webView);
+
+                // Force layout update
+                _contentPanel.PerformLayout();
+                _webView.Refresh();
 
                 // Navigate to login page
                 _lblStatus.Text = "Loading login page...";
+                Logger.Info($"Navigating to: {LOGIN_URL}");
                 _webView.CoreWebView2.Navigate(LOGIN_URL);
 
-                Logger.Info("WebView2 initialized, navigating to login page");
+            }
+            catch (WebView2RuntimeNotFoundException)
+            {
+                Logger.Error("WebView2 runtime not found");
+                _lblLoading.Text = "WebView2 Runtime not installed";
+                _lblStatus.Text = "Please install Microsoft Edge WebView2 Runtime";
+                
+                var result = MessageBox.Show(
+                    "Microsoft Edge WebView2 Runtime is required.\n\n" +
+                    "Would you like to download it now?",
+                    "WebView2 Required",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (result == DialogResult.Yes)
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "https://developer.microsoft.com/microsoft-edge/webview2/",
+                        UseShellExecute = true
+                    });
+                }
+
+                this.DialogResult = DialogResult.Abort;
+                this.Close();
             }
             catch (Exception ex)
             {
                 Logger.Error("Failed to initialize WebView2", ex);
-                _lblStatus.Text = "Browser component failed to load";
+                _lblLoading.Text = $"Error: {ex.Message}";
+                _lblStatus.Text = "Browser initialization failed";
                 
                 MessageBox.Show(
-                    "Could not initialize the login browser.\n\n" +
-                    "Please ensure Microsoft Edge WebView2 Runtime is installed.\n\n" +
-                    "You can download it from:\n" +
-                    "https://developer.microsoft.com/microsoft-edge/webview2/",
-                    "WebView2 Error",
+                    $"Could not initialize the browser:\n\n{ex.Message}",
+                    "Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
 
@@ -243,94 +289,53 @@ namespace PatsKillerPro
             }
         }
 
-        private void WebView_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+        private void HandleCallback(string url)
         {
-            var url = e.Uri;
-            Logger.Info($"WebView navigating to: {url}");
-
-            // Check if this is our callback URL
-            if (url.StartsWith(CALLBACK_SCHEME, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                // Cancel navigation - we'll handle this ourselves
-                e.Cancel = true;
-
-                // Parse the callback URL: patskiller://callback?token=XXX&email=YYY
-                try
+                Logger.Info($"Processing callback: {url}");
+                
+                // Parse: patskiller://callback?token=XXX&email=YYY
+                var uri = new Uri(url);
+                var query = uri.Query.TrimStart('?');
+                var queryParams = new System.Collections.Generic.Dictionary<string, string>();
+                
+                foreach (var param in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    var uri = new Uri(url);
-                    var query = uri.Query.TrimStart('?');
-                    var queryParams = new System.Collections.Generic.Dictionary<string, string>();
-                    
-                    foreach (var param in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                    var parts = param.Split('=', 2);
+                    if (parts.Length == 2)
                     {
-                        var parts = param.Split('=', 2);
-                        if (parts.Length == 2)
-                        {
-                            queryParams[Uri.UnescapeDataString(parts[0])] = Uri.UnescapeDataString(parts[1]);
-                        }
-                    }
-
-                    queryParams.TryGetValue("token", out var token);
-                    queryParams.TryGetValue("email", out var email);
-
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        AuthToken = token;
-                        UserEmail = email;
-                        Logger.Info($"Login successful for: {email}");
-
-                        this.DialogResult = DialogResult.OK;
-                        this.Close();
-                    }
-                    else
-                    {
-                        Logger.Warning("Callback received but no token found");
-                        _lblStatus.Text = "Login failed - no token received";
+                        queryParams[Uri.UnescapeDataString(parts[0])] = Uri.UnescapeDataString(parts[1]);
                     }
                 }
-                catch (Exception ex)
+
+                queryParams.TryGetValue("token", out var token);
+                queryParams.TryGetValue("email", out var email);
+
+                if (!string.IsNullOrEmpty(token))
                 {
-                    Logger.Error("Failed to parse callback URL", ex);
-                    _lblStatus.Text = "Login failed - invalid response";
+                    AuthToken = token;
+                    UserEmail = email;
+                    Logger.Info($"Login successful for: {email}");
+                    _lblStatus.Text = "Login successful!";
+
+                    // Close dialog with success
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        this.DialogResult = DialogResult.OK;
+                        this.Close();
+                    }));
+                }
+                else
+                {
+                    Logger.Warning("Callback received but no token");
+                    _lblStatus.Text = "Login failed - no token received";
                 }
             }
-            // Also check for localhost callback (fallback)
-            else if (url.Contains("localhost") && url.Contains("callback"))
+            catch (Exception ex)
             {
-                e.Cancel = true;
-                
-                try
-                {
-                    var uri = new Uri(url);
-                    var query = uri.Query.TrimStart('?');
-                    var queryParams = new System.Collections.Generic.Dictionary<string, string>();
-                    
-                    foreach (var param in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        var parts = param.Split('=', 2);
-                        if (parts.Length == 2)
-                        {
-                            queryParams[Uri.UnescapeDataString(parts[0])] = Uri.UnescapeDataString(parts[1]);
-                        }
-                    }
-
-                    queryParams.TryGetValue("token", out var token);
-                    queryParams.TryGetValue("email", out var email);
-
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        AuthToken = token;
-                        UserEmail = email;
-                        Logger.Info($"Login successful (localhost callback) for: {email}");
-
-                        this.DialogResult = DialogResult.OK;
-                        this.Close();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("Failed to parse localhost callback", ex);
-                }
+                Logger.Error("Failed to parse callback", ex);
+                _lblStatus.Text = "Login failed - invalid response";
             }
         }
     }
