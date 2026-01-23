@@ -51,22 +51,48 @@ namespace PatsKillerPro
 
         // Results
         public string? AuthToken { get; private set; }
+        public string? RefreshToken { get; private set; }
         public string? UserEmail { get; private set; }
 
-        // API Configuration - UPDATE THESE WITH YOUR SUPABASE URL
+        // API Configuration - FIXED: Correct Supabase URL and endpoints
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
         private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0.iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
-        private const string AUTH_PAGE_URL = "https://patskiller.com/auth?session=";
+        
+        // FIXED: Correct auth page URL (was /auth, now /desktop-auth)
+        private const string AUTH_PAGE_URL = "https://patskiller.com/desktop-auth?session=";
 
         // Polling
         private CancellationTokenSource? _cts;
         private string? _currentSessionCode;
         private readonly HttpClient _httpClient = new HttpClient();
+        private readonly string _machineId;
 
         public GoogleLoginForm()
         {
+            // Generate a machine ID for this device
+            _machineId = GetMachineId();
+            
             InitializeComponent();
             ShowLoginState();
+        }
+
+        /// <summary>
+        /// Get unique machine identifier
+        /// </summary>
+        private static string GetMachineId()
+        {
+            try
+            {
+                // Use machine name + a hash for uniqueness
+                var data = Environment.MachineName + Environment.UserName;
+                using var sha = System.Security.Cryptography.SHA256.Create();
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
+                return Convert.ToBase64String(hash)[..16]; // First 16 chars
+            }
+            catch
+            {
+                return Environment.MachineName;
+            }
         }
 
         private void InitializeComponent()
@@ -761,13 +787,26 @@ namespace PatsKillerPro
         }
 
         // ============ API CALLS ============
+        
+        /// <summary>
+        /// FIXED: Creates a desktop auth session using the correct endpoint
+        /// - Uses create-desktop-auth-session (not create-auth-session)
+        /// - Uses apikey header (not Authorization: Bearer)
+        /// - Sends machineId in request body
+        /// </summary>
         private async Task<SessionInfo?> CreateSessionAsync()
         {
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/create-auth-session");
-                request.Headers.Add("Authorization", $"Bearer {SUPABASE_ANON_KEY}");
-                request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+                // FIXED: Correct endpoint name
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/create-desktop-auth-session");
+                
+                // FIXED: Use apikey header instead of Authorization: Bearer
+                request.Headers.Add("apikey", SUPABASE_ANON_KEY);
+                
+                // FIXED: Send machineId in the request body
+                var body = JsonSerializer.Serialize(new { machineId = _machineId });
+                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
@@ -775,12 +814,15 @@ namespace PatsKillerPro
                 Logger.Info($"CreateSession response: {response.StatusCode} - {json}");
 
                 if (!response.IsSuccessStatusCode)
+                {
+                    Logger.Error($"CreateSession failed: {response.StatusCode} - {json}");
                     return null;
+                }
 
                 var doc = JsonDocument.Parse(json);
                 return new SessionInfo
                 {
-                    SessionId = doc.RootElement.GetProperty("sessionId").GetString() ?? "",
+                    SessionId = "", // Not returned by new API
                     SessionCode = doc.RootElement.GetProperty("sessionCode").GetString() ?? "",
                     ExpiresAt = doc.RootElement.GetProperty("expiresAt").GetString() ?? ""
                 };
@@ -808,13 +850,14 @@ namespace PatsKillerPro
                     if (result.Status == "complete" && !string.IsNullOrEmpty(result.Token))
                     {
                         AuthToken = result.Token;
+                        RefreshToken = result.RefreshToken;
                         UserEmail = result.Email;
                         Logger.Info($"Login successful: {result.Email}");
 
                         this.BeginInvoke(new Action(() => ShowSuccessState(result.Email ?? "User")));
                         return;
                     }
-                    else if (result.Status == "expired")
+                    else if (result.Status == "expired" || result.Status == "invalid")
                     {
                         this.BeginInvoke(new Action(() => ShowErrorState("Session expired.\nPlease try again.")));
                         return;
@@ -832,18 +875,38 @@ namespace PatsKillerPro
             }
         }
 
+        /// <summary>
+        /// FIXED: Checks the desktop auth session using the correct endpoint
+        /// - Uses check-desktop-auth-session (not check-auth-session)
+        /// - Uses POST method (not GET)
+        /// - Uses apikey header (not Authorization: Bearer)
+        /// - Sends sessionCode and machineId in request body
+        /// - Reads accessToken (not token) from response
+        /// </summary>
         private async Task<SessionResult?> CheckSessionAsync(string sessionCode)
         {
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/check-auth-session?code={sessionCode}");
-                request.Headers.Add("Authorization", $"Bearer {SUPABASE_ANON_KEY}");
+                // FIXED: Correct endpoint name and use POST method
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/check-desktop-auth-session");
+                
+                // FIXED: Use apikey header instead of Authorization: Bearer
+                request.Headers.Add("apikey", SUPABASE_ANON_KEY);
+                
+                // FIXED: Send sessionCode and machineId in request body (POST, not GET query params)
+                var body = JsonSerializer.Serialize(new { sessionCode = sessionCode, machineId = _machineId });
+                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
+                Logger.Debug($"CheckSession response: {response.StatusCode} - {json}");
+
                 if (!response.IsSuccessStatusCode)
+                {
+                    Logger.Warning($"CheckSession failed: {response.StatusCode} - {json}");
                     return null;
+                }
 
                 var doc = JsonDocument.Parse(json);
                 var status = doc.RootElement.GetProperty("status").GetString() ?? "";
@@ -852,7 +915,9 @@ namespace PatsKillerPro
 
                 if (status == "complete")
                 {
-                    result.Token = doc.RootElement.TryGetProperty("token", out var t) ? t.GetString() : null;
+                    // FIXED: The API returns "accessToken", not "token"
+                    result.Token = doc.RootElement.TryGetProperty("accessToken", out var t) ? t.GetString() : null;
+                    result.RefreshToken = doc.RootElement.TryGetProperty("refreshToken", out var r) ? r.GetString() : null;
                     result.Email = doc.RootElement.TryGetProperty("email", out var e) ? e.GetString() : null;
                 }
 
@@ -960,6 +1025,7 @@ namespace PatsKillerPro
         {
             public string Status { get; set; } = "";
             public string? Token { get; set; }
+            public string? RefreshToken { get; set; }
             public string? Email { get; set; }
         }
     }
