@@ -362,7 +362,7 @@ namespace PatsKillerPro
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorGoogleBtn,
                 ForeColor = Color.FromArgb(60, 60, 60),
-                Font = new Font("Segoe UI", 11F, FontStyle.SemiBold),
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 Cursor = Cursors.Hand,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ImageAlign = ContentAlignment.MiddleLeft
@@ -458,7 +458,7 @@ namespace PatsKillerPro
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorRed,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F, FontStyle.SemiBold),
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
             btnSignIn.FlatAppearance.BorderSize = 0;
@@ -638,7 +638,7 @@ namespace PatsKillerPro
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorInput,
                 ForeColor = _colorText,
-                Font = new Font("Segoe UI", 10F, FontStyle.SemiBold),
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
             btnReopen.FlatAppearance.BorderColor = _colorBorder;
