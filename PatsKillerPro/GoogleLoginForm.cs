@@ -820,11 +820,23 @@ namespace PatsKillerPro
                 }
 
                 var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                
+                // Use TryGetProperty for safer parsing - API returns: {"ok":true,"sessionCode":"XXX","expiresAt":"..."}
+                var sessionCode = root.TryGetProperty("sessionCode", out var sc) ? sc.GetString() ?? "" : "";
+                var expiresAt = root.TryGetProperty("expiresAt", out var ea) ? ea.GetString() ?? "" : "";
+                
+                if (string.IsNullOrEmpty(sessionCode))
+                {
+                    Logger.Error($"CreateSession: No sessionCode in response: {json}");
+                    return null;
+                }
+                
                 return new SessionInfo
                 {
                     SessionId = "", // Not returned by new API
-                    SessionCode = doc.RootElement.GetProperty("sessionCode").GetString() ?? "",
-                    ExpiresAt = doc.RootElement.GetProperty("expiresAt").GetString() ?? ""
+                    SessionCode = sessionCode,
+                    ExpiresAt = expiresAt
                 };
             }
             catch (Exception ex)
