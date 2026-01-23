@@ -12,8 +12,7 @@ using PatsKillerPro.Vehicle;
 namespace PatsKillerPro
 {
     /// <summary>
-    /// Main application form - V4 Professional Design (Fixed Tabs)
-    /// Clean dark theme with tabbed interface and activity log
+    /// Main application form - V5 with Button-Based Tabs
     /// </summary>
     public partial class MainForm : Form
     {
@@ -31,6 +30,8 @@ namespace PatsKillerPro
         private readonly Color _colorDanger = Color.FromArgb(239, 68, 68);
         private readonly Color _colorButton = Color.FromArgb(50, 50, 55);
         private readonly Color _colorButtonHover = Color.FromArgb(65, 65, 70);
+        private readonly Color _colorTabActive = Color.FromArgb(59, 130, 246);
+        private readonly Color _colorTabInactive = Color.FromArgb(45, 45, 50);
 
         // ============ STATE ============
         private string _userEmail = "";
@@ -45,7 +46,14 @@ namespace PatsKillerPro
         private Panel _headerPanel = null!;
         private Panel _loginPanel = null!;
         private Panel _mainPanel = null!;
-        private TabControl _tabControl = null!;
+        private Panel _tabButtonPanel = null!;
+        private Panel _contentPanel = null!;
+        private Panel _patsPanel = null!;
+        private Panel _diagPanel = null!;
+        private Panel _freePanel = null!;
+        private Button _btnTabPats = null!;
+        private Button _btnTabDiag = null!;
+        private Button _btnTabFree = null!;
         private RichTextBox _txtLog = null!;
         private Label _lblTokens = null!;
         private Label _lblUser = null!;
@@ -243,7 +251,7 @@ namespace PatsKillerPro
             centerPanel.Controls.Add(btnGoogle);
 
             var lblOr = new Label {
-                Text = "─────────  or sign in with email  ─────────",
+                Text = "───────  or sign in with email  ───────",
                 ForeColor = _colorTextDim, Font = new Font("Segoe UI", 8F),
                 TextAlign = ContentAlignment.MiddleCenter, Size = new Size(340, 25), Location = new Point(30, 145)
             };
@@ -290,7 +298,7 @@ namespace PatsKillerPro
             this.Controls.Add(_loginPanel);
         }
 
-        // ============ MAIN PANEL WITH TABS ============
+        // ============ MAIN PANEL WITH BUTTON TABS ============
         private void CreateMainPanel()
         {
             _mainPanel = new Panel
@@ -301,18 +309,42 @@ namespace PatsKillerPro
                 Visible = false
             };
 
-            // === LOG PANEL (add FIRST for proper docking) ===
+            // === TAB BUTTONS (at top) ===
+            _tabButtonPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 50,
+                BackColor = _colorPanel,
+                Padding = new Padding(10, 8, 10, 8)
+            };
+
+            _btnTabPats = CreateTabButton("PATS Keys", 0);
+            _btnTabPats.Location = new Point(10, 8);
+            _btnTabPats.Click += (s, e) => SwitchTab(0);
+            _tabButtonPanel.Controls.Add(_btnTabPats);
+
+            _btnTabDiag = CreateTabButton("Diagnostics", 1);
+            _btnTabDiag.Location = new Point(170, 8);
+            _btnTabDiag.Click += (s, e) => SwitchTab(1);
+            _tabButtonPanel.Controls.Add(_btnTabDiag);
+
+            _btnTabFree = CreateTabButton("Free Functions", 2);
+            _btnTabFree.Location = new Point(330, 8);
+            _btnTabFree.Click += (s, e) => SwitchTab(2);
+            _tabButtonPanel.Controls.Add(_btnTabFree);
+
+            // === LOG PANEL (at bottom) ===
             var logPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 140,
+                Height = 130,
                 BackColor = _colorSurface,
-                Padding = new Padding(10)
+                Padding = new Padding(10, 5, 10, 5)
             };
 
             var lblLog = new Label
             {
-                Text = "📋 Activity Log",
+                Text = "Activity Log",
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 ForeColor = _colorTextDim,
                 Location = new Point(10, 5),
@@ -322,8 +354,8 @@ namespace PatsKillerPro
 
             _txtLog = new RichTextBox
             {
-                Dock = DockStyle.Bottom,
-                Height = 110,
+                Location = new Point(10, 25),
+                Size = new Size(890, 95),
                 BackColor = _colorPanel,
                 ForeColor = _colorText,
                 Font = new Font("Consolas", 9F),
@@ -332,70 +364,78 @@ namespace PatsKillerPro
                 ScrollBars = RichTextBoxScrollBars.Vertical
             };
             logPanel.Controls.Add(_txtLog);
+            logPanel.Resize += (s, e) => { _txtLog.Width = logPanel.Width - 20; };
 
-            logPanel.Paint += (s, e) =>
-            {
-                using var pen = new Pen(_colorBorder, 1);
-                e.Graphics.DrawLine(pen, 0, 0, logPanel.Width, 0);
-            };
-
-            // === TAB CONTROL (standard rendering) ===
-            _tabControl = new TabControl
+            // === CONTENT PANEL (middle) ===
+            _contentPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                Padding = new Point(20, 8),
-                ItemSize = new Size(150, 35),
-                SizeMode = TabSizeMode.Fixed
-            };
-
-            // Create tab pages
-            var tabPats = new TabPage("🔑 PATS Keys")
-            {
                 BackColor = _colorBackground,
-                ForeColor = _colorText,
                 Padding = new Padding(5)
             };
 
-            var tabDiag = new TabPage("⚙️ Diagnostics")
-            {
-                BackColor = _colorBackground,
-                ForeColor = _colorText,
-                Padding = new Padding(5)
-            };
+            // Create tab content panels
+            _patsPanel = new Panel { Dock = DockStyle.Fill, BackColor = _colorBackground, AutoScroll = true, Visible = true };
+            _diagPanel = new Panel { Dock = DockStyle.Fill, BackColor = _colorBackground, AutoScroll = true, Visible = false };
+            _freePanel = new Panel { Dock = DockStyle.Fill, BackColor = _colorBackground, AutoScroll = true, Visible = false };
 
-            var tabFree = new TabPage("⚡ Free Functions")
-            {
-                BackColor = _colorBackground,
-                ForeColor = _colorText,
-                Padding = new Padding(5)
-            };
+            CreatePatsContent(_patsPanel);
+            CreateDiagnosticsContent(_diagPanel);
+            CreateFreeContent(_freePanel);
 
-            // Build tab content
-            CreatePatsTab(tabPats);
-            CreateDiagnosticsTab(tabDiag);
-            CreateFreeTab(tabFree);
+            _contentPanel.Controls.Add(_patsPanel);
+            _contentPanel.Controls.Add(_diagPanel);
+            _contentPanel.Controls.Add(_freePanel);
 
-            // Add tabs to control
-            _tabControl.TabPages.Add(tabPats);
-            _tabControl.TabPages.Add(tabDiag);
-            _tabControl.TabPages.Add(tabFree);
-
-            // ADD CONTROLS IN CORRECT ORDER FOR DOCKING
-            _mainPanel.Controls.Add(_tabControl);
-            _mainPanel.Controls.Add(logPanel);
+            // Add panels in correct order for docking
+            _mainPanel.Controls.Add(_contentPanel);  // Fill - added first
+            _mainPanel.Controls.Add(logPanel);       // Bottom
+            _mainPanel.Controls.Add(_tabButtonPanel); // Top
 
             this.Controls.Add(_mainPanel);
+
+            // Set initial tab
+            SwitchTab(0);
         }
 
-        // ============ PATS TAB ============
-        private void CreatePatsTab(TabPage tab)
+        private Button CreateTabButton(string text, int index)
         {
-            var container = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoScroll = true };
+            var btn = new Button
+            {
+                Text = text,
+                Size = new Size(150, 34),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = index == 0 ? _colorTabActive : _colorTabInactive,
+                ForeColor = _colorText,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Tag = index
+            };
+            btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.MouseOverBackColor = _colorAccent;
+            return btn;
+        }
+
+        private void SwitchTab(int index)
+        {
+            // Update button colors
+            _btnTabPats.BackColor = index == 0 ? _colorTabActive : _colorTabInactive;
+            _btnTabDiag.BackColor = index == 1 ? _colorTabActive : _colorTabInactive;
+            _btnTabFree.BackColor = index == 2 ? _colorTabActive : _colorTabInactive;
+
+            // Show/hide panels
+            _patsPanel.Visible = index == 0;
+            _diagPanel.Visible = index == 1;
+            _freePanel.Visible = index == 2;
+        }
+
+        // ============ PATS CONTENT ============
+        private void CreatePatsContent(Panel container)
+        {
             int y = 10;
 
             // Device Section
-            var grpDevice = CreateSection("J2534 Device", 10, y, 870, 70);
+            var grpDevice = CreateSection("J2534 Device", 5, y, 880, 70);
             grpDevice.Controls.Add(new Label { Text = "Device:", ForeColor = _colorText, Location = new Point(15, 30), AutoSize = true });
 
             _cmbDevices = CreateComboBox();
@@ -418,9 +458,9 @@ namespace PatsKillerPro
             y += 85;
 
             // Vehicle Section
-            var grpVehicle = CreateSection("Vehicle", 10, y, 870, 95);
+            var grpVehicle = CreateSection("Vehicle", 5, y, 880, 95);
 
-            var btnRead = CreateButton("🚗 Read VIN", 120, 36);
+            var btnRead = CreateButton("Read VIN", 120, 36);
             btnRead.Location = new Point(15, 28);
             btnRead.BackColor = _colorAccent;
             btnRead.Click += BtnReadVin_Click;
@@ -444,7 +484,7 @@ namespace PatsKillerPro
             y += 110;
 
             // PATS Codes Section
-            var grpCodes = CreateSection("PATS Codes", 10, y, 870, 75);
+            var grpCodes = CreateSection("PATS Codes", 5, y, 880, 75);
 
             grpCodes.Controls.Add(new Label { Text = "OUTCODE:", ForeColor = _colorText, Font = new Font("Segoe UI", 9F, FontStyle.Bold), Location = new Point(15, 33), AutoSize = true });
             _txtOutcode = CreateTextBox();
@@ -455,14 +495,14 @@ namespace PatsKillerPro
             _txtOutcode.TextAlign = HorizontalAlignment.Center;
             grpCodes.Controls.Add(_txtOutcode);
 
-            var btnCopy = CreateButton("📋", 40, 30);
+            var btnCopy = CreateButton("Copy", 60, 30);
             btnCopy.Location = new Point(290, 28);
             _toolTip.SetToolTip(btnCopy, "Copy outcode");
             btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); AddLog("info", "Outcode copied"); } };
             grpCodes.Controls.Add(btnCopy);
 
-            var btnGetIncode = CreateButton("🌐 Get Incode", 140, 32);
-            btnGetIncode.Location = new Point(350, 27);
+            var btnGetIncode = CreateButton("Get Incode", 120, 32);
+            btnGetIncode.Location = new Point(360, 27);
             btnGetIncode.BackColor = _colorWarning;
             btnGetIncode.ForeColor = Color.Black;
             btnGetIncode.Click += (s, e) => OpenUrl("https://patskiller.com/calculator");
@@ -480,47 +520,45 @@ namespace PatsKillerPro
             y += 90;
 
             // Key Operations Section
-            var grpKeys = CreateSection("Key Operations", 10, y, 870, 75);
+            var grpKeys = CreateSection("Key Operations", 5, y, 880, 75);
 
-            var btnProgram = CreateButton("🔑 Program Keys", 140, 38);
+            var btnProgram = CreateButton("Program Keys", 130, 38);
             btnProgram.Location = new Point(20, 26);
             btnProgram.BackColor = _colorSuccess;
             btnProgram.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnProgram.Click += BtnProgramKeys_Click;
             grpKeys.Controls.Add(btnProgram);
 
-            var btnErase = CreateButton("⚠ Erase All", 110, 38);
-            btnErase.Location = new Point(170, 26);
+            var btnErase = CreateButton("Erase All", 100, 38);
+            btnErase.Location = new Point(160, 26);
             btnErase.BackColor = _colorDanger;
             btnErase.Click += BtnEraseKeys_Click;
             grpKeys.Controls.Add(btnErase);
 
-            var btnParamReset = CreateButton("🔄 Param Reset", 130, 38);
-            btnParamReset.Location = new Point(290, 26);
+            var btnParamReset = CreateButton("Param Reset", 110, 38);
+            btnParamReset.Location = new Point(270, 26);
             btnParamReset.Click += BtnParamReset_Click;
             grpKeys.Controls.Add(btnParamReset);
 
-            var btnEscl = CreateButton("🔒 Init ESCL", 110, 38);
-            btnEscl.Location = new Point(430, 26);
+            var btnEscl = CreateButton("Init ESCL", 100, 38);
+            btnEscl.Location = new Point(390, 26);
             btnEscl.Click += BtnEscl_Click;
             grpKeys.Controls.Add(btnEscl);
 
-            var btnDisable = CreateButton("🔓 Disable BCM", 120, 38);
-            btnDisable.Location = new Point(550, 26);
+            var btnDisable = CreateButton("Disable BCM", 110, 38);
+            btnDisable.Location = new Point(500, 26);
             btnDisable.Click += BtnDisableBcm_Click;
             grpKeys.Controls.Add(btnDisable);
 
             container.Controls.Add(grpKeys);
-            tab.Controls.Add(container);
         }
 
-        // ============ DIAGNOSTICS TAB ============
-        private void CreateDiagnosticsTab(TabPage tab)
+        // ============ DIAGNOSTICS CONTENT ============
+        private void CreateDiagnosticsContent(Panel container)
         {
-            var container = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoScroll = true };
             int y = 10;
 
-            var grpDtc = CreateSection("DTC Operations (1 Token Each)", 10, y, 870, 75);
+            var grpDtc = CreateSection("DTC Operations (1 Token Each)", 5, y, 880, 75);
 
             var btnClearP160A = CreateButton("Clear P160A", 120, 36);
             btnClearP160A.Location = new Point(20, 26);
@@ -546,7 +584,7 @@ namespace PatsKillerPro
             container.Controls.Add(grpDtc);
             y += 90;
 
-            var grpKeypad = CreateSection("Keypad Code Operations", 10, y, 870, 75);
+            var grpKeypad = CreateSection("Keypad Code Operations", 5, y, 880, 75);
 
             var btnKeypad = CreateButton("Read/Write Keypad Code", 180, 36);
             btnKeypad.Location = new Point(20, 26);
@@ -556,9 +594,9 @@ namespace PatsKillerPro
             container.Controls.Add(grpKeypad);
             y += 90;
 
-            var grpBcm = CreateSection("BCM Operations (Advanced)", 10, y, 870, 75);
+            var grpBcm = CreateSection("BCM Operations (Advanced)", 5, y, 880, 75);
 
-            var btnBcmFactory = CreateButton("⚠ BCM Factory Reset", 170, 36);
+            var btnBcmFactory = CreateButton("BCM Factory Reset", 150, 36);
             btnBcmFactory.Location = new Point(20, 26);
             btnBcmFactory.BackColor = _colorDanger;
             btnBcmFactory.Click += BtnBcmFactory_Click;
@@ -566,47 +604,45 @@ namespace PatsKillerPro
             grpBcm.Controls.Add(btnBcmFactory);
 
             container.Controls.Add(grpBcm);
-            tab.Controls.Add(container);
         }
 
-        // ============ FREE FUNCTIONS TAB ============
-        private void CreateFreeTab(TabPage tab)
+        // ============ FREE FUNCTIONS CONTENT ============
+        private void CreateFreeContent(Panel container)
         {
-            var container = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoScroll = true };
             int y = 10;
 
             var lblFree = new Label
             {
-                Text = "✓ These operations are FREE - No token cost",
+                Text = "These operations are FREE - No token cost",
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 ForeColor = _colorSuccess,
-                Location = new Point(15, y),
+                Location = new Point(10, y),
                 AutoSize = true
             };
             container.Controls.Add(lblFree);
             y += 40;
 
-            var grpBasic = CreateSection("Basic Operations", 10, y, 870, 75);
+            var grpBasic = CreateSection("Basic Operations", 5, y, 880, 75);
 
-            var btnClearDtc = CreateButton("Clear All DTCs", 140, 36);
+            var btnClearDtc = CreateButton("Clear All DTCs", 130, 36);
             btnClearDtc.Location = new Point(20, 26);
             btnClearDtc.Click += BtnClearDtc_Click;
             grpBasic.Controls.Add(btnClearDtc);
 
-            var btnClearKam = CreateButton("Clear KAM", 120, 36);
-            btnClearKam.Location = new Point(170, 26);
+            var btnClearKam = CreateButton("Clear KAM", 110, 36);
+            btnClearKam.Location = new Point(160, 26);
             btnClearKam.Click += BtnClearKam_Click;
             grpBasic.Controls.Add(btnClearKam);
 
-            var btnVehicleReset = CreateButton("Vehicle Reset", 130, 36);
-            btnVehicleReset.Location = new Point(300, 26);
+            var btnVehicleReset = CreateButton("Vehicle Reset", 120, 36);
+            btnVehicleReset.Location = new Point(280, 26);
             btnVehicleReset.Click += BtnVehicleReset_Click;
             grpBasic.Controls.Add(btnVehicleReset);
 
             container.Controls.Add(grpBasic);
             y += 90;
 
-            var grpRead = CreateSection("Read Operations", 10, y, 870, 75);
+            var grpRead = CreateSection("Read Operations", 5, y, 880, 75);
 
             var btnReadKeys = CreateButton("Read Keys Count", 140, 36);
             btnReadKeys.Location = new Point(20, 26);
@@ -621,26 +657,25 @@ namespace PatsKillerPro
             container.Controls.Add(grpRead);
             y += 90;
 
-            var grpResources = CreateSection("Resources & Support", 10, y, 870, 75);
+            var grpResources = CreateSection("Resources and Support", 5, y, 880, 75);
 
-            var btnTutorial = CreateButton("📖 Tutorial", 120, 36);
+            var btnTutorial = CreateButton("Tutorial", 100, 36);
             btnTutorial.Location = new Point(20, 26);
             btnTutorial.Click += (s, e) => OpenUrl("https://patskiller.com/faqs");
             grpResources.Controls.Add(btnTutorial);
 
-            var btnBuyTokens = CreateButton("💳 Buy Tokens", 130, 36);
-            btnBuyTokens.Location = new Point(150, 26);
+            var btnBuyTokens = CreateButton("Buy Tokens", 110, 36);
+            btnBuyTokens.Location = new Point(130, 26);
             btnBuyTokens.BackColor = _colorAccent;
             btnBuyTokens.Click += (s, e) => OpenUrl("https://patskiller.com/buy-tokens");
             grpResources.Controls.Add(btnBuyTokens);
 
-            var btnSupport = CreateButton("📧 Support", 120, 36);
-            btnSupport.Location = new Point(290, 26);
+            var btnSupport = CreateButton("Support", 100, 36);
+            btnSupport.Location = new Point(250, 26);
             btnSupport.Click += (s, e) => OpenUrl("https://patskiller.com/contact");
             grpResources.Controls.Add(btnSupport);
 
             container.Controls.Add(grpResources);
-            tab.Controls.Add(container);
         }
 
         // ============ UI HELPERS ============
@@ -727,7 +762,7 @@ namespace PatsKillerPro
             if (_txtLog.InvokeRequired) { _txtLog.Invoke(new Action(() => AddLog(type, message))); return; }
 
             var time = DateTime.Now.ToString("HH:mm:ss");
-            var prefix = type switch { "success" => "✓", "error" => "✗", "warning" => "⚠", _ => "•" };
+            var prefix = type switch { "success" => "[OK]", "error" => "[ERR]", "warning" => "[WARN]", _ => "[INFO]" };
             var color = type switch { "success" => _colorSuccess, "error" => _colorDanger, "warning" => _colorWarning, _ => _colorTextDim };
 
             _txtLog.SelectionStart = _txtLog.TextLength;
@@ -738,7 +773,6 @@ namespace PatsKillerPro
             _txtLog.ScrollToCaret();
         }
 
-        private void UpdateStatus(string message) { AddLog("info", message); Logger.Info(message); }
         private void OpenUrl(string url) { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true }); } catch { } }
 
         private bool ConfirmTokenCost(int cost, string operation, string details = "")
@@ -771,42 +805,24 @@ namespace PatsKillerPro
             var token = Settings.GetString("auth_token", "");
             if (!string.IsNullOrEmpty(email) && !string.IsNullOrEmpty(token))
             {
-                _userEmail = email;
-                _authToken = token;
-                _tokenBalance = 10;
-                _lblTokens.Text = $"Tokens: {_tokenBalance}";
-                _lblUser.Text = _userEmail;
-                ShowMainPanel();
-                AddLog("info", $"Logged in as {_userEmail}");
+                _userEmail = email; _authToken = token; _tokenBalance = 10;
+                _lblTokens.Text = $"Tokens: {_tokenBalance}"; _lblUser.Text = _userEmail;
+                ShowMainPanel(); AddLog("info", $"Logged in as {_userEmail}");
             }
         }
 
         private async void BtnLogin_Click(object? sender, EventArgs e)
         {
-            var email = _txtEmail.Text.Trim();
-            var password = _txtPassword.Text;
-            if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
-            {
-                MessageBox.Show("Please enter email and password.", "Login", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            _btnLogin.Enabled = false;
-            _btnLogin.Text = "Signing in...";
-
+            var email = _txtEmail.Text.Trim(); var password = _txtPassword.Text;
+            if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password)) { MessageBox.Show("Please enter email and password.", "Login", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            _btnLogin.Enabled = false; _btnLogin.Text = "Signing in...";
             try
             {
                 await Task.Delay(500);
-                _userEmail = email;
-                _authToken = "token_" + DateTime.Now.Ticks;
-                _tokenBalance = 10;
-                Settings.SetString("email", email);
-                Settings.SetString("auth_token", _authToken);
-                Settings.Save();
-                _lblTokens.Text = $"Tokens: {_tokenBalance}";
-                _lblUser.Text = _userEmail;
-                ShowMainPanel();
-                AddLog("success", $"Logged in as {email}");
+                _userEmail = email; _authToken = "token_" + DateTime.Now.Ticks; _tokenBalance = 10;
+                Settings.SetString("email", email); Settings.SetString("auth_token", _authToken); Settings.Save();
+                _lblTokens.Text = $"Tokens: {_tokenBalance}"; _lblUser.Text = _userEmail;
+                ShowMainPanel(); AddLog("success", $"Logged in as {email}");
             }
             catch (Exception ex) { ShowError("Login Failed", "Could not connect", ex); }
             finally { _btnLogin.Enabled = true; _btnLogin.Text = "Sign In"; }
@@ -819,21 +835,12 @@ namespace PatsKillerPro
                 AddLog("info", "Opening Google login...");
                 using var loginForm = new GoogleLoginForm();
                 var result = loginForm.ShowDialog(this);
-
                 if (result == DialogResult.OK && !string.IsNullOrEmpty(loginForm.AuthToken))
                 {
-                    _authToken = loginForm.AuthToken;
-                    _userEmail = loginForm.UserEmail ?? "Google User";
-                    _tokenBalance = loginForm.TokenCount;
-
-                    Settings.SetString("auth_token", _authToken);
-                    Settings.SetString("email", _userEmail);
-                    Settings.Save();
-
-                    _lblTokens.Text = $"Tokens: {_tokenBalance}";
-                    _lblUser.Text = _userEmail;
-                    ShowMainPanel();
-                    AddLog("success", $"Logged in as {_userEmail}");
+                    _authToken = loginForm.AuthToken; _userEmail = loginForm.UserEmail ?? "Google User"; _tokenBalance = loginForm.TokenCount;
+                    Settings.SetString("auth_token", _authToken); Settings.SetString("email", _userEmail); Settings.Save();
+                    _lblTokens.Text = $"Tokens: {_tokenBalance}"; _lblUser.Text = _userEmail;
+                    ShowMainPanel(); AddLog("success", $"Logged in as {_userEmail}");
                 }
             }
             catch (Exception ex) { ShowError("Login Failed", ex.Message, ex); }
@@ -841,28 +848,19 @@ namespace PatsKillerPro
 
         private void BtnLogout_Click(object? sender, EventArgs e)
         {
-            _userEmail = "";
-            _authToken = "";
-            _tokenBalance = 0;
-            Settings.Remove("auth_token");
-            Settings.Save();
-            _txtPassword.Text = "";
-            _lblTokens.Text = "Tokens: --";
-            _lblUser.Text = "Not logged in";
-            ShowLoginPanel();
-            AddLog("info", "Logged out");
+            _userEmail = ""; _authToken = ""; _tokenBalance = 0;
+            Settings.Remove("auth_token"); Settings.Save();
+            _txtPassword.Text = ""; _lblTokens.Text = "Tokens: --"; _lblUser.Text = "Not logged in";
+            ShowLoginPanel(); AddLog("info", "Logged out");
         }
 
-        // ============ J2534 OPERATIONS ============
+        // ============ J2534 and PATS OPERATIONS ============
         private void BtnScan_Click(object? sender, EventArgs e)
         {
             try
             {
-                AddLog("info", "Scanning for J2534 devices...");
-                _cmbDevices.Items.Clear();
-                _deviceManager?.Dispose();
-                _deviceManager = new J2534DeviceManager();
-                _deviceManager.ScanForDevices();
+                AddLog("info", "Scanning for J2534 devices..."); _cmbDevices.Items.Clear();
+                _deviceManager?.Dispose(); _deviceManager = new J2534DeviceManager(); _deviceManager.ScanForDevices();
                 var deviceNames = _deviceManager.GetDeviceNames();
                 if (deviceNames.Count == 0) { _cmbDevices.Items.Add("No devices found"); AddLog("warning", "No J2534 devices found"); }
                 else { foreach (var name in deviceNames) _cmbDevices.Items.Add(name); _cmbDevices.SelectedIndex = 0; AddLog("success", $"Found {deviceNames.Count} device(s)"); }
@@ -872,15 +870,10 @@ namespace PatsKillerPro
 
         private void BtnConnect_Click(object? sender, EventArgs e)
         {
-            if (_cmbDevices.SelectedItem == null || _cmbDevices.SelectedItem.ToString() == "No devices found" || _deviceManager == null)
-            {
-                MessageBox.Show("Select a device first.", "Connect", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            if (_cmbDevices.SelectedItem == null || _cmbDevices.SelectedItem.ToString() == "No devices found" || _deviceManager == null) { MessageBox.Show("Select a device first.", "Connect", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             try
             {
-                AddLog("info", "Connecting...");
-                var deviceName = _cmbDevices.SelectedItem.ToString()!;
+                AddLog("info", "Connecting..."); var deviceName = _cmbDevices.SelectedItem.ToString()!;
                 _device = _deviceManager.ConnectToDevice(deviceName);
                 _hsCanChannel = _device.OpenChannel(Protocol.ISO15765, BaudRates.HS_CAN_500K, ConnectFlags.NONE);
                 AddLog("success", $"Connected to {deviceName}");
@@ -894,71 +887,44 @@ namespace PatsKillerPro
             if (_hsCanChannel == null) { MessageBox.Show("Connect to device first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             try
             {
-                AddLog("info", "Reading VIN...");
-                var uds = new UdsService(_hsCanChannel);
+                AddLog("info", "Reading VIN..."); var uds = new UdsService(_hsCanChannel);
                 _currentVin = await Task.Run(() => uds.ReadVIN()) ?? "";
                 if (!string.IsNullOrEmpty(_currentVin))
                 {
-                    _lblVin.Text = $"VIN: {_currentVin}";
-                    _lblVin.ForeColor = _colorSuccess;
+                    _lblVin.Text = $"VIN: {_currentVin}"; _lblVin.ForeColor = _colorSuccess;
                     AddLog("info", "Reading outcode...");
                     var outcode = await Task.Run(() => uds.ReadOutcode());
-                    _txtOutcode.Text = outcode;
-                    AddLog("success", $"VIN: {_currentVin}");
+                    _txtOutcode.Text = outcode; AddLog("success", $"VIN: {_currentVin}");
                 }
                 else { _lblVin.Text = "VIN: Could not read"; _lblVin.ForeColor = _colorDanger; AddLog("warning", "Select vehicle manually"); }
             }
             catch (Exception ex) { ShowError("Read Error", "Failed to read", ex); }
         }
 
-        // ============ PATS OPERATIONS ============
         private async void BtnProgramKeys_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             var incode = _txtIncode.Text.Trim();
             if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try
-            {
-                AddLog("info", "Programming key...");
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-                var result = await Task.Run(() => pats.ProgramKeys(incode));
-                if (result) { MessageBox.Show("Key programmed!\n\nRemove key, insert next, click Program again.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); AddLog("success", "Key programmed"); }
-            }
+            try { AddLog("info", "Programming key..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); var result = await Task.Run(() => pats.ProgramKeys(incode)); if (result) { MessageBox.Show("Key programmed!\n\nRemove key, insert next, click Program again.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); AddLog("success", "Key programmed"); } }
             catch (Exception ex) { ShowError("Programming Failed", "Failed", ex); }
         }
 
         private async void BtnEraseKeys_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_KEY_ERASE, "Erase All Keys", "⚠️ WARNING: Erases ALL keys!")) return;
+            if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_KEY_ERASE, "Erase All Keys", "WARNING: Erases ALL keys!")) return;
             if (MessageBox.Show("Are you SURE?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             var incode = _txtIncode.Text.Trim();
             if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try
-            {
-                AddLog("warning", "Erasing keys...");
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-                await Task.Run(() => pats.EraseAllKeys(incode));
-                MessageBox.Show("Keys erased! Program 2+ new keys now.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                AddLog("success", "Keys erased");
-            }
+            try { AddLog("warning", "Erasing keys..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.EraseAllKeys(incode)); MessageBox.Show("Keys erased! Program 2+ new keys now.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning); AddLog("success", "Keys erased"); }
             catch (Exception ex) { ShowError("Erase Failed", "Failed", ex); }
         }
 
         private async void BtnParamReset_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try
-            {
-                AddLog("info", "Parameter reset...");
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-                await Task.Run(() => pats.ParameterReset());
-                MessageBox.Show("Done!\n\nIgnition OFF 15s, then ON.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                AddLog("success", "Parameter reset complete");
-            }
+            try { AddLog("info", "Parameter reset..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ParameterReset()); MessageBox.Show("Done!\n\nIgnition OFF 15s, then ON.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); AddLog("success", "Parameter reset complete"); }
             catch (Exception ex) { ShowError("Reset Failed", "Failed", ex); }
         }
 
@@ -966,30 +932,14 @@ namespace PatsKillerPro
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_ESCL_INIT, "Initialize ESCL")) return;
-            try
-            {
-                AddLog("info", "Initializing ESCL...");
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-                await Task.Run(() => pats.InitializeESCL());
-                MessageBox.Show("ESCL initialized!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                AddLog("success", "ESCL done");
-            }
+            try { AddLog("info", "Initializing ESCL..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.InitializeESCL()); MessageBox.Show("ESCL initialized!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); AddLog("success", "ESCL done"); }
             catch (Exception ex) { ShowError("ESCL Failed", "Failed", ex); }
         }
 
         private async void BtnDisableBcm_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            try
-            {
-                AddLog("info", "Disabling BCM security...");
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
-                await Task.Run(() => pats.DisableBcmSecurity());
-                MessageBox.Show("BCM security disabled.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                AddLog("success", "BCM disabled");
-            }
+            try { AddLog("info", "Disabling BCM security..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.DisableBcmSecurity()); MessageBox.Show("BCM security disabled.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); AddLog("success", "BCM disabled"); }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
 
@@ -1057,16 +1007,14 @@ namespace PatsKillerPro
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             try
             {
-                var uds = new UdsService(_hsCanChannel);
-                var pats = new PatsOperations(uds);
+                var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds);
                 var hasGateway = await Task.Run(() => pats.DetectGateway());
                 if (!hasGateway) { MessageBox.Show("No gateway (pre-2020 vehicle).", "Gateway", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
                 if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_GATEWAY_UNLOCK, "Unlock Gateway")) return;
                 var incode = _txtIncode.Text.Trim();
                 if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
                 await Task.Run(() => pats.UnlockGateway(incode));
-                MessageBox.Show("Gateway unlocked!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                AddLog("success", "Gateway unlocked");
+                MessageBox.Show("Gateway unlocked!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); AddLog("success", "Gateway unlocked");
             }
             catch (Exception ex) { ShowError("Failed", "Failed", ex); }
         }
@@ -1095,7 +1043,7 @@ namespace PatsKillerPro
         private async void BtnBcmFactory_Click(object? sender, EventArgs e)
         {
             if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (MessageBox.Show("⚠️ This resets ALL BCM settings!\nScanner required after!\n\nContinue?", "⚠️ DANGER", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            if (MessageBox.Show("This resets ALL BCM settings!\nScanner required after!\n\nContinue?", "DANGER", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             if (!ConfirmTokenCost(PatsOperations.TOKEN_COST_BCM_FACTORY, "BCM Factory Defaults")) return;
             var incode1 = Microsoft.VisualBasic.Interaction.InputBox("Incode 1:", "BCM Factory", _txtIncode.Text);
             if (string.IsNullOrEmpty(incode1)) return;
