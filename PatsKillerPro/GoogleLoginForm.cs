@@ -1,7 +1,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -14,12 +13,12 @@ using PatsKillerPro.Utils;
 namespace PatsKillerPro
 {
     /// <summary>
-    /// Professional OAuth login form using QR Code + Polling
-    /// No localhost server, no Windows security blocks
+    /// Professional OAuth login form matching PatsKiller Pro mockup v2
+    /// Features: Google OAuth primary, Email/password secondary, No QR code
     /// </summary>
     public class GoogleLoginForm : Form
     {
-        // UI Controls
+        // ============ UI CONTROLS ============
         private Panel _headerPanel = null!;
         private Panel _contentPanel = null!;
         private PictureBox _logoBox = null!;
@@ -33,61 +32,52 @@ namespace PatsKillerPro
         private Panel _waitingPanel = null!;
         private Panel _successPanel = null!;
         private Panel _errorPanel = null!;
-        
-        // QR Code display
-        private PictureBox _qrCodeBox = null!;
-        private Label _lblSessionCode = null!;
 
-        // Dark theme colors (matching mockup)
-        private readonly Color _colorBackground = Color.FromArgb(30, 30, 30);
-        private readonly Color _colorHeader = Color.FromArgb(37, 37, 38);
-        private readonly Color _colorPanel = Color.FromArgb(45, 45, 48);
-        private readonly Color _colorInput = Color.FromArgb(60, 60, 60);
-        private readonly Color _colorBorder = Color.FromArgb(80, 80, 80);
-        private readonly Color _colorText = Color.FromArgb(255, 255, 255);
-        private readonly Color _colorTextDim = Color.FromArgb(150, 150, 150);
-        private readonly Color _colorRed = Color.FromArgb(233, 69, 96);
-        private readonly Color _colorGreen = Color.FromArgb(76, 175, 80);
+        // ============ DARK THEME COLORS (Matching Mockup) ============
+        private readonly Color _colorBackground = Color.FromArgb(30, 30, 30);      // #1e1e1e
+        private readonly Color _colorHeader = Color.FromArgb(37, 37, 38);          // #252526
+        private readonly Color _colorPanel = Color.FromArgb(45, 45, 48);           // #2d2d30
+        private readonly Color _colorInput = Color.FromArgb(60, 60, 60);           // #3c3c3c
+        private readonly Color _colorBorder = Color.FromArgb(70, 70, 70);          // #464646
+        private readonly Color _colorText = Color.FromArgb(255, 255, 255);         // White
+        private readonly Color _colorTextDim = Color.FromArgb(150, 150, 150);      // Gray
+        private readonly Color _colorRed = Color.FromArgb(233, 69, 96);            // #e94560 - PatsKiller Red
+        private readonly Color _colorGreen = Color.FromArgb(76, 175, 80);          // #4caf50 - Success Green
+        private readonly Color _colorGoogleBtn = Color.FromArgb(255, 255, 255);    // White for Google button
 
-        // Results
+        // ============ RESULTS ============
         public string? AuthToken { get; private set; }
         public string? RefreshToken { get; private set; }
         public string? UserEmail { get; private set; }
+        public int TokenCount { get; private set; }
 
-        // API Configuration - FIXED: Correct Supabase URL and endpoints
+        // ============ API CONFIGURATION ============
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
         private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0.iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
-        
-        // FIXED: Correct auth page URL (was /auth, now /desktop-auth)
         private const string AUTH_PAGE_URL = "https://patskiller.com/desktop-auth?session=";
 
-        // Polling
+        // ============ STATE ============
         private CancellationTokenSource? _cts;
         private string? _currentSessionCode;
         private readonly HttpClient _httpClient = new HttpClient();
         private readonly string _machineId;
 
+        // ============ CONSTRUCTOR ============
         public GoogleLoginForm()
         {
-            // Generate a machine ID for this device
             _machineId = GetMachineId();
-            
             InitializeComponent();
             ShowLoginState();
         }
 
-        /// <summary>
-        /// Get unique machine identifier
-        /// </summary>
         private static string GetMachineId()
         {
             try
             {
-                // Use machine name + a hash for uniqueness
                 var data = Environment.MachineName + Environment.UserName;
                 using var sha = System.Security.Cryptography.SHA256.Create();
                 var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
-                return Convert.ToBase64String(hash)[..16]; // First 16 chars
+                return Convert.ToBase64String(hash)[..16];
             }
             catch
             {
@@ -95,27 +85,49 @@ namespace PatsKillerPro
             }
         }
 
+        // ============ INITIALIZATION ============
         private void InitializeComponent()
         {
             // Form settings
             this.Text = "PatsKiller Pro 2026 (Ford & Lincoln PATS Solution)";
             this.Size = new Size(900, 700);
             this.MinimumSize = new Size(800, 600);
-            this.StartPosition = FormStartPosition.CenterParent;
+            this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.BackColor = _colorBackground;
             this.Font = new Font("Segoe UI", 9F);
 
-            // Dark title bar
+            // Enable dark title bar on Windows 10/11
             try
             {
-                var attribute = 20;
+                var attribute = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
                 var value = 1;
                 DwmSetWindowAttribute(this.Handle, attribute, ref value, sizeof(int));
             }
             catch { }
 
-            // ============ HEADER PANEL ============
+            CreateHeaderPanel();
+            CreateContentPanel();
+            CreateLoginPanel();
+            CreateWaitingPanel();
+            CreateSuccessPanel();
+            CreateErrorPanel();
+
+            this.FormClosing += (s, e) => _cts?.Cancel();
+            this.Load += (s, e) => PositionHeaderLabels();
+            this.Resize += (s, e) => 
+            {
+                PositionHeaderLabels();
+                CenterActivePanel();
+            };
+        }
+
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        // ============ HEADER PANEL ============
+        private void CreateHeaderPanel()
+        {
             _headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -142,7 +154,8 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 18F, FontStyle.Bold),
                 ForeColor = _colorText,
                 AutoSize = true,
-                Location = new Point(80, 15)
+                Location = new Point(80, 15),
+                BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblTitle);
 
@@ -153,7 +166,8 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(82, 45)
+                Location = new Point(82, 45),
+                BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblSubtitle);
 
@@ -164,7 +178,8 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 ForeColor = _colorGreen,
                 AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblTokens);
 
@@ -174,19 +189,25 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblStatus);
 
-            _headerPanel.Resize += (s, e) =>
+            this.Controls.Add(_headerPanel);
+        }
+
+        private void PositionHeaderLabels()
+        {
+            if (_lblTokens != null && _lblStatus != null && _headerPanel != null)
             {
                 _lblTokens.Location = new Point(_headerPanel.Width - _lblTokens.Width - 20, 18);
                 _lblStatus.Location = new Point(_headerPanel.Width - _lblStatus.Width - 20, 45);
-            };
+            }
+        }
 
-            this.Controls.Add(_headerPanel);
-
-            // ============ CONTENT PANEL ============
+        private void CreateContentPanel()
+        {
             _contentPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -194,25 +215,6 @@ namespace PatsKillerPro
                 Padding = new Padding(40)
             };
             this.Controls.Add(_contentPanel);
-
-            // Create all state panels
-            CreateLoginPanel();
-            CreateWaitingPanel();
-            CreateSuccessPanel();
-            CreateErrorPanel();
-
-            // Handle form closing
-            this.FormClosing += (s, e) =>
-            {
-                _cts?.Cancel();
-            };
-
-            // Initial layout
-            this.Load += (s, e) =>
-            {
-                _lblTokens.Location = new Point(_headerPanel.Width - _lblTokens.Width - 20, 18);
-                _lblStatus.Location = new Point(_headerPanel.Width - _lblStatus.Width - 20, 45);
-            };
         }
 
         private void LoadLogo()
@@ -235,317 +237,570 @@ namespace PatsKillerPro
                         return;
                     }
                 }
-                _logoBox.Image = CreatePlaceholderLogo();
+                _logoBox.Image = CreatePatsKillerLogo(50);
             }
             catch
             {
-                _logoBox.Image = CreatePlaceholderLogo();
+                _logoBox.Image = CreatePatsKillerLogo(50);
             }
         }
 
-        private Image CreatePlaceholderLogo()
+        /// <summary>
+        /// Creates the PatsKiller logo programmatically (key icon with red accents)
+        /// </summary>
+        private Image CreatePatsKillerLogo(int size)
         {
-            var bmp = new Bitmap(50, 50);
+            var bmp = new Bitmap(size, size);
             using (var g = Graphics.FromImage(bmp))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var brush = new SolidBrush(Color.FromArgb(26, 26, 46)))
-                    g.FillRectangle(brush, 0, 0, 50, 50);
-                using (var pen = new Pen(_colorRed, 2))
-                    g.DrawRectangle(pen, 1, 1, 47, 47);
-                using (var brush = new SolidBrush(_colorRed))
+                
+                // Background with gradient
+                using (var bgBrush = new LinearGradientBrush(
+                    new Point(0, 0), new Point(size, size),
+                    Color.FromArgb(26, 26, 46), Color.FromArgb(22, 33, 62)))
                 {
-                    g.FillEllipse(brush, 8, 12, 18, 18);
-                    g.FillRectangle(brush, 22, 18, 22, 6);
-                    g.FillRectangle(brush, 36, 24, 3, 6);
-                    g.FillRectangle(brush, 41, 24, 3, 8);
+                    g.FillRectangle(bgBrush, 0, 0, size, size);
                 }
-                using (var brush = new SolidBrush(Color.FromArgb(26, 26, 46)))
-                    g.FillEllipse(brush, 13, 17, 8, 8);
+                
+                // Red border
+                using (var pen = new Pen(_colorRed, 2))
+                {
+                    g.DrawRectangle(pen, 1, 1, size - 3, size - 3);
+                }
+                
+                // Key icon
+                var keySize = size * 0.6f;
+                var offsetX = (size - keySize) / 2;
+                var offsetY = (size - keySize) / 2;
+                
+                using (var redBrush = new SolidBrush(_colorRed))
+                {
+                    // Key head (circle)
+                    g.FillEllipse(redBrush, offsetX, offsetY + 2, keySize * 0.5f, keySize * 0.5f);
+                    // Key shaft
+                    g.FillRectangle(redBrush, offsetX + keySize * 0.35f, offsetY + keySize * 0.2f, keySize * 0.6f, keySize * 0.15f);
+                    // Key teeth
+                    g.FillRectangle(redBrush, offsetX + keySize * 0.7f, offsetY + keySize * 0.35f, keySize * 0.1f, keySize * 0.15f);
+                    g.FillRectangle(redBrush, offsetX + keySize * 0.85f, offsetY + keySize * 0.35f, keySize * 0.1f, keySize * 0.2f);
+                }
+                
+                // Inner circle hole in key head
+                using (var bgBrush = new SolidBrush(Color.FromArgb(26, 26, 46)))
+                {
+                    g.FillEllipse(bgBrush, offsetX + keySize * 0.12f, offsetY + keySize * 0.14f, keySize * 0.25f, keySize * 0.25f);
+                }
             }
             return bmp;
         }
 
-        [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-
-        // ============ LOGIN PANEL (with QR Code) ============
+        // ============ LOGIN PANEL (Step 1) ============
         private void CreateLoginPanel()
         {
             _loginPanel = new Panel
             {
-                Size = new Size(450, 580),
+                Size = new Size(420, 520),
                 BackColor = _colorPanel,
                 Visible = false
             };
 
-            var y = 25;
+            // Round corners effect via region
+            _loginPanel.Paint += (s, e) =>
+            {
+                using var path = GetRoundedRectPath(_loginPanel.ClientRectangle, 16);
+                using var pen = new Pen(_colorBorder, 1);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.DrawPath(pen, path);
+            };
 
-            // Logo at top
+            var y = 30;
+
+            // Logo centered
             var logoPic = new PictureBox
             {
-                Size = new Size(70, 70),
+                Size = new Size(100, 100),
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Image = _logoBox.Image,
-                Location = new Point((_loginPanel.Width - 70) / 2, y)
+                Image = CreatePatsKillerLogo(100),
+                BackColor = Color.Transparent
             };
+            logoPic.Location = new Point((_loginPanel.Width - 100) / 2, y);
             _loginPanel.Controls.Add(logoPic);
-            y += 85;
+            y += 115;
 
-            // Title
+            // "Welcome Back" title
             var lblWelcome = new Label
             {
-                Text = "Sign In",
-                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
+                Text = "Welcome Back",
+                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
                 ForeColor = _colorText,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
             lblWelcome.Location = new Point((_loginPanel.Width - lblWelcome.PreferredWidth) / 2, y);
             _loginPanel.Controls.Add(lblWelcome);
-            y += 45;
-
-            // QR Code placeholder
-            _qrCodeBox = new PictureBox
-            {
-                Size = new Size(180, 180),
-                Location = new Point((_loginPanel.Width - 180) / 2, y),
-                BackColor = Color.White,
-                SizeMode = PictureBoxSizeMode.Zoom
-            };
-            _loginPanel.Controls.Add(_qrCodeBox);
-            y += 195;
-
-            // Session code display
-            _lblSessionCode = new Label
-            {
-                Text = "--------",
-                Font = new Font("Consolas", 16F, FontStyle.Bold),
-                ForeColor = _colorRed,
-                AutoSize = true
-            };
-            _lblSessionCode.Location = new Point((_loginPanel.Width - _lblSessionCode.PreferredWidth) / 2, y);
-            _loginPanel.Controls.Add(_lblSessionCode);
             y += 35;
 
-            // Scan instruction
-            var lblScan = new Label
+            // Subtitle
+            var lblSubtitle = new Label
             {
-                Text = "Scan with your phone camera",
+                Text = "Sign in to access your tokens",
                 Font = new Font("Segoe UI", 10F),
                 ForeColor = _colorTextDim,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
-            lblScan.Location = new Point((_loginPanel.Width - lblScan.PreferredWidth) / 2, y);
-            _loginPanel.Controls.Add(lblScan);
-            y += 35;
+            lblSubtitle.Location = new Point((_loginPanel.Width - lblSubtitle.PreferredWidth) / 2, y);
+            _loginPanel.Controls.Add(lblSubtitle);
+            y += 40;
 
-            // OR divider
-            var lblOr = new Label
+            // ===== GOOGLE SIGN IN BUTTON (Primary) =====
+            var btnGoogle = new Button
             {
-                Text = "───────────  or  ───────────",
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = _colorTextDim,
-                AutoSize = true
-            };
-            lblOr.Location = new Point((_loginPanel.Width - lblOr.PreferredWidth) / 2, y);
-            _loginPanel.Controls.Add(lblOr);
-            y += 35;
-
-            // Open Browser Button
-            var btnBrowser = new Button
-            {
-                Text = "🌐  Open Browser Instead",
+                Text = "     Continue with Google",
                 Size = new Size(360, 50),
                 Location = new Point((_loginPanel.Width - 360) / 2, y),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = _colorRed,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                Cursor = Cursors.Hand
+                BackColor = _colorGoogleBtn,
+                ForeColor = Color.FromArgb(60, 60, 60),
+                Font = new Font("Segoe UI", 11F, FontStyle.SemiBold),
+                Cursor = Cursors.Hand,
+                TextAlign = ContentAlignment.MiddleCenter,
+                ImageAlign = ContentAlignment.MiddleLeft
             };
-            btnBrowser.FlatAppearance.BorderSize = 0;
-            btnBrowser.Click += BtnOpenBrowser_Click;
-            _loginPanel.Controls.Add(btnBrowser);
+            btnGoogle.FlatAppearance.BorderSize = 0;
+            btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
+            
+            // Add Google icon
+            btnGoogle.Image = CreateGoogleIcon(24);
+            btnGoogle.TextImageRelation = TextImageRelation.ImageBeforeText;
+            btnGoogle.Padding = new Padding(15, 0, 0, 0);
+            
+            btnGoogle.Click += BtnGoogle_Click;
+            _loginPanel.Controls.Add(btnGoogle);
             y += 65;
 
-            // Loading indicator
-            var lblLoading = new Label
+            // Divider "or sign in with email"
+            var lblDivider = new Label
             {
-                Name = "lblLoginLoading",
-                Text = "Generating QR code...",
+                Text = "───────────  or sign in with email  ───────────",
+                Font = new Font("Segoe UI", 8F),
+                ForeColor = _colorTextDim,
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            lblDivider.Location = new Point((_loginPanel.Width - lblDivider.PreferredWidth) / 2, y);
+            _loginPanel.Controls.Add(lblDivider);
+            y += 30;
+
+            // Email label
+            var lblEmail = new Label
+            {
+                Text = "Email",
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
-                AutoSize = true
+                AutoSize = true,
+                Location = new Point(30, y),
+                BackColor = Color.Transparent
             };
-            lblLoading.Location = new Point((_loginPanel.Width - lblLoading.PreferredWidth) / 2, y);
-            _loginPanel.Controls.Add(lblLoading);
+            _loginPanel.Controls.Add(lblEmail);
+            y += 22;
+
+            // Email input
+            var txtEmail = new TextBox
+            {
+                Size = new Size(360, 40),
+                Location = new Point(30, y),
+                BackColor = _colorInput,
+                ForeColor = _colorText,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 11F)
+            };
+            txtEmail.GotFocus += (s, e) => { if (txtEmail.Text == "you@example.com") txtEmail.Text = ""; };
+            txtEmail.Text = "you@example.com";
+            txtEmail.ForeColor = _colorTextDim;
+            txtEmail.GotFocus += (s, e) => txtEmail.ForeColor = _colorText;
+            _loginPanel.Controls.Add(txtEmail);
+            y += 45;
+
+            // Password label
+            var lblPassword = new Label
+            {
+                Text = "Password",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = _colorTextDim,
+                AutoSize = true,
+                Location = new Point(30, y),
+                BackColor = Color.Transparent
+            };
+            _loginPanel.Controls.Add(lblPassword);
+            y += 22;
+
+            // Password input
+            var txtPassword = new TextBox
+            {
+                Size = new Size(360, 40),
+                Location = new Point(30, y),
+                BackColor = _colorInput,
+                ForeColor = _colorText,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 11F),
+                UseSystemPasswordChar = true
+            };
+            _loginPanel.Controls.Add(txtPassword);
+            y += 50;
+
+            // Sign In button (email/password)
+            var btnSignIn = new Button
+            {
+                Text = "Sign In",
+                Size = new Size(360, 45),
+                Location = new Point(30, y),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = _colorRed,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 11F, FontStyle.SemiBold),
+                Cursor = Cursors.Hand
+            };
+            btnSignIn.FlatAppearance.BorderSize = 0;
+            btnSignIn.Click += (s, e) => 
+            {
+                MessageBox.Show(
+                    "Email/password login is not yet implemented.\n\nPlease use 'Continue with Google' or register at patskiller.com",
+                    "Coming Soon",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            };
+            _loginPanel.Controls.Add(btnSignIn);
+            y += 55;
+
+            // Register link
+            var lblRegister = new Label
+            {
+                Text = "Don't have an account? Register at patskiller.com",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = _colorTextDim,
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand
+            };
+            lblRegister.Location = new Point((_loginPanel.Width - lblRegister.PreferredWidth) / 2, y);
+            lblRegister.Click += (s, e) =>
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://patskiller.com/register",
+                    UseShellExecute = true
+                });
+            };
+            lblRegister.MouseEnter += (s, e) => lblRegister.ForeColor = _colorRed;
+            lblRegister.MouseLeave += (s, e) => lblRegister.ForeColor = _colorTextDim;
+            _loginPanel.Controls.Add(lblRegister);
 
             _contentPanel.Controls.Add(_loginPanel);
         }
 
-        // ============ WAITING PANEL ============
+        private Image CreateGoogleIcon(int size)
+        {
+            var bmp = new Bitmap(size, size);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Color.Transparent);
+                
+                // Simplified Google "G" icon
+                var center = size / 2f;
+                var radius = size * 0.4f;
+                
+                // Blue arc (right side)
+                using (var pen = new Pen(Color.FromArgb(66, 133, 244), size * 0.15f))
+                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, -45, 90);
+                
+                // Green arc (bottom right)
+                using (var pen = new Pen(Color.FromArgb(52, 168, 83), size * 0.15f))
+                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, 45, 90);
+                
+                // Yellow arc (bottom left)
+                using (var pen = new Pen(Color.FromArgb(251, 188, 5), size * 0.15f))
+                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, 135, 90);
+                
+                // Red arc (top)
+                using (var pen = new Pen(Color.FromArgb(234, 67, 53), size * 0.15f))
+                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, 225, 90);
+            }
+            return bmp;
+        }
+
+        // ============ WAITING PANEL (Step 2) ============
         private void CreateWaitingPanel()
         {
             _waitingPanel = new Panel
             {
-                Size = new Size(450, 420),
+                Size = new Size(420, 400),
                 BackColor = _colorPanel,
                 Visible = false
             };
 
             var y = 40;
 
+            // Logo
             var logoPic = new PictureBox
             {
-                Size = new Size(80, 80),
+                Size = new Size(100, 100),
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Image = _logoBox.Image,
-                Location = new Point((_waitingPanel.Width - 80) / 2, y)
+                Image = CreatePatsKillerLogo(100),
+                BackColor = Color.Transparent
             };
+            logoPic.Location = new Point((_waitingPanel.Width - 100) / 2, y);
             _waitingPanel.Controls.Add(logoPic);
-            y += 100;
+            y += 120;
 
+            // Title
             var lblTitle = new Label
             {
-                Text = "Waiting for Login",
+                Text = "Complete Sign In",
                 Font = new Font("Segoe UI", 20F, FontStyle.Bold),
                 ForeColor = _colorText,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
             lblTitle.Location = new Point((_waitingPanel.Width - lblTitle.PreferredWidth) / 2, y);
             _waitingPanel.Controls.Add(lblTitle);
-            y += 40;
+            y += 35;
 
+            // Message
             var lblMsg = new Label
             {
-                Text = "Complete sign-in on your phone or browser.\nThis window will update automatically.",
+                Text = "A browser window has opened.\nPlease sign in with Google to continue.",
                 Font = new Font("Segoe UI", 10F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                TextAlign = ContentAlignment.MiddleCenter
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.Transparent
             };
             lblMsg.Location = new Point((_waitingPanel.Width - lblMsg.PreferredWidth) / 2, y);
             _waitingPanel.Controls.Add(lblMsg);
-            y += 70;
+            y += 55;
 
-            // Animated dots
+            // Animated dots container
             var dotsPanel = new Panel
             {
-                Size = new Size(100, 20),
-                Location = new Point((_waitingPanel.Width - 100) / 2, y),
+                Size = new Size(80, 20),
+                Location = new Point((_waitingPanel.Width - 80) / 2, y),
                 BackColor = Color.Transparent
             };
-            var dot1 = new Panel { Size = new Size(12, 12), Location = new Point(20, 4), BackColor = _colorRed };
-            var dot2 = new Panel { Size = new Size(12, 12), Location = new Point(45, 4), BackColor = _colorRed };
-            var dot3 = new Panel { Size = new Size(12, 12), Location = new Point(70, 4), BackColor = _colorRed };
+            var dot1 = new Panel { Size = new Size(14, 14), Location = new Point(5, 3), BackColor = _colorRed };
+            var dot2 = new Panel { Size = new Size(14, 14), Location = new Point(30, 3), BackColor = _colorRed };
+            var dot3 = new Panel { Size = new Size(14, 14), Location = new Point(55, 3), BackColor = _colorRed };
+            
+            // Make dots circular
+            dot1.Paint += (s, e) => { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; e.Graphics.FillEllipse(new SolidBrush(_colorRed), 0, 0, 14, 14); };
+            dot2.Paint += (s, e) => { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; e.Graphics.FillEllipse(new SolidBrush(_colorRed), 0, 0, 14, 14); };
+            dot3.Paint += (s, e) => { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; e.Graphics.FillEllipse(new SolidBrush(_colorRed), 0, 0, 14, 14); };
+            
             dotsPanel.Controls.AddRange(new Control[] { dot1, dot2, dot3 });
             _waitingPanel.Controls.Add(dotsPanel);
 
+            // Animation timer
             var animTimer = new System.Windows.Forms.Timer { Interval = 300 };
             var animState = 0;
             animTimer.Tick += (s, e) =>
             {
-                dot1.BackColor = animState == 0 ? _colorRed : Color.FromArgb(100, _colorRed);
-                dot2.BackColor = animState == 1 ? _colorRed : Color.FromArgb(100, _colorRed);
-                dot3.BackColor = animState == 2 ? _colorRed : Color.FromArgb(100, _colorRed);
+                dot1.BackColor = animState == 0 ? _colorRed : Color.FromArgb(80, _colorRed);
+                dot2.BackColor = animState == 1 ? _colorRed : Color.FromArgb(80, _colorRed);
+                dot3.BackColor = animState == 2 ? _colorRed : Color.FromArgb(80, _colorRed);
+                dot1.Invalidate();
+                dot2.Invalidate();
+                dot3.Invalidate();
                 animState = (animState + 1) % 3;
             };
             animTimer.Start();
-            y += 60;
+            y += 35;
 
-            // Cancel button
-            var btnCancel = new Button
+            // "Waiting for authentication..."
+            var lblWaiting = new Label
             {
-                Text = "Cancel",
-                Size = new Size(200, 40),
-                Location = new Point((_waitingPanel.Width - 200) / 2, y),
+                Text = "Waiting for authentication...",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = _colorTextDim,
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            lblWaiting.Location = new Point((_waitingPanel.Width - lblWaiting.PreferredWidth) / 2, y);
+            _waitingPanel.Controls.Add(lblWaiting);
+            y += 40;
+
+            // Reopen Browser button
+            var btnReopen = new Button
+            {
+                Text = "🌐  Reopen Browser",
+                Size = new Size(280, 45),
+                Location = new Point((_waitingPanel.Width - 280) / 2, y),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorInput,
                 ForeColor = _colorText,
-                Font = new Font("Segoe UI", 10F),
+                Font = new Font("Segoe UI", 10F, FontStyle.SemiBold),
                 Cursor = Cursors.Hand
             };
-            btnCancel.FlatAppearance.BorderColor = _colorBorder;
-            btnCancel.Click += (s, e) =>
+            btnReopen.FlatAppearance.BorderColor = _colorBorder;
+            btnReopen.FlatAppearance.BorderSize = 1;
+            btnReopen.Click += BtnReopenBrowser_Click;
+            _waitingPanel.Controls.Add(btnReopen);
+            y += 55;
+
+            // Cancel link
+            var lblCancel = new Label
+            {
+                Text = "Cancel",
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = _colorTextDim,
+                AutoSize = true,
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            lblCancel.Location = new Point((_waitingPanel.Width - lblCancel.PreferredWidth) / 2, y);
+            lblCancel.Click += (s, e) =>
             {
                 _cts?.Cancel();
+                Logger.Info("Login cancelled");
                 ShowLoginState();
             };
-            _waitingPanel.Controls.Add(btnCancel);
+            lblCancel.MouseEnter += (s, e) => lblCancel.ForeColor = _colorText;
+            lblCancel.MouseLeave += (s, e) => lblCancel.ForeColor = _colorTextDim;
+            _waitingPanel.Controls.Add(lblCancel);
 
             _contentPanel.Controls.Add(_waitingPanel);
         }
 
-        // ============ SUCCESS PANEL ============
+        // ============ SUCCESS PANEL (Step 3) ============
         private void CreateSuccessPanel()
         {
             _successPanel = new Panel
             {
-                Size = new Size(450, 400),
+                Size = new Size(420, 420),
                 BackColor = _colorPanel,
                 Visible = false
             };
 
             var y = 40;
 
+            // Success checkmark circle
             var successIcon = new Panel
             {
-                Size = new Size(90, 90),
-                Location = new Point((_successPanel.Width - 90) / 2, y),
-                BackColor = _colorGreen
+                Size = new Size(96, 96),
+                Location = new Point((_successPanel.Width - 96) / 2, y),
+                BackColor = Color.Transparent
             };
-            var lblCheck = new Label
+            successIcon.Paint += (s, e) =>
             {
-                Text = "✓",
-                Font = new Font("Segoe UI", 40F, FontStyle.Bold),
-                ForeColor = Color.White,
-                AutoSize = false,
-                Size = new Size(90, 90),
-                TextAlign = ContentAlignment.MiddleCenter
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                
+                // Gradient green circle
+                using (var brush = new LinearGradientBrush(
+                    new Point(0, 0), new Point(96, 96),
+                    Color.FromArgb(76, 175, 80), Color.FromArgb(56, 142, 60)))
+                {
+                    e.Graphics.FillEllipse(brush, 0, 0, 94, 94);
+                }
+                
+                // White checkmark
+                using (var pen = new Pen(Color.White, 6))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    e.Graphics.DrawLine(pen, 25, 50, 42, 67);
+                    e.Graphics.DrawLine(pen, 42, 67, 72, 32);
+                }
             };
-            successIcon.Controls.Add(lblCheck);
             _successPanel.Controls.Add(successIcon);
-            y += 110;
+            y += 115;
 
+            // "Welcome!"
             var lblWelcome = new Label
             {
                 Text = "Welcome!",
                 Font = new Font("Segoe UI", 22F, FontStyle.Bold),
                 ForeColor = _colorText,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
             lblWelcome.Location = new Point((_successPanel.Width - lblWelcome.PreferredWidth) / 2, y);
             _successPanel.Controls.Add(lblWelcome);
             y += 40;
 
-            var lblSignedIn = new Label
+            // "Signed in as"
+            var lblSignedAs = new Label
             {
                 Text = "Signed in as",
                 Font = new Font("Segoe UI", 10F),
                 ForeColor = _colorTextDim,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
-            lblSignedIn.Location = new Point((_successPanel.Width - lblSignedIn.PreferredWidth) / 2, y);
-            _successPanel.Controls.Add(lblSignedIn);
+            lblSignedAs.Location = new Point((_successPanel.Width - lblSignedAs.PreferredWidth) / 2, y);
+            _successPanel.Controls.Add(lblSignedAs);
             y += 25;
 
+            // Email (dynamic)
             var lblEmail = new Label
             {
                 Name = "lblSuccessEmail",
                 Text = "user@example.com",
                 Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 ForeColor = _colorText,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
             lblEmail.Location = new Point((_successPanel.Width - lblEmail.PreferredWidth) / 2, y);
             _successPanel.Controls.Add(lblEmail);
-            y += 50;
+            y += 40;
 
+            // Token count box
+            var tokenBox = new Panel
+            {
+                Size = new Size(340, 60),
+                Location = new Point((_successPanel.Width - 340) / 2, y),
+                BackColor = _colorInput
+            };
+            tokenBox.Paint += (s, e) =>
+            {
+                using var pen = new Pen(_colorBorder, 1);
+                using var path = GetRoundedRectPath(tokenBox.ClientRectangle, 12);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.DrawPath(pen, path);
+            };
+
+            var lblTokenLabel = new Label
+            {
+                Text = "Available Tokens",
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = _colorTextDim,
+                Location = new Point(20, 20),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            tokenBox.Controls.Add(lblTokenLabel);
+
+            var lblTokenCount = new Label
+            {
+                Name = "lblSuccessTokens",
+                Text = "0",
+                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                ForeColor = _colorGreen,
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            lblTokenCount.Location = new Point(tokenBox.Width - lblTokenCount.PreferredWidth - 25, 15);
+            tokenBox.Controls.Add(lblTokenCount);
+
+            _successPanel.Controls.Add(tokenBox);
+            y += 80;
+
+            // Start Programming button
             var btnStart = new Button
             {
                 Text = "Start Programming",
-                Size = new Size(300, 55),
-                Location = new Point((_successPanel.Width - 300) / 2, y),
+                Size = new Size(340, 55),
+                Location = new Point((_successPanel.Width - 340) / 2, y),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorRed,
                 ForeColor = Color.White,
@@ -563,61 +818,78 @@ namespace PatsKillerPro
             _contentPanel.Controls.Add(_successPanel);
         }
 
-        // ============ ERROR PANEL ============
+        // ============ ERROR PANEL (Step 4) ============
         private void CreateErrorPanel()
         {
             _errorPanel = new Panel
             {
-                Size = new Size(450, 350),
+                Size = new Size(420, 380),
                 BackColor = _colorPanel,
                 Visible = false
             };
 
             var y = 40;
 
+            // Error X circle
             var errorIcon = new Panel
             {
-                Size = new Size(90, 90),
-                Location = new Point((_errorPanel.Width - 90) / 2, y),
-                BackColor = _colorRed
+                Size = new Size(96, 96),
+                Location = new Point((_errorPanel.Width - 96) / 2, y),
+                BackColor = Color.Transparent
             };
-            var lblX = new Label
+            errorIcon.Paint += (s, e) =>
             {
-                Text = "✕",
-                Font = new Font("Segoe UI", 40F, FontStyle.Bold),
-                ForeColor = Color.White,
-                AutoSize = false,
-                Size = new Size(90, 90),
-                TextAlign = ContentAlignment.MiddleCenter
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                
+                // Gradient red circle
+                using (var brush = new LinearGradientBrush(
+                    new Point(0, 0), new Point(96, 96),
+                    Color.FromArgb(244, 67, 54), Color.FromArgb(211, 47, 47)))
+                {
+                    e.Graphics.FillEllipse(brush, 0, 0, 94, 94);
+                }
+                
+                // White X
+                using (var pen = new Pen(Color.White, 6))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    e.Graphics.DrawLine(pen, 30, 30, 64, 64);
+                    e.Graphics.DrawLine(pen, 64, 30, 30, 64);
+                }
             };
-            errorIcon.Controls.Add(lblX);
             _errorPanel.Controls.Add(errorIcon);
-            y += 110;
+            y += 115;
 
+            // "Sign In Failed"
             var lblTitle = new Label
             {
                 Text = "Sign In Failed",
                 Font = new Font("Segoe UI", 22F, FontStyle.Bold),
                 ForeColor = _colorText,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
             lblTitle.Location = new Point((_errorPanel.Width - lblTitle.PreferredWidth) / 2, y);
             _errorPanel.Controls.Add(lblTitle);
             y += 40;
 
+            // Error message
             var lblMsg = new Label
             {
                 Name = "lblErrorMsg",
-                Text = "Session expired or was cancelled.\nPlease try again.",
+                Text = "Authentication was cancelled or timed out.\nPlease try again.",
                 Font = new Font("Segoe UI", 10F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                TextAlign = ContentAlignment.MiddleCenter
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.Transparent
             };
             lblMsg.Location = new Point((_errorPanel.Width - lblMsg.PreferredWidth) / 2, y);
             _errorPanel.Controls.Add(lblMsg);
-            y += 60;
+            y += 55;
 
+            // Try Again button
             var btnRetry = new Button
             {
                 Text = "Try Again",
@@ -630,8 +902,25 @@ namespace PatsKillerPro
                 Cursor = Cursors.Hand
             };
             btnRetry.FlatAppearance.BorderSize = 0;
-            btnRetry.Click += async (s, e) => await StartAuthFlowAsync();
+            btnRetry.Click += async (s, e) => await StartGoogleAuthAsync();
             _errorPanel.Controls.Add(btnRetry);
+            y += 65;
+
+            // Back to Login link
+            var lblBack = new Label
+            {
+                Text = "Back to Login",
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = _colorTextDim,
+                AutoSize = true,
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            lblBack.Location = new Point((_errorPanel.Width - lblBack.PreferredWidth) / 2, y);
+            lblBack.Click += (s, e) => ShowLoginState();
+            lblBack.MouseEnter += (s, e) => lblBack.ForeColor = _colorText;
+            lblBack.MouseLeave += (s, e) => lblBack.ForeColor = _colorTextDim;
+            _errorPanel.Controls.Add(lblBack);
 
             _contentPanel.Controls.Add(_errorPanel);
         }
@@ -644,9 +933,6 @@ namespace PatsKillerPro
             _successPanel.Visible = false;
             _errorPanel.Visible = false;
             CenterPanel(_loginPanel);
-            
-            // Start auth flow when showing login
-            _ = StartAuthFlowAsync();
         }
 
         private void ShowWaitingState()
@@ -658,14 +944,31 @@ namespace PatsKillerPro
             CenterPanel(_waitingPanel);
         }
 
-        private void ShowSuccessState(string email)
+        private void ShowSuccessState(string email, int tokens)
         {
+            // Update email label
             foreach (Control c in _successPanel.Controls)
             {
                 if (c.Name == "lblSuccessEmail")
                 {
                     c.Text = email;
                     c.Location = new Point((_successPanel.Width - c.PreferredSize.Width) / 2, c.Location.Y);
+                }
+            }
+            
+            // Update token count
+            foreach (Control c in _successPanel.Controls)
+            {
+                if (c is Panel tokenBox)
+                {
+                    foreach (Control tc in tokenBox.Controls)
+                    {
+                        if (tc.Name == "lblSuccessTokens")
+                        {
+                            tc.Text = tokens.ToString();
+                            tc.Location = new Point(tokenBox.Width - tc.PreferredSize.Width - 25, 15);
+                        }
+                    }
                 }
             }
 
@@ -675,11 +978,12 @@ namespace PatsKillerPro
             _errorPanel.Visible = false;
             CenterPanel(_successPanel);
 
-            _lblTokens.Text = "Tokens: --";
+            _lblTokens.Text = $"Tokens: {tokens}";
             _lblStatus.Text = email;
+            PositionHeaderLabels();
         }
 
-        private void ShowErrorState(string message = "Session expired or was cancelled.\nPlease try again.")
+        private void ShowErrorState(string message = "Authentication was cancelled or timed out.\nPlease try again.")
         {
             foreach (Control c in _errorPanel.Controls)
             {
@@ -699,35 +1003,53 @@ namespace PatsKillerPro
 
         private void CenterPanel(Panel panel)
         {
-            panel.Location = new Point(
-                (_contentPanel.Width - panel.Width) / 2,
-                (_contentPanel.Height - panel.Height) / 2
-            );
+            if (_contentPanel != null && panel != null)
+            {
+                panel.Location = new Point(
+                    Math.Max(0, (_contentPanel.Width - panel.Width) / 2),
+                    Math.Max(0, (_contentPanel.Height - panel.Height) / 2)
+                );
+            }
         }
 
-        protected override void OnResize(EventArgs e)
+        private void CenterActivePanel()
         {
-            base.OnResize(e);
             if (_loginPanel?.Visible == true) CenterPanel(_loginPanel);
             else if (_waitingPanel?.Visible == true) CenterPanel(_waitingPanel);
             else if (_successPanel?.Visible == true) CenterPanel(_successPanel);
             else if (_errorPanel?.Visible == true) CenterPanel(_errorPanel);
         }
 
+        // ============ EVENT HANDLERS ============
+        private async void BtnGoogle_Click(object? sender, EventArgs e)
+        {
+            await StartGoogleAuthAsync();
+        }
+
+        private void BtnReopenBrowser_Click(object? sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(_currentSessionCode))
+            {
+                var url = AUTH_PAGE_URL + _currentSessionCode;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+        }
+
         // ============ AUTH FLOW ============
-        private async Task StartAuthFlowAsync()
+        private async Task StartGoogleAuthAsync()
         {
             try
             {
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
 
-                // Update UI
-                UpdateLoadingLabel("Creating session...");
-                _qrCodeBox.Image = null;
-                _lblSessionCode.Text = "--------";
+                Logger.Info("Opening Google login...");
 
-                // Create session via API
+                // Create session
                 var session = await CreateSessionAsync();
                 if (session == null)
                 {
@@ -736,75 +1058,36 @@ namespace PatsKillerPro
                 }
 
                 _currentSessionCode = session.SessionCode;
-                _lblSessionCode.Text = session.SessionCode;
 
-                // Generate QR code
-                UpdateLoadingLabel("Generating QR code...");
-                var authUrl = AUTH_PAGE_URL + session.SessionCode;
-                var qrImage = GenerateQRCode(authUrl);
-                _qrCodeBox.Image = qrImage;
+                // Open browser to auth page
+                var url = AUTH_PAGE_URL + session.SessionCode;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
 
-                UpdateLoadingLabel("Scan QR code or click button below");
+                // Show waiting state
+                ShowWaitingState();
 
                 // Start polling
-                _ = PollForCompletionAsync(session.SessionCode, _cts.Token);
+                await PollForCompletionAsync(session.SessionCode, _cts.Token);
             }
             catch (Exception ex)
             {
-                Logger.Error("StartAuthFlowAsync error", ex);
+                Logger.Error("StartGoogleAuthAsync error", ex);
                 ShowErrorState("Failed to start authentication.\nPlease try again.");
             }
         }
 
-        private void UpdateLoadingLabel(string text)
-        {
-            foreach (Control c in _loginPanel.Controls)
-            {
-                if (c.Name == "lblLoginLoading")
-                {
-                    c.Text = text;
-                    c.Location = new Point((_loginPanel.Width - c.PreferredSize.Width) / 2, c.Location.Y);
-                }
-            }
-        }
-
-        private void BtnOpenBrowser_Click(object? sender, EventArgs e)
-        {
-            if (string.IsNullOrEmpty(_currentSessionCode))
-            {
-                MessageBox.Show("Please wait for session to be created.", "Please Wait", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var url = AUTH_PAGE_URL + _currentSessionCode;
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = url,
-                UseShellExecute = true
-            });
-
-            ShowWaitingState();
-        }
-
         // ============ API CALLS ============
-        
-        /// <summary>
-        /// FIXED: Creates a desktop auth session using the correct endpoint
-        /// - Uses create-desktop-auth-session (not create-auth-session)
-        /// - Uses apikey header (not Authorization: Bearer)
-        /// - Sends machineId in request body
-        /// </summary>
         private async Task<SessionInfo?> CreateSessionAsync()
         {
             try
             {
-                // FIXED: Correct endpoint name
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/create-desktop-auth-session");
-                
-                // FIXED: Use apikey header instead of Authorization: Bearer
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 
-                // FIXED: Send machineId in the request body
                 var body = JsonSerializer.Serialize(new { machineId = _machineId });
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
@@ -822,7 +1105,6 @@ namespace PatsKillerPro
                 var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
                 
-                // Use TryGetProperty for safer parsing - API returns: {"ok":true,"sessionCode":"XXX","expiresAt":"..."}
                 var sessionCode = root.TryGetProperty("sessionCode", out var sc) ? sc.GetString() ?? "" : "";
                 var expiresAt = root.TryGetProperty("expiresAt", out var ea) ? ea.GetString() ?? "" : "";
                 
@@ -834,7 +1116,6 @@ namespace PatsKillerPro
                 
                 return new SessionInfo
                 {
-                    SessionId = "", // Not returned by new API
                     SessionCode = sessionCode,
                     ExpiresAt = expiresAt
                 };
@@ -850,7 +1131,9 @@ namespace PatsKillerPro
         {
             try
             {
-                while (!ct.IsCancellationRequested)
+                var timeout = DateTime.UtcNow.AddMinutes(5); // 5 minute timeout
+                
+                while (!ct.IsCancellationRequested && DateTime.UtcNow < timeout)
                 {
                     await Task.Delay(2000, ct);
 
@@ -864,9 +1147,11 @@ namespace PatsKillerPro
                         AuthToken = result.Token;
                         RefreshToken = result.RefreshToken;
                         UserEmail = result.Email;
+                        TokenCount = result.TokenCount;
+                        
                         Logger.Info($"Login successful: {result.Email}");
 
-                        this.BeginInvoke(new Action(() => ShowSuccessState(result.Email ?? "User")));
+                        this.BeginInvoke(new Action(() => ShowSuccessState(result.Email ?? "User", result.TokenCount)));
                         return;
                     }
                     else if (result.Status == "expired" || result.Status == "invalid")
@@ -874,38 +1159,32 @@ namespace PatsKillerPro
                         this.BeginInvoke(new Action(() => ShowErrorState("Session expired.\nPlease try again.")));
                         return;
                     }
-                    // else: still pending, continue polling
+                }
+                
+                // Timeout
+                if (!ct.IsCancellationRequested)
+                {
+                    this.BeginInvoke(new Action(() => ShowErrorState("Authentication timed out.\nPlease try again.")));
                 }
             }
             catch (OperationCanceledException)
             {
-                // Cancelled, do nothing
+                // Cancelled by user
             }
             catch (Exception ex)
             {
                 Logger.Error("PollForCompletionAsync error", ex);
+                this.BeginInvoke(new Action(() => ShowErrorState("An error occurred.\nPlease try again.")));
             }
         }
 
-        /// <summary>
-        /// FIXED: Checks the desktop auth session using the correct endpoint
-        /// - Uses check-desktop-auth-session (not check-auth-session)
-        /// - Uses POST method (not GET)
-        /// - Uses apikey header (not Authorization: Bearer)
-        /// - Sends sessionCode and machineId in request body
-        /// - Reads accessToken (not token) from response
-        /// </summary>
         private async Task<SessionResult?> CheckSessionAsync(string sessionCode)
         {
             try
             {
-                // FIXED: Correct endpoint name and use POST method
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/check-desktop-auth-session");
-                
-                // FIXED: Use apikey header instead of Authorization: Bearer
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 
-                // FIXED: Send sessionCode and machineId in request body (POST, not GET query params)
                 var body = JsonSerializer.Serialize(new { sessionCode = sessionCode, machineId = _machineId });
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
@@ -921,16 +1200,20 @@ namespace PatsKillerPro
                 }
 
                 var doc = JsonDocument.Parse(json);
-                var status = doc.RootElement.GetProperty("status").GetString() ?? "";
+                var root = doc.RootElement;
+                var status = root.TryGetProperty("status", out var s) ? s.GetString() ?? "" : "";
 
                 var result = new SessionResult { Status = status };
 
                 if (status == "complete")
                 {
-                    // FIXED: The API returns "accessToken", not "token"
-                    result.Token = doc.RootElement.TryGetProperty("accessToken", out var t) ? t.GetString() : null;
-                    result.RefreshToken = doc.RootElement.TryGetProperty("refreshToken", out var r) ? r.GetString() : null;
-                    result.Email = doc.RootElement.TryGetProperty("email", out var e) ? e.GetString() : null;
+                    result.Token = root.TryGetProperty("accessToken", out var t) ? t.GetString() : null;
+                    result.RefreshToken = root.TryGetProperty("refreshToken", out var r) ? r.GetString() : null;
+                    result.Email = root.TryGetProperty("email", out var e) ? e.GetString() : null;
+                    
+                    // Try to get token count (if available)
+                    // TODO: Fetch token count from a separate API endpoint
+                    result.TokenCount = 0;
                 }
 
                 return result;
@@ -942,93 +1225,28 @@ namespace PatsKillerPro
             }
         }
 
-        // ============ QR CODE GENERATION ============
-        private Image GenerateQRCode(string content)
+        // ============ HELPERS ============
+        private static GraphicsPath GetRoundedRectPath(Rectangle rect, int radius)
         {
-            // Simple QR code generation using built-in .NET
-            // For production, consider using QRCoder NuGet package
-            return GenerateSimpleQRCode(content, 180);
-        }
+            var path = new GraphicsPath();
+            var diameter = radius * 2;
+            var arc = new Rectangle(rect.Location, new Size(diameter, diameter));
 
-        private Image GenerateSimpleQRCode(string content, int size)
-        {
-            // This is a placeholder that creates a visual representation
-            // In production, use QRCoder library for real QR codes
-            // Install: dotnet add package QRCoder
-            
-            var bmp = new Bitmap(size, size);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.Clear(Color.White);
-                g.SmoothingMode = SmoothingMode.AntiAlias;
+            path.AddArc(arc, 180, 90);
+            arc.X = rect.Right - diameter;
+            path.AddArc(arc, 270, 90);
+            arc.Y = rect.Bottom - diameter;
+            path.AddArc(arc, 0, 90);
+            arc.X = rect.Left;
+            path.AddArc(arc, 90, 90);
+            path.CloseFigure();
 
-                // Draw a pattern that represents a QR code visually
-                var random = new Random(content.GetHashCode());
-                var cellSize = size / 25;
-                
-                // Draw position patterns (corners)
-                DrawPositionPattern(g, 2, 2, cellSize);
-                DrawPositionPattern(g, size - 9 * cellSize, 2, cellSize);
-                DrawPositionPattern(g, 2, size - 9 * cellSize, cellSize);
-
-                // Draw data modules (simplified)
-                for (int x = 9; x < 16; x++)
-                {
-                    for (int y = 0; y < 25; y++)
-                    {
-                        if (random.Next(2) == 1)
-                        {
-                            g.FillRectangle(Brushes.Black, x * cellSize, y * cellSize, cellSize, cellSize);
-                        }
-                    }
-                }
-
-                for (int x = 0; x < 9; x++)
-                {
-                    for (int y = 9; y < 16; y++)
-                    {
-                        if (random.Next(2) == 1)
-                        {
-                            g.FillRectangle(Brushes.Black, x * cellSize, y * cellSize, cellSize, cellSize);
-                        }
-                    }
-                }
-
-                for (int x = 16; x < 25; x++)
-                {
-                    for (int y = 9; y < 25; y++)
-                    {
-                        if (random.Next(2) == 1)
-                        {
-                            g.FillRectangle(Brushes.Black, x * cellSize, y * cellSize, cellSize, cellSize);
-                        }
-                    }
-                }
-
-                // Add center logo placeholder
-                var logoSize = size / 5;
-                var logoRect = new Rectangle((size - logoSize) / 2, (size - logoSize) / 2, logoSize, logoSize);
-                g.FillRectangle(Brushes.White, logoRect);
-                g.FillRectangle(new SolidBrush(_colorRed), 
-                    logoRect.X + 4, logoRect.Y + 4, logoRect.Width - 8, logoRect.Height - 8);
-            }
-            return bmp;
-        }
-
-        private void DrawPositionPattern(Graphics g, int x, int y, int cellSize)
-        {
-            // Outer black square
-            g.FillRectangle(Brushes.Black, x, y, 7 * cellSize, 7 * cellSize);
-            // Inner white square
-            g.FillRectangle(Brushes.White, x + cellSize, y + cellSize, 5 * cellSize, 5 * cellSize);
-            // Center black square
-            g.FillRectangle(Brushes.Black, x + 2 * cellSize, y + 2 * cellSize, 3 * cellSize, 3 * cellSize);
+            return path;
         }
 
         // ============ HELPER CLASSES ============
         private class SessionInfo
         {
-            public string SessionId { get; set; } = "";
             public string SessionCode { get; set; } = "";
             public string ExpiresAt { get; set; } = "";
         }
@@ -1039,6 +1257,7 @@ namespace PatsKillerPro
             public string? Token { get; set; }
             public string? RefreshToken { get; set; }
             public string? Email { get; set; }
+            public int TokenCount { get; set; }
         }
     }
 }
