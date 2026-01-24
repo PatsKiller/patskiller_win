@@ -22,6 +22,7 @@ namespace PatsKillerPro
         private Panel _headerPanel = null!;
         private Panel _contentPanel = null!;
         private PictureBox _logoBox = null!;
+        private Image? _logoImage;
         private Label _lblTitle = null!;
         private Label _lblSubtitle = null!;
         private Label _lblTokens = null!;
@@ -219,23 +220,72 @@ namespace PatsKillerPro
 
         private void LoadLogo()
         {
+            // Load the shipped logo (Resources/logo.png). Prefer embedded resource; fall back to disk; final fallback is generated icon.
+            Image? TryCloneFromStream(Stream s)
+            {
+                try
+                {
+                    using var tmp = Image.FromStream(s);
+                    return new Bitmap(tmp);
+                }
+                catch { return null; }
+            }
+
+            Image? TryLoadFromFileNoLock(string path)
+            {
+                try
+                {
+                    using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    return TryCloneFromStream(fs);
+                }
+                catch { return null; }
+            }
+
             try
             {
-                var paths = new[]
-                {
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "logo.png"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.png"),
-                    "Resources/logo.png",
-                    "logo.png"
-                };
+                var asm = typeof(GoogleLoginForm).Assembly
+                          ?? System.Reflection.Assembly.GetEntryAssembly()
+                          ?? System.Reflection.Assembly.GetExecutingAssembly();
 
-                foreach (var path in paths)
+                var names = asm.GetManifestResourceNames();
+                var resName =
+                    names.FirstOrDefault(n => n.EndsWith(".Resources.logo.png", StringComparison.OrdinalIgnoreCase)) ??
+                    names.FirstOrDefault(n => n.EndsWith("Resources.logo.png", StringComparison.OrdinalIgnoreCase)) ??
+                    names.FirstOrDefault(n => n.EndsWith("logo.png", StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrWhiteSpace(resName))
                 {
-                    if (File.Exists(path))
+                    using var s = asm.GetManifestResourceStream(resName);
+                    if (s != null)
                     {
-                        _logoBox.Image = Image.FromFile(path);
-                        return;
+                        _logoImage = TryCloneFromStream(s);
                     }
+                }
+            }
+            catch { /* ignore */ }
+
+            if (_logoImage == null)
+            {
+                try
+                {
+                    var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                    var p1 = Path.Combine(baseDir, "Resources", "logo.png");
+                    if (File.Exists(p1)) _logoImage = TryLoadFromFileNoLock(p1);
+
+                    if (_logoImage == null)
+                    {
+                        var p2 = Path.Combine(baseDir, "logo.png");
+                        if (File.Exists(p2)) _logoImage = TryLoadFromFileNoLock(p2);
+                    }
+                }
+                catch { /* ignore */ }
+            }
+
+            if (_logoImage == null)
+                _logoImage = CreatePatsKillerLogo(80);
+
+            _logoBox.Image = _logoImage;
+        }
                 }
                 _logoBox.Image = CreatePatsKillerLogo(50);
             }
@@ -297,48 +347,68 @@ namespace PatsKillerPro
         // ============ LOGIN PANEL (Step 1) ============
         private void CreateLoginPanel()
         {
+            // Responsive, DPI-safe login card. No magic pixel math.
             _loginPanel = new Panel
             {
-                Size = new Size(420, 520),
                 BackColor = _colorPanel,
-                Visible = false
+                Visible = false,
+                Padding = new Padding(28)
             };
 
-            // Round corners effect via region
+            // Rounded corners (painted border)
             _loginPanel.Paint += (s, e) =>
             {
-                using var path = GetRoundedRectPath(_loginPanel.ClientRectangle, 16);
+                using var path = GetRoundedRectPath(_loginPanel.ClientRectangle, 18);
                 using var pen = new Pen(_colorBorder, 1);
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 e.Graphics.DrawPath(pen, path);
             };
 
-            var y = 30;
+            // 3-column table: [50% spacer] [content] [50% spacer] for true centering
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                ColumnCount = 3,
+                RowCount = 12,
+                Padding = new Padding(0),
+                Margin = new Padding(0)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            for (int i = 0; i < root.RowCount; i++) root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            // Logo centered
+
+            // helper to add centered controls
+            void AddRow(Control c, int row, Padding? margin = null)
+            {
+                c.Margin = margin ?? new Padding(0, 0, 0, 0);
+                root.Controls.Add(c, 1, row);
+            }
+
+            int row = 0;
+
+            // Logo
             var logoPic = new PictureBox
             {
-                Size = new Size(100, 100),
+                Size = new Size(96, 96),
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Image = CreatePatsKillerLogo(100),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Image = _logoImage ?? CreatePatsKillerLogo(96)
             };
-            logoPic.Location = new Point((_loginPanel.Width - 100) / 2, y);
-            _loginPanel.Controls.Add(logoPic);
-            y += 115;
+            AddRow(logoPic, row++, new Padding(0, 0, 0, 18));
 
-            // "Welcome Back" title
+            // Title
             var lblWelcome = new Label
             {
                 Text = "Welcome Back",
-                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
                 ForeColor = _colorText,
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            lblWelcome.Location = new Point((_loginPanel.Width - lblWelcome.PreferredWidth) / 2, y);
-            _loginPanel.Controls.Add(lblWelcome);
-            y += 35;
+            AddRow(lblWelcome, row++, new Padding(0, 0, 0, 6));
 
             // Subtitle
             var lblSubtitle = new Label
@@ -349,16 +419,13 @@ namespace PatsKillerPro
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            lblSubtitle.Location = new Point((_loginPanel.Width - lblSubtitle.PreferredWidth) / 2, y);
-            _loginPanel.Controls.Add(lblSubtitle);
-            y += 40;
+            AddRow(lblSubtitle, row++, new Padding(0, 0, 0, 18));
 
-            // ===== GOOGLE SIGN IN BUTTON (Primary) =====
+            // Google button
             var btnGoogle = new Button
             {
-                Text = "     Continue with Google",
-                Size = new Size(360, 50),
-                Location = new Point((_loginPanel.Width - 360) / 2, y),
+                Text = "Continue with Google",
+                Size = new Size(380, 50),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorGoogleBtn,
                 ForeColor = Color.FromArgb(60, 60, 60),
@@ -369,133 +436,117 @@ namespace PatsKillerPro
             };
             btnGoogle.FlatAppearance.BorderSize = 0;
             btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
-            
-            // Add Google icon
-            btnGoogle.Image = CreateGoogleIcon(24);
+            btnGoogle.Image = CreateGoogleIcon(22);
             btnGoogle.TextImageRelation = TextImageRelation.ImageBeforeText;
-            btnGoogle.Padding = new Padding(15, 0, 0, 0);
-            
+            btnGoogle.Padding = new Padding(18, 0, 0, 0);
             btnGoogle.Click += BtnGoogle_Click;
-            _loginPanel.Controls.Add(btnGoogle);
-            y += 65;
+            AddRow(btnGoogle, row++, new Padding(0, 0, 0, 16));
 
-            // Divider "or sign in with email"
-            var lblDivider = new Label
+            // Divider: line - label - line
+            var divider = new TableLayoutPanel
             {
-                Text = "───────────  or sign in with email  ───────────",
-                Font = new Font("Segoe UI", 8F),
+                AutoSize = true,
+                ColumnCount = 3,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 16)
+            };
+            divider.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+            divider.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            divider.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+
+            Panel Line()
+            {
+                return new Panel { Height = 1, Dock = DockStyle.Fill, BackColor = _colorBorder, Margin = new Padding(0, 12, 0, 0) };
+            }
+
+            var lblOr = new Label
+            {
+                Text = "or sign in with email",
+                Font = new Font("Segoe UI", 8.5F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = new Padding(12, 0, 12, 0)
             };
-            lblDivider.Location = new Point((_loginPanel.Width - lblDivider.PreferredWidth) / 2, y);
-            _loginPanel.Controls.Add(lblDivider);
-            y += 30;
+            divider.Controls.Add(Line(), 0, 0);
+            divider.Controls.Add(lblOr, 1, 0);
+            divider.Controls.Add(Line(), 2, 0);
+            AddRow(divider, row++);
 
-            // Email label
+            // Email
             var lblEmail = new Label
             {
                 Text = "Email",
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(30, y),
                 BackColor = Color.Transparent
             };
-            _loginPanel.Controls.Add(lblEmail);
-            y += 22;
+            AddRow(lblEmail, row++, new Padding(0, 0, 0, 6));
 
-            // Email input
             var txtEmail = new TextBox
             {
-                Size = new Size(360, 40),
-                Location = new Point(30, y),
+                Size = new Size(380, 38),
                 BackColor = _colorInput,
                 ForeColor = _colorText,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 11F)
+                Font = new Font("Segoe UI", 11F),
+                Multiline = true,
+                Text = ""
             };
-            txtEmail.GotFocus += (s, e) => { if (txtEmail.Text == "you@example.com") txtEmail.Text = ""; };
-            txtEmail.Text = "you@example.com";
-            txtEmail.ForeColor = _colorTextDim;
-            txtEmail.GotFocus += (s, e) => txtEmail.ForeColor = _colorText;
-            _loginPanel.Controls.Add(txtEmail);
-            y += 45;
+            AddRow(txtEmail, row++, new Padding(0, 0, 0, 12));
 
-            // Password label
-            var lblPassword = new Label
+            // Password
+            var lblPass = new Label
             {
                 Text = "Password",
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(30, y),
                 BackColor = Color.Transparent
             };
-            _loginPanel.Controls.Add(lblPassword);
-            y += 22;
+            AddRow(lblPass, row++, new Padding(0, 0, 0, 6));
 
-            // Password input
             var txtPassword = new TextBox
             {
-                Size = new Size(360, 40),
-                Location = new Point(30, y),
+                Size = new Size(380, 38),
                 BackColor = _colorInput,
                 ForeColor = _colorText,
                 BorderStyle = BorderStyle.FixedSingle,
                 Font = new Font("Segoe UI", 11F),
-                UseSystemPasswordChar = true
+                Multiline = true,
+                UseSystemPasswordChar = true,
+                Text = ""
             };
-            _loginPanel.Controls.Add(txtPassword);
-            y += 50;
+            AddRow(txtPassword, row++, new Padding(0, 0, 0, 18));
 
-            // Sign In button (email/password)
+            // Sign in button
             var btnSignIn = new Button
             {
                 Text = "Sign In",
-                Size = new Size(360, 45),
-                Location = new Point(30, y),
+                Size = new Size(380, 52),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorRed,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
             btnSignIn.FlatAppearance.BorderSize = 0;
-            btnSignIn.Click += (s, e) => 
+            btnSignIn.FlatAppearance.MouseOverBackColor = Color.FromArgb(215, 55, 80);
+            btnSignIn.Click += (s, e) =>
             {
                 MessageBox.Show(
-                    "Email/password login is not yet implemented.\n\nPlease use 'Continue with Google' or register at patskiller.com",
+                    "Email/password login is not yet implemented.
+
+Please use 'Continue with Google' or register at patskiller.com",
                     "Coming Soon",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             };
-            _loginPanel.Controls.Add(btnSignIn);
-            y += 55;
+            AddRow(btnSignIn, row++, new Padding(0, 0, 0, 0));
 
-            // Register link
-            var lblRegister = new Label
-            {
-                Text = "Don't have an account? Register at patskiller.com",
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                Cursor = Cursors.Hand
-            };
-            lblRegister.Location = new Point((_loginPanel.Width - lblRegister.PreferredWidth) / 2, y);
-            lblRegister.Click += (s, e) =>
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "https://patskiller.com/register",
-                    UseShellExecute = true
-                });
-            };
-            lblRegister.MouseEnter += (s, e) => lblRegister.ForeColor = _colorRed;
-            lblRegister.MouseLeave += (s, e) => lblRegister.ForeColor = _colorTextDim;
-            _loginPanel.Controls.Add(lblRegister);
-
+            _loginPanel.Controls.Add(root);
             _contentPanel.Controls.Add(_loginPanel);
         }
 
@@ -981,6 +1032,22 @@ namespace PatsKillerPro
             _lblTokens.Text = $"Tokens: {tokens}";
             _lblStatus.Text = email;
             PositionHeaderLabels();
+
+            // Auto-start: close this dialog as soon as we have a valid session.
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(450);
+                if (IsDisposed) return;
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        DialogResult = DialogResult.OK;
+                        Close();
+                    }));
+                }
+                catch { /* ignore */ }
+            });
         }
 
         private void ShowErrorState(string message = "Authentication was cancelled or timed out.\nPlease try again.")
@@ -1003,13 +1070,34 @@ namespace PatsKillerPro
 
         private void CenterPanel(Panel panel)
         {
-            if (_contentPanel != null && panel != null)
+            if (_contentPanel == null || panel == null) return;
+
+            // Responsive sizing: grow the card on large windows, but cap it so it still feels "modal".
+            int w = Math.Max(460, Math.Min(640, _contentPanel.Width - 140));
+            int h = Math.Max(520, Math.Min(720, _contentPanel.Height - 120));
+
+            if (ReferenceEquals(panel, _loginPanel))
             {
-                panel.Location = new Point(
-                    Math.Max(0, (_contentPanel.Width - panel.Width) / 2),
-                    Math.Max(0, (_contentPanel.Height - panel.Height) / 2)
-                );
+                panel.Size = new Size(w, h);
             }
+            else if (ReferenceEquals(panel, _waitingPanel))
+            {
+                panel.Size = new Size(Math.Min(560, w), Math.Min(520, h));
+            }
+            else if (ReferenceEquals(panel, _successPanel))
+            {
+                panel.Size = new Size(Math.Min(520, w), Math.Min(520, h));
+            }
+            else if (ReferenceEquals(panel, _errorPanel))
+            {
+                panel.Size = new Size(Math.Min(560, w), Math.Min(520, h));
+            }
+
+            panel.Location = new Point(
+                Math.Max(0, (_contentPanel.Width - panel.Width) / 2),
+                Math.Max(0, (_contentPanel.Height - panel.Height) / 2)
+            );
+        }
         }
 
         private void CenterActivePanel()

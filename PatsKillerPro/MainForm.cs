@@ -59,40 +59,28 @@ namespace PatsKillerPro
             ApplyDarkTitleBar();
             BuildUI();
             LoadSession();
+
+            // Dispose cached images cleanly
+            this.FormClosed += (_, __) => { try { _logoImage?.Dispose(); } catch { } };
         }
 
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
 
-            // Fit the entire app (including Activity Log) into the visible working area by default.
-            // This avoids "missing log" on smaller screens and eliminates first-launch scrolling.
-            var wa = Screen.FromControl(this).WorkingArea;
-            var inset = Dpi(8);
-
-            var target = new Rectangle(
-                wa.Left + inset,
-                wa.Top + inset,
-                Math.Max(MinimumSize.Width, wa.Width - (inset * 2)),
-                Math.Max(MinimumSize.Height, wa.Height - (inset * 2))
-            );
-
-            // Clamp to the working area (Windows will enforce this anyway, but be explicit)
-            target.Width = Math.Min(target.Width, wa.Width);
-            target.Height = Math.Min(target.Height, wa.Height);
-
-            StartPosition = FormStartPosition.Manual;
-            Bounds = target;
+            // Maximize by default (requested). Keeps the Activity Log visible and avoids initial scrolling.
+            if (WindowState != FormWindowState.Maximized)
+                WindowState = FormWindowState.Maximized;
         }
 
         private void InitializeComponent()
         {
             this.Text = "PatsKiller Pro 2026";
-            // Default size is later snapped to the current monitor's working area in OnShown()
             this.ClientSize = new Size(1400, 900);
             // Keep the app usable on common laptop screens (e.g., 1366x768)
             this.MinimumSize = new Size(1100, 720);
             this.StartPosition = FormStartPosition.CenterScreen;
+            this.WindowState = FormWindowState.Maximized;
             this.BackColor = BG;
             this.ForeColor = TEXT;
             this.Font = new Font("Segoe UI", 10F);
@@ -133,7 +121,34 @@ namespace PatsKillerPro
                 return host;
             }
 
-            // Fallback: simple letter mark (keeps UI usable even if resource path changes)
+            // Fallback: use the EXE icon (always available) before the plain letter mark.
+            try
+            {
+                var ic = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (ic != null)
+                {
+                    using (ic)
+                    {
+                        _logoImage = ic.ToBitmap();
+                    }
+
+                    if (_logoImage != null)
+                    {
+                        var pb2 = new PictureBox
+                        {
+                            Dock = DockStyle.Fill,
+                            BackColor = Color.Transparent,
+                            SizeMode = PictureBoxSizeMode.Zoom,
+                            Image = _logoImage
+                        };
+                        host.Controls.Add(pb2);
+                        return host;
+                    }
+                }
+            }
+            catch { }
+
+            // Last-resort: simple letter mark (keeps UI usable even if branding assets go missing).
             var lbl = new Label
             {
                 Text = "P",
@@ -150,36 +165,124 @@ namespace PatsKillerPro
 
         private Image? TryLoadLogoImage()
         {
+            // Robust brand mark loading across Debug / Publish / single-file.
+            // Priority: embedded resources -> loose files -> associated EXE icon.
+
+            static Image? CloneFromStream(Stream s)
+            {
+                try
+                {
+                    using var tmp = Image.FromStream(s);
+                    return new Bitmap(tmp);
+                }
+                catch { return null; }
+            }
+
+            static Image? LoadPngNoLock(string path)
+            {
+                try
+                {
+                    using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    return CloneFromStream(fs);
+                }
+                catch { return null; }
+            }
+
+            static Image? LoadIcoToBitmap(string path)
+            {
+                try
+                {
+                    using var ic = new Icon(path);
+                    return ic.ToBitmap();
+                }
+                catch { return null; }
+            }
+
+            // 1) Embedded resources
             try
             {
-                // Prefer embedded resource (most reliable when deployed)
-                var asm = Assembly.GetExecutingAssembly();
+                var asm = typeof(MainForm).Assembly
+                          ?? Assembly.GetEntryAssembly()
+                          ?? Assembly.GetExecutingAssembly();
+
                 var names = asm.GetManifestResourceNames();
-                var resName = names.FirstOrDefault(n => n.EndsWith("Resources.logo.png", StringComparison.OrdinalIgnoreCase))
-                           ?? names.FirstOrDefault(n => n.EndsWith("logo.png", StringComparison.OrdinalIgnoreCase));
+
+                string? pick(params string[] endsWith)
+                {
+                    foreach (var suf in endsWith)
+                    {
+                        var n = names.FirstOrDefault(x => x.EndsWith(suf, StringComparison.OrdinalIgnoreCase));
+                        if (!string.IsNullOrWhiteSpace(n)) return n;
+                    }
+                    return null;
+                }
+
+                // Prefer icons (smaller + crisp), then PNG
+                var resName = pick(".Resources.app.ico", "Resources.app.ico", "app.ico",
+                                   ".Resources.favicon.ico", "Resources.favicon.ico", "favicon.ico",
+                                   ".Resources.logo.png", "Resources.logo.png", "logo.png");
 
                 if (!string.IsNullOrWhiteSpace(resName))
                 {
-                    using var s = asm.GetManifestResourceStream(resName);
+                    using var s = asm.GetManifestResourceStream(resName!);
                     if (s != null)
                     {
-                        // Clone into memory so the stream can be closed safely.
-                        using var tmp = Image.FromStream(s);
-                        return new Bitmap(tmp);
+                        if (resName!.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
+                        {
+                            using var ms = new MemoryStream();
+                            s.CopyTo(ms);
+                            ms.Position = 0;
+                            using var ic = new Icon(ms);
+                            return ic.ToBitmap();
+                        }
+                        var img = CloneFromStream(s);
+                        if (img != null) return img;
                     }
                 }
             }
-            catch { /* ignore and fall back */ }
+            catch { }
 
+            // 2) Loose files (dev runs / non single-file publish)
             try
             {
-                // Fallback to file on disk (useful for dev runs / loose file deployments)
                 var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                var p1 = Path.Combine(baseDir, "Resources", "logo.png");
-                if (File.Exists(p1)) return Image.FromFile(p1);
 
-                var p2 = Path.Combine(baseDir, "logo.png");
-                if (File.Exists(p2)) return Image.FromFile(p2);
+                foreach (var p in new[]
+                {
+                    Path.Combine(baseDir, "Resources", "app.ico"),
+                    Path.Combine(baseDir, "Resources", "favicon.ico"),
+                    Path.Combine(baseDir, "Resources", "logo.png"),
+                    Path.Combine(baseDir, "app.ico"),
+                    Path.Combine(baseDir, "favicon.ico"),
+                    Path.Combine(baseDir, "logo.png")
+                })
+                {
+                    if (!File.Exists(p)) continue;
+                    if (p.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var bi = LoadIcoToBitmap(p);
+                        if (bi != null) return bi;
+                    }
+                    else
+                    {
+                        var bp = LoadPngNoLock(p);
+                        if (bp != null) return bp;
+                    }
+                }
+            }
+            catch { }
+
+            // 3) Associated icon (works even when content files aren't extracted)
+            try
+            {
+                var ic = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (ic != null)
+                {
+                    using (ic)
+                    {
+                        return ic.ToBitmap();
+                    }
+                }
             }
             catch { }
 
