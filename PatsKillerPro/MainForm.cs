@@ -97,7 +97,12 @@ namespace PatsKillerPro
 
         private void ApplyDarkTitleBar()
         {
-            try { int v = 1; DwmSetWindowAttribute(this.Handle, 20, ref v, 4); } catch { }
+            try 
+            { 
+                int v = 1; 
+                DwmSetWindowAttribute(this.Handle, 20, ref v, 4); 
+            } 
+            catch { }
         }
 
         [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
@@ -237,7 +242,6 @@ namespace PatsKillerPro
             var lblSelect = new Label { Text = "Or select vehicle:", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, AutoSize = true, Location = new Point(400, 54) };
             sec2.Controls.Add(lblSelect);
             
-            // INCREASED WIDTH to 350 so "Bronco" text fits
             _cmbVehicles = MakeComboBox(350);
             _cmbVehicles.Location = new Point(520, 48);
             foreach (var v in VehiclePlatforms.GetAllVehicles()) _cmbVehicles.Items.Add(v.DisplayName);
@@ -298,7 +302,6 @@ namespace PatsKillerPro
             var sec4 = MakeSection("KEY PROGRAMMING OPERATIONS", W, 115);
             sec4.Location = new Point(0, y);
             
-            // Use FlowLayoutPanel to automatically size buttons (FIXES "Progra" text cut off)
             var btnFlow = new FlowLayoutPanel 
             { 
                 Location = new Point(20, 45), 
@@ -603,13 +606,12 @@ namespace PatsKillerPro
             return b;
         }
         
-        // Helper specifically for the FlowLayout auto-sized buttons
         private Button MakeAutoSizedButton(string text, Color bg)
         {
-            var b = MakeButton(text, 0, 44); // Width 0, let AutoSize handle it
+            var b = MakeButton(text, 0, 44);
             b.AutoSize = true;
             b.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            b.MinimumSize = new Size(0, 44); // Ensure height
+            b.MinimumSize = new Size(0, 44);
             b.Padding = new Padding(15, 0, 15, 0);
             b.Margin = new Padding(0, 0, 10, 0);
             b.BackColor = bg;
@@ -731,4 +733,322 @@ namespace PatsKillerPro
         }
         #endregion
 
-        #
+        #region Device
+        private void BtnScan_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                Log("info", "Scanning..."); _cmbDevices.Items.Clear();
+                _deviceManager?.Dispose(); _deviceManager = new J2534DeviceManager();
+                _deviceManager.ScanForDevices();
+                var names = _deviceManager.GetDeviceNames();
+                if (names.Count == 0) { _cmbDevices.Items.Add("No devices found"); Log("warning", "No devices"); }
+                else { foreach (var n in names) _cmbDevices.Items.Add(n); Log("success", $"Found {names.Count}"); }
+                _cmbDevices.SelectedIndex = 0;
+            }
+            catch (Exception ex) { ShowError("Scan Error", "Failed", ex); }
+        }
+
+        private void BtnConnect_Click(object? sender, EventArgs e)
+        {
+            if (_cmbDevices.SelectedItem == null || _cmbDevices.SelectedItem.ToString()!.Contains("No") || _cmbDevices.SelectedItem.ToString()!.Contains("Select") || _deviceManager == null)
+            { MessageBox.Show("Select device first.", "Connect", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try
+            {
+                Log("info", "Connecting...");
+                var name = _cmbDevices.SelectedItem.ToString()!;
+                _device = _deviceManager.ConnectToDevice(name);
+                _hsCanChannel = _device.OpenChannel(Protocol.ISO15765, BaudRates.HS_CAN_500K, ConnectFlags.NONE);
+                _lblStatus.Text = "● Connected"; _lblStatus.ForeColor = ColorSuccess;
+                Log("success", $"Connected to {name}");
+            }
+            catch (Exception ex) { ShowError("Connect Failed", "Error", ex); }
+        }
+
+        private async void BtnReadVin_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try
+            {
+                Log("info", "Reading VIN...");
+                var uds = new UdsService(_hsCanChannel);
+                _currentVin = await Task.Run(() => uds.ReadVIN()) ?? "";
+                if (!string.IsNullOrEmpty(_currentVin))
+                {
+                    _lblVin.Text = $"VIN: {_currentVin}"; _lblVin.ForeColor = ColorSuccess;
+                    var outcode = await Task.Run(() => uds.ReadOutcode());
+                    _txtOutcode.Text = outcode;
+                    Log("success", $"VIN: {_currentVin}");
+                }
+                else { _lblVin.Text = "VIN: Could not read"; _lblVin.ForeColor = ColorDanger; Log("warning", "Could not read VIN"); }
+            }
+            catch (Exception ex) { ShowError("Read Error", "Failed", ex); }
+        }
+        #endregion
+
+        #region PATS Operations
+        private async void BtnProgramKeys_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            var incode = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try { Log("info", "Programming..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); var r = await Task.Run(() => pats.ProgramKeys(incode)); if (r) { MessageBox.Show("Key programmed!\n\nRemove key, insert next, click Program again.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Key programmed"); } }
+            catch (Exception ex) { ShowError("Programming Failed", "Failed", ex); }
+        }
+
+        private async void BtnEraseKeys_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (!ConfirmToken(PatsOperations.TOKEN_COST_KEY_ERASE, "Erase All Keys")) return;
+            if (MessageBox.Show("ERASE ALL KEYS?\n\nThis cannot be undone!", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            var incode = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try { Log("warning", "Erasing..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.EraseAllKeys(incode)); MessageBox.Show("All keys erased!\n\nProgram 2+ new keys now.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning); Log("success", "Erased"); }
+            catch (Exception ex) { ShowError("Erase Failed", "Failed", ex); }
+        }
+
+        private async void BtnParamReset_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try { Log("info", "Resetting..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ParameterReset()); MessageBox.Show("Done!\n\nIgnition OFF 15s then ON.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Reset complete"); }
+            catch (Exception ex) { ShowError("Reset Failed", "Failed", ex); }
+        }
+
+        private async void BtnEscl_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (!ConfirmToken(PatsOperations.TOKEN_COST_ESCL_INIT, "Initialize ESCL")) return;
+            try { Log("info", "Initializing ESCL..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.InitializeESCL()); MessageBox.Show("ESCL initialized!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "ESCL done"); }
+            catch (Exception ex) { ShowError("ESCL Failed", "Failed", ex); }
+        }
+
+        private async void BtnDisableBcm_Click(object? sender, EventArgs e)
+        {
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            try { Log("info", "Disabling BCM..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.DisableBcmSecurity()); MessageBox.Show("BCM disabled.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "BCM disabled"); }
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); }
+        }
+        #endregion
+
+        #region Diagnostics
+        private async void BtnClearP160A_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_P160A, "Clear P160A")) return; 
+            try 
+            { 
+                Log("info", "Clearing P160A..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var pats = new PatsOperations(uds); 
+                await Task.Run(() => pats.ClearP160A()); 
+                MessageBox.Show("P160A cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Cleared"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnClearB10A2_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_B10A2, "Clear B10A2")) return; 
+            try 
+            { 
+                Log("info", "Clearing B10A2..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var pats = new PatsOperations(uds); 
+                await Task.Run(() => pats.ClearB10A2()); 
+                MessageBox.Show("B10A2 cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Cleared"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnClearCrush_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_CRUSH, "Clear Crush")) return; 
+            try 
+            { 
+                Log("info", "Clearing crush..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var pats = new PatsOperations(uds); 
+                await Task.Run(() => pats.ClearCrushEvent()); 
+                MessageBox.Show("Crush cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Cleared"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnGatewayUnlock_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            try 
+            { 
+                var uds = new UdsService(_hsCanChannel); 
+                var pats = new PatsOperations(uds); 
+                if (!await Task.Run(() => pats.DetectGateway())) 
+                { 
+                    MessageBox.Show("No gateway (pre-2020).", "Gateway", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                    return; 
+                } 
+                if (!ConfirmToken(PatsOperations.TOKEN_COST_GATEWAY_UNLOCK, "Unlock Gateway")) return; 
+                var incode = _txtIncode.Text.Trim(); 
+                if (string.IsNullOrEmpty(incode)) 
+                { 
+                    MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); 
+                    return; 
+                } 
+                await Task.Run(() => pats.UnlockGateway(incode)); 
+                MessageBox.Show("Gateway unlocked!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Unlocked"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnKeypadCode_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            var c = MessageBox.Show("YES = Read\nNO = Write", "Keypad", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question); 
+            if (c == DialogResult.Cancel) return; 
+            if (c == DialogResult.Yes) 
+            { 
+                if (!ConfirmToken(PatsOperations.TOKEN_COST_KEYPAD_READ, "Read Keypad")) return; 
+                try 
+                { 
+                    var uds = new UdsService(_hsCanChannel); 
+                    var pats = new PatsOperations(uds); 
+                    var code = await Task.Run(() => pats.ReadKeypadCode()); 
+                    MessageBox.Show($"Code: {code}", "Keypad", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                    Log("success", $"Keypad: {code}"); 
+                } 
+                catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+            } 
+            else 
+            { 
+                var nc = Microsoft.VisualBasic.Interaction.InputBox("Enter 5-digit code:", "Write Keypad", ""); 
+                if (string.IsNullOrEmpty(nc) || nc.Length != 5) return; 
+                if (!ConfirmToken(PatsOperations.TOKEN_COST_KEYPAD_WRITE, "Write Keypad")) return; 
+                try 
+                { 
+                    var uds = new UdsService(_hsCanChannel); 
+                    var pats = new PatsOperations(uds); 
+                    await Task.Run(() => pats.WriteKeypadCode(nc)); 
+                    MessageBox.Show($"Set: {nc}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                    Log("success", "Keypad set"); 
+                } 
+                catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+            } 
+        }
+
+        private async void BtnBcmFactory_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            if (MessageBox.Show("This resets ALL BCM settings!\nScanner required after!\n\nContinue?", "WARNING", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; 
+            if (!ConfirmToken(PatsOperations.TOKEN_COST_BCM_FACTORY, "BCM Factory Reset")) return; 
+            var i1 = Microsoft.VisualBasic.Interaction.InputBox("Incode 1:", "BCM Factory", _txtIncode.Text); 
+            if (string.IsNullOrEmpty(i1)) return; 
+            var i2 = Microsoft.VisualBasic.Interaction.InputBox("Incode 2:", "BCM Factory", ""); 
+            if (string.IsNullOrEmpty(i2)) return; 
+            var i3 = Microsoft.VisualBasic.Interaction.InputBox("Incode 3 (optional):", "BCM Factory", ""); 
+            var incodes = string.IsNullOrEmpty(i3) ? new[] { i1, i2 } : new[] { i1, i2, i3 }; 
+            try 
+            { 
+                Log("warning", "BCM Factory Reset..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var pats = new PatsOperations(uds); 
+                await Task.Run(() => pats.BcmFactoryDefaults(incodes)); 
+                MessageBox.Show("BCM reset!\nScanner required!", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning); 
+                Log("success", "BCM reset"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+        #endregion
+
+        #region Free Functions
+        private async void BtnClearDtc_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            try 
+            { 
+                Log("info", "Clearing DTCs..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                await Task.Run(() => uds.ClearDTCs()); 
+                MessageBox.Show("DTCs cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Cleared"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnClearKam_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            try 
+            { 
+                Log("info", "Clearing KAM..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var pats = new PatsOperations(uds); 
+                await Task.Run(() => pats.ClearKAM()); 
+                MessageBox.Show("KAM cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Cleared"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnVehicleReset_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            try 
+            { 
+                Log("info", "Resetting..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var pats = new PatsOperations(uds); 
+                await Task.Run(() => pats.VehicleReset()); 
+                MessageBox.Show("Reset complete!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Reset done"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnReadKeysCount_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            try 
+            { 
+                Log("info", "Reading keys..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var count = await Task.Run(() => uds.ReadKeysCount()); 
+                _lblKeysCount.Text = count.ToString(); 
+                MessageBox.Show($"Keys: {count}", "Count", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", $"Keys: {count}"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+
+        private async void BtnReadModuleInfo_Click(object? sender, EventArgs e) 
+        { 
+            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
+            try 
+            { 
+                Log("info", "Reading modules..."); 
+                var uds = new UdsService(_hsCanChannel); 
+                var info = await Task.Run(() => uds.ReadAllModuleInfo()); 
+                MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information); 
+                Log("success", "Done"); 
+            } 
+            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
+        }
+        #endregion
+
+        protected override void OnFormClosing(FormClosingEventArgs e) 
+        { 
+            try 
+            { 
+                _hsCanChannel?.Dispose(); 
+                _device?.Dispose(); 
+                _deviceManager?.Dispose(); 
+            } 
+            catch { } 
+            base.OnFormClosing(e); 
+        }
+    }
+}
