@@ -1,5 +1,8 @@
 using System;
 using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.Communication;
@@ -33,6 +36,9 @@ namespace PatsKillerPro
         private J2534Channel? _channel;
         private int _activeTab = 0;
 
+        // Assets
+        private Image? _logoImage;
+
         // Controls
         private Panel _header = null!, _tabBar = null!, _content = null!, _logPanel = null!, _loginPanel = null!;
         private Panel _patsTab = null!, _diagTab = null!, _freeTab = null!;
@@ -45,6 +51,8 @@ namespace PatsKillerPro
         // DPI helpers (keeps runtime-created controls scaling-friendly)
         private int Dpi(int px) => (int)Math.Round(px * (DeviceDpi / 96f));
         private Padding DpiPad(int l, int t, int r, int b) => new Padding(Dpi(l), Dpi(t), Dpi(r), Dpi(b));
+
+        private Image? _logoImage;
 
         public MainForm()
         {
@@ -100,6 +108,85 @@ namespace PatsKillerPro
             try { int v = 1; DwmSetWindowAttribute(Handle, 20, ref v, 4); } catch { }
         }
 
+        private Control CreateLogoBlock()
+        {
+            var sz = Dpi(54);
+            var host = new Panel
+            {
+                Size = new Size(sz, sz),
+                BackColor = ACCENT,
+                Margin = new Padding(0, 0, Dpi(12), 0),
+                Padding = DpiPad(6, 6, 6, 6)
+            };
+
+            _logoImage ??= TryLoadLogoImage();
+
+            if (_logoImage != null)
+            {
+                var pb = new PictureBox
+                {
+                    Dock = DockStyle.Fill,
+                    BackColor = Color.Transparent,
+                    SizeMode = PictureBoxSizeMode.Zoom,
+                    Image = _logoImage
+                };
+                host.Controls.Add(pb);
+                return host;
+            }
+
+            // Fallback: simple letter mark (keeps UI usable even if resource path changes)
+            var lbl = new Label
+            {
+                Text = "P",
+                Font = new Font("Segoe UI", 16, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = Color.Transparent,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            host.Padding = new Padding(0);
+            host.Controls.Add(lbl);
+            return host;
+        }
+
+        private Image? TryLoadLogoImage()
+        {
+            try
+            {
+                // Prefer embedded resource (most reliable when deployed)
+                var asm = Assembly.GetExecutingAssembly();
+                var names = asm.GetManifestResourceNames();
+                var resName = names.FirstOrDefault(n => n.EndsWith("Resources.logo.png", StringComparison.OrdinalIgnoreCase))
+                           ?? names.FirstOrDefault(n => n.EndsWith("logo.png", StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrWhiteSpace(resName))
+                {
+                    using var s = asm.GetManifestResourceStream(resName);
+                    if (s != null)
+                    {
+                        // Clone into memory so the stream can be closed safely.
+                        using var tmp = Image.FromStream(s);
+                        return new Bitmap(tmp);
+                    }
+                }
+            }
+            catch { /* ignore and fall back */ }
+
+            try
+            {
+                // Fallback to file on disk (useful for dev runs / loose file deployments)
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var p1 = Path.Combine(baseDir, "Resources", "logo.png");
+                if (File.Exists(p1)) return Image.FromFile(p1);
+
+                var p2 = Path.Combine(baseDir, "logo.png");
+                if (File.Exists(p2)) return Image.FromFile(p2);
+            }
+            catch { }
+
+            return null;
+        }
+
         [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
 
@@ -142,16 +229,8 @@ namespace PatsKillerPro
             left.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-            var logo = new Label
-            {
-                Text = "P",
-                Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = Color.White,
-                BackColor = ACCENT,
-                Size = new Size(Dpi(54), Dpi(54)),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Margin = new Padding(0, 0, Dpi(12), 0)
-            };
+            // Logo (loads Resources/logo.png from embedded resource or disk; falls back to "P")
+            var logo = CreateLogoBlock();
 
             var textStack = new TableLayoutPanel
             {
@@ -723,6 +802,19 @@ namespace PatsKillerPro
         private async void BtnReadKeys_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { var c = await Task.Run(() => new UdsService(_channel).ReadKeysCount()); _lblKeys.Text = c.ToString(); MessageBox.Show($"Keys: {c}"); Log("success", $"Keys: {c}"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
         #endregion
 
-        protected override void OnFormClosing(FormClosingEventArgs e) { try { _channel?.Dispose(); _device?.Dispose(); _deviceManager?.Dispose(); } catch { } base.OnFormClosing(e); }
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            try
+            {
+                _channel?.Dispose();
+                _device?.Dispose();
+                _deviceManager?.Dispose();
+                _logoImage?.Dispose();
+                _logoImage = null;
+            }
+            catch { }
+
+            base.OnFormClosing(e);
+        }
     }
 }
