@@ -53,8 +53,8 @@ namespace PatsKillerPro
         private void InitializeComponent()
         {
             this.Text = "PatsKiller Pro 2026";
-            this.ClientSize = new Size(1400, 950);
-            this.MinimumSize = new Size(1200, 800);
+            this.ClientSize = new Size(1500, 1000);
+            this.MinimumSize = new Size(1300, 900);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = BG;
             this.ForeColor = TEXT;
@@ -88,11 +88,11 @@ namespace PatsKillerPro
             _header.Resize += (s, e) => LayoutHeader();
             Controls.Add(_header);
 
-            // TAB BAR
+            // TAB BAR - wider flow panel for all 3 tabs
             _tabBar = new Panel { Dock = DockStyle.Top, Height = 55, BackColor = SURFACE, Visible = false };
             _tabBar.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawLine(p, 0, 54, Width, 54); };
 
-            var tabFlow = new FlowLayoutPanel { Location = new Point(20, 10), Size = new Size(800, 42), BackColor = Color.Transparent };
+            var tabFlow = new FlowLayoutPanel { Location = new Point(20, 10), Size = new Size(1200, 42), BackColor = Color.Transparent };
             _btnTab1 = TabBtn("PATS Key Programming", true); _btnTab1.Click += (s, e) => SwitchTab(0); tabFlow.Controls.Add(_btnTab1);
             _btnTab2 = TabBtn("Diagnostics", false); _btnTab2.Click += (s, e) => SwitchTab(1); tabFlow.Controls.Add(_btnTab2);
             _btnTab3 = TabBtn("Free Functions", false); _btnTab3.Click += (s, e) => SwitchTab(2); tabFlow.Controls.Add(_btnTab3);
@@ -129,142 +129,189 @@ namespace PatsKillerPro
 
         private void BuildPatsTab()
         {
-            _patsTab = new Panel { Location = new Point(20, 15), BackColor = BG, AutoSize = true };
-            int y = 0, W = 1320;
+            _patsTab = new Panel { Location = new Point(20, 15), BackColor = BG, Size = new Size(1420, 600) };
+            int y = 0, W = 1400;
 
-            // === J2534 DEVICE CONNECTION ===
-            var sec1 = Section("J2534 DEVICE CONNECTION", W, 100);
+            // === SECTION 1: J2534 DEVICE CONNECTION ===
+            var sec1 = Section("J2534 DEVICE CONNECTION", W, 110);
             sec1.Location = new Point(0, y);
 
-            var row1 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
-            _cmbDevices = MakeCombo(420); _cmbDevices.Items.Add("Select J2534 Device..."); _cmbDevices.SelectedIndex = 0;
-            _cmbDevices.Margin = new Padding(0, 4, 20, 0);
+            var row1 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
+            
+            _cmbDevices = MakeCombo(400);
+            _cmbDevices.Items.Add("Select J2534 Device...");
+            _cmbDevices.SelectedIndex = 0;
+            _cmbDevices.Margin = new Padding(0, 6, 20, 0);
             row1.Controls.Add(_cmbDevices);
 
-            var btnScan = AutoBtn("Scan Devices", BTN_BG); btnScan.Click += BtnScan_Click; row1.Controls.Add(btnScan);
-            var btnConn = AutoBtn("Connect", SUCCESS); btnConn.Click += BtnConnect_Click; row1.Controls.Add(btnConn);
-            _lblStatus = new Label { Text = "Status: Not Connected", Font = new Font("Segoe UI", 11), ForeColor = WARNING, AutoSize = true, Margin = new Padding(25, 10, 0, 0) };
+            var btnScan = AutoBtn("Scan Devices", BTN_BG);
+            btnScan.Click += BtnScan_Click;
+            row1.Controls.Add(btnScan);
+
+            var btnConn = AutoBtn("Connect", SUCCESS);
+            btnConn.Click += BtnConnect_Click;
+            row1.Controls.Add(btnConn);
+
+            _lblStatus = new Label { Text = "Status: Not Connected", Font = new Font("Segoe UI", 11), ForeColor = WARNING, AutoSize = true, Margin = new Padding(30, 12, 0, 0) };
             row1.Controls.Add(_lblStatus);
 
             sec1.Controls.Add(row1);
             _patsTab.Controls.Add(sec1);
-            y += 115;
+            y += 125;
 
-            // === VEHICLE INFORMATION ===
-            var sec2 = Section("VEHICLE INFORMATION", W, 100);
+            // === SECTION 2: VEHICLE INFORMATION ===
+            var sec2 = Section("VEHICLE INFORMATION", W, 110);
             sec2.Location = new Point(0, y);
 
-            var row2 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 180, 48), BackColor = Color.Transparent };
-            var btnVin = AutoBtn("Read VIN", ACCENT); btnVin.Click += BtnReadVin_Click; row2.Controls.Add(btnVin);
-            _lblVin = new Label { Text = "VIN: —————————————————", Font = new Font("Consolas", 12), ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(15, 10, 20, 0) };
+            var row2 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 200, 55), BackColor = Color.Transparent };
+            
+            var btnVin = AutoBtn("Read VIN", ACCENT);
+            btnVin.Click += BtnReadVin_Click;
+            row2.Controls.Add(btnVin);
+
+            _lblVin = new Label { Text = "VIN: —————————————————", Font = new Font("Consolas", 12), ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(15, 12, 20, 0) };
             row2.Controls.Add(_lblVin);
-            var lblSel = new Label { Text = "Or select vehicle:", Font = new Font("Segoe UI", 10), ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(10, 10, 10, 0) };
+
+            var lblSel = new Label { Text = "Or select vehicle:", Font = new Font("Segoe UI", 10), ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(20, 12, 10, 0) };
             row2.Controls.Add(lblSel);
-            _cmbVehicles = MakeCombo(360);
+
+            _cmbVehicles = MakeCombo(340);
             foreach (var v in VehiclePlatforms.GetAllVehicles()) _cmbVehicles.Items.Add(v.DisplayName);
             if (_cmbVehicles.Items.Count > 0) _cmbVehicles.SelectedIndex = 0;
-            _cmbVehicles.Margin = new Padding(0, 4, 0, 0);
+            _cmbVehicles.Margin = new Padding(0, 6, 0, 0);
             row2.Controls.Add(_cmbVehicles);
 
             sec2.Controls.Add(row2);
 
-            // Keys badge
-            var keysBg = new Panel { Location = new Point(W - 150, 42), Size = new Size(130, 52), BackColor = SURFACE };
-            keysBg.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, 129, 51); };
+            // Keys badge - positioned on right
+            var keysBg = new Panel { Location = new Point(W - 150, 45), Size = new Size(130, 55), BackColor = SURFACE };
+            keysBg.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, 129, 54); };
             keysBg.Controls.Add(new Label { Text = "KEYS", Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = TEXT_MUTED, Location = new Point(0, 6), Size = new Size(130, 16), TextAlign = ContentAlignment.MiddleCenter });
-            _lblKeys = new Label { Text = "--", Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = SUCCESS, Location = new Point(0, 22), Size = new Size(130, 28), TextAlign = ContentAlignment.MiddleCenter };
+            _lblKeys = new Label { Text = "--", Font = new Font("Segoe UI", 22, FontStyle.Bold), ForeColor = SUCCESS, Location = new Point(0, 24), Size = new Size(130, 28), TextAlign = ContentAlignment.MiddleCenter };
             keysBg.Controls.Add(_lblKeys);
             sec2.Controls.Add(keysBg);
 
             _patsTab.Controls.Add(sec2);
-            y += 115;
+            y += 125;
 
-            // === PATS SECURITY CODES ===
-            var sec3 = Section("PATS SECURITY CODES", W, 100);
+            // === SECTION 3: PATS SECURITY CODES ===
+            var sec3 = Section("PATS SECURITY CODES", W, 110);
             sec3.Location = new Point(0, y);
 
-            var row3 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
-            row3.Controls.Add(new Label { Text = "OUTCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 8, 0) });
-            _txtOutcode = MakeTextBox(160); _txtOutcode.ReadOnly = true; _txtOutcode.Margin = new Padding(0, 4, 15, 0); row3.Controls.Add(_txtOutcode);
-            var btnCopy = AutoBtn("Copy", BTN_BG); btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); Log("info", "Copied"); } }; row3.Controls.Add(btnCopy);
-            var btnGet = AutoBtn("Get Incode Online", WARNING); btnGet.ForeColor = Color.Black; btnGet.Click += (s, e) => OpenUrl("https://patskiller.com/calculator"); row3.Controls.Add(btnGet);
-            row3.Controls.Add(new Label { Text = "INCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = new Padding(30, 10, 8, 0) });
-            _txtIncode = MakeTextBox(160); _txtIncode.Margin = new Padding(0, 4, 0, 0); row3.Controls.Add(_txtIncode);
+            var row3 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
+            
+            row3.Controls.Add(new Label { Text = "OUTCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 12, 10, 0) });
+            
+            _txtOutcode = MakeTextBox(160);
+            _txtOutcode.ReadOnly = true;
+            _txtOutcode.Margin = new Padding(0, 6, 15, 0);
+            row3.Controls.Add(_txtOutcode);
+
+            var btnCopy = AutoBtn("Copy", BTN_BG);
+            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); Log("info", "Copied"); } };
+            row3.Controls.Add(btnCopy);
+
+            var btnGet = AutoBtn("Get Incode Online", WARNING);
+            btnGet.ForeColor = Color.Black;
+            btnGet.Click += (s, e) => OpenUrl("https://patskiller.com/calculator");
+            row3.Controls.Add(btnGet);
+
+            row3.Controls.Add(new Label { Text = "INCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = new Padding(40, 12, 10, 0) });
+            
+            _txtIncode = MakeTextBox(160);
+            _txtIncode.Margin = new Padding(0, 6, 0, 0);
+            row3.Controls.Add(_txtIncode);
 
             sec3.Controls.Add(row3);
             _patsTab.Controls.Add(sec3);
-            y += 115;
+            y += 125;
 
-            // === KEY PROGRAMMING OPERATIONS ===
-            var sec4 = Section("KEY PROGRAMMING OPERATIONS", W, 130);
+            // === SECTION 4: KEY PROGRAMMING OPERATIONS ===
+            var sec4 = Section("KEY PROGRAMMING OPERATIONS", W, 145);
             sec4.Location = new Point(0, y);
 
-            var row4 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 50), BackColor = Color.Transparent };
-            var btnProg = AutoBtn("Program Key", SUCCESS); btnProg.Font = new Font("Segoe UI", 11, FontStyle.Bold); btnProg.Click += BtnProgram_Click; row4.Controls.Add(btnProg);
-            var btnErase = AutoBtn("Erase All Keys", DANGER); btnErase.Click += BtnErase_Click; row4.Controls.Add(btnErase);
-            var btnParam = AutoBtn("Parameter Reset", BTN_BG); btnParam.Click += BtnParam_Click; row4.Controls.Add(btnParam);
-            var btnEscl = AutoBtn("Initialize ESCL", BTN_BG); btnEscl.Click += BtnEscl_Click; row4.Controls.Add(btnEscl);
-            var btnDis = AutoBtn("Disable BCM Security", BTN_BG); btnDis.Click += BtnDisable_Click; row4.Controls.Add(btnDis);
+            // Use TWO rows if needed - wider flow panel
+            var row4 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
+            
+            var btnProg = AutoBtn("Program Key", SUCCESS);
+            btnProg.Font = new Font("Segoe UI", 11, FontStyle.Bold);
+            btnProg.Click += BtnProgram_Click;
+            row4.Controls.Add(btnProg);
+
+            var btnErase = AutoBtn("Erase All Keys", DANGER);
+            btnErase.Click += BtnErase_Click;
+            row4.Controls.Add(btnErase);
+
+            var btnParam = AutoBtn("Parameter Reset", BTN_BG);
+            btnParam.Click += BtnParam_Click;
+            row4.Controls.Add(btnParam);
+
+            var btnEscl = AutoBtn("Initialize ESCL", BTN_BG);
+            btnEscl.Click += BtnEscl_Click;
+            row4.Controls.Add(btnEscl);
+
+            var btnDis = AutoBtn("Disable BCM Security", BTN_BG);
+            btnDis.Click += BtnDisable_Click;
+            row4.Controls.Add(btnDis);
+
             sec4.Controls.Add(row4);
 
-            var tip = new Label { Text = "💡 Tip: Program Key costs 1 token per session (unlimited keys). Insert key, click Program, repeat for additional keys.", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, Location = new Point(24, 102), AutoSize = true };
+            var tip = new Label { Text = "💡 Tip: Program Key costs 1 token per session (unlimited keys). Insert key, click Program, repeat for additional keys.", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, Location = new Point(24, 112), AutoSize = true };
             sec4.Controls.Add(tip);
 
             _patsTab.Controls.Add(sec4);
-            _patsTab.Size = new Size(W + 30, y + 145);
             _content.Controls.Add(_patsTab);
         }
 
         private void BuildDiagTab()
         {
-            _diagTab = new Panel { Location = new Point(20, 15), BackColor = BG, Visible = false, AutoSize = true };
-            int y = 0, W = 1320;
+            _diagTab = new Panel { Location = new Point(20, 15), BackColor = BG, Visible = false, Size = new Size(1420, 500) };
+            int y = 0, W = 1400;
 
-            var sec1 = Section("DTC CLEAR OPERATIONS (1 TOKEN EACH)", W, 100);
+            var sec1 = Section("DTC CLEAR OPERATIONS (1 TOKEN EACH)", W, 110);
             sec1.Location = new Point(0, y);
-            var r1 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
-            var b1 = AutoBtn("Clear P160A", ACCENT); b1.Click += BtnP160A_Click; r1.Controls.Add(b1);
-            var b2 = AutoBtn("Clear B10A2", ACCENT); b2.Click += BtnB10A2_Click; r1.Controls.Add(b2);
-            var b3 = AutoBtn("Clear Crush Event", ACCENT); b3.Click += BtnCrush_Click; r1.Controls.Add(b3);
-            var b4 = AutoBtn("Unlock Gateway", ACCENT); b4.Click += BtnGateway_Click; r1.Controls.Add(b4);
+            var r1 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
+            r1.Controls.Add(AutoBtn("Clear P160A", ACCENT)); ((Button)r1.Controls[0]).Click += BtnP160A_Click;
+            r1.Controls.Add(AutoBtn("Clear B10A2", ACCENT)); ((Button)r1.Controls[1]).Click += BtnB10A2_Click;
+            r1.Controls.Add(AutoBtn("Clear Crush Event", ACCENT)); ((Button)r1.Controls[2]).Click += BtnCrush_Click;
+            r1.Controls.Add(AutoBtn("Unlock Gateway", ACCENT)); ((Button)r1.Controls[3]).Click += BtnGateway_Click;
             sec1.Controls.Add(r1);
             _diagTab.Controls.Add(sec1);
-            y += 115;
+            y += 125;
 
-            var sec2 = Section("KEYPAD CODE OPERATIONS", W, 100);
+            var sec2 = Section("KEYPAD CODE OPERATIONS", W, 110);
             sec2.Location = new Point(0, y);
-            var r2 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
+            var r2 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
             var k1 = AutoBtn("Read Keypad Code", BTN_BG); k1.Click += BtnKeypad_Click; r2.Controls.Add(k1);
             var k2 = AutoBtn("Write Keypad Code", BTN_BG); k2.Click += BtnKeypad_Click; r2.Controls.Add(k2);
-            r2.Controls.Add(new Label { Text = "For vehicles with door keypad entry", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, AutoSize = true, Margin = new Padding(20, 12, 0, 0) });
+            r2.Controls.Add(new Label { Text = "For vehicles with door keypad entry", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, AutoSize = true, Margin = new Padding(25, 14, 0, 0) });
             sec2.Controls.Add(r2);
             _diagTab.Controls.Add(sec2);
-            y += 115;
+            y += 125;
 
-            var sec3 = Section("BCM ADVANCED OPERATIONS", W, 100);
+            var sec3 = Section("BCM ADVANCED OPERATIONS", W, 110);
             sec3.Location = new Point(0, y);
-            var r3 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
+            var r3 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
             var bcm = AutoBtn("BCM Factory Reset", DANGER); bcm.Click += BtnBcm_Click; r3.Controls.Add(bcm);
-            r3.Controls.Add(new Label { Text = "⚠ WARNING: Requires As-Built reprogramming after reset!", Font = new Font("Segoe UI", 10), ForeColor = DANGER, AutoSize = true, Margin = new Padding(20, 12, 0, 0) });
+            r3.Controls.Add(new Label { Text = "⚠ WARNING: Requires As-Built reprogramming after reset!", Font = new Font("Segoe UI", 10), ForeColor = DANGER, AutoSize = true, Margin = new Padding(25, 14, 0, 0) });
             sec3.Controls.Add(r3);
             _diagTab.Controls.Add(sec3);
-            y += 115;
+            y += 125;
 
-            var sec4 = Section("MODULE INFORMATION", W, 100);
+            var sec4 = Section("MODULE INFORMATION", W, 110);
             sec4.Location = new Point(0, y);
-            var r4 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
+            var r4 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
             var mod = AutoBtn("Read All Module Info", BTN_BG); mod.Click += BtnModInfo_Click; r4.Controls.Add(mod);
             sec4.Controls.Add(r4);
             _diagTab.Controls.Add(sec4);
 
-            _diagTab.Size = new Size(W + 30, y + 115);
             _content.Controls.Add(_diagTab);
         }
 
         private void BuildFreeTab()
         {
-            _freeTab = new Panel { Location = new Point(20, 15), BackColor = BG, Visible = false, AutoSize = true };
-            int y = 0, W = 1320;
+            _freeTab = new Panel { Location = new Point(20, 15), BackColor = BG, Visible = false, Size = new Size(1420, 450) };
+            int y = 0, W = 1400;
 
             var banner = new Panel { Location = new Point(0, y), Size = new Size(W, 55), BackColor = Color.FromArgb(20, 34, 197, 94) };
             banner.Paint += (s, e) => { using var p = new Pen(SUCCESS, 2); e.Graphics.DrawRectangle(p, 1, 1, W - 3, 52); };
@@ -272,35 +319,34 @@ namespace PatsKillerPro
             _freeTab.Controls.Add(banner);
             y += 70;
 
-            var sec1 = Section("BASIC VEHICLE OPERATIONS", W, 100);
+            var sec1 = Section("BASIC VEHICLE OPERATIONS", W, 110);
             sec1.Location = new Point(0, y);
-            var r1 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
+            var r1 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
             var f1 = AutoBtn("Clear All DTCs", BTN_BG); f1.Click += BtnDtc_Click; r1.Controls.Add(f1);
             var f2 = AutoBtn("Clear KAM", BTN_BG); f2.Click += BtnKam_Click; r1.Controls.Add(f2);
             var f3 = AutoBtn("Vehicle Reset", BTN_BG); f3.Click += BtnReset_Click; r1.Controls.Add(f3);
             sec1.Controls.Add(r1);
             _freeTab.Controls.Add(sec1);
-            y += 115;
+            y += 125;
 
-            var sec2 = Section("READ OPERATIONS", W, 100);
+            var sec2 = Section("READ OPERATIONS", W, 110);
             sec2.Location = new Point(0, y);
-            var r2 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
+            var r2 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
             var rd1 = AutoBtn("Read Keys Count", BTN_BG); rd1.Click += BtnReadKeys_Click; r2.Controls.Add(rd1);
             var rd2 = AutoBtn("Read Module Info", BTN_BG); rd2.Click += BtnModInfo_Click; r2.Controls.Add(rd2);
             sec2.Controls.Add(r2);
             _freeTab.Controls.Add(sec2);
-            y += 115;
+            y += 125;
 
-            var sec3 = Section("RESOURCES & SUPPORT", W, 100);
+            var sec3 = Section("RESOURCES & SUPPORT", W, 110);
             sec3.Location = new Point(0, y);
-            var r3 = new FlowLayoutPanel { Location = new Point(20, 48), Size = new Size(W - 40, 48), BackColor = Color.Transparent };
+            var r3 = new FlowLayoutPanel { Location = new Point(20, 50), Size = new Size(W - 40, 55), BackColor = Color.Transparent };
             var u1 = AutoBtn("User Guide", ACCENT); u1.Click += (s, e) => OpenUrl("https://patskiller.com/faqs"); r3.Controls.Add(u1);
             var u2 = AutoBtn("Buy Tokens", SUCCESS); u2.Click += (s, e) => OpenUrl("https://patskiller.com/buy-tokens"); r3.Controls.Add(u2);
             var u3 = AutoBtn("Contact Support", BTN_BG); u3.Click += (s, e) => OpenUrl("https://patskiller.com/contact"); r3.Controls.Add(u3);
             sec3.Controls.Add(r3);
             _freeTab.Controls.Add(sec3);
 
-            _freeTab.Size = new Size(W + 30, y + 115);
             _content.Controls.Add(_freeTab);
         }
 
@@ -345,19 +391,18 @@ namespace PatsKillerPro
                 using var f = new Font("Segoe UI", 11F, FontStyle.Bold);
                 using var b = new SolidBrush(TEXT_DIM);
                 e.Graphics.DrawString(title, f, b, 22, 14);
-                e.Graphics.DrawLine(pen, 18, 42, w - 18, 42);
+                e.Graphics.DrawLine(pen, 18, 44, w - 18, 44);
             };
             return p;
         }
 
-        // AUTO-SIZED BUTTON - Windows calculates width!
         private Button AutoBtn(string text, Color bg)
         {
             var b = new Button
             {
                 Text = text,
                 AutoSize = true,
-                Padding = new Padding(20, 12, 20, 12),  // Generous padding
+                Padding = new Padding(22, 12, 22, 12),
                 Margin = new Padding(0, 0, 15, 0),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = bg,
@@ -376,7 +421,7 @@ namespace PatsKillerPro
             {
                 Text = text,
                 AutoSize = true,
-                Padding = new Padding(22, 8, 22, 8),
+                Padding = new Padding(24, 10, 24, 10),
                 Margin = new Padding(0, 0, 10, 0),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = active ? ACCENT : BTN_BG,
