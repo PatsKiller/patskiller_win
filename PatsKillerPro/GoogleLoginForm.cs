@@ -589,7 +589,8 @@ namespace PatsKillerPro
             };
             lblTitle.Location = new Point((_waitingPanel.Width - lblTitle.PreferredWidth) / 2, y);
             _waitingPanel.Controls.Add(lblTitle);
-            y += lblWelcome.Height + 8;
+            // spacing after title
+            y += lblTitle.Height + 24;
 
             // Message
             var lblMsg = new Label
@@ -603,7 +604,8 @@ namespace PatsKillerPro
             };
             lblMsg.Location = new Point((_waitingPanel.Width - lblMsg.PreferredWidth) / 2, y);
             _waitingPanel.Controls.Add(lblMsg);
-            y += btnSignIn.Height + 16;
+            // spacing after message
+            y += lblMsg.Height + 28;
 
             // Animated dots container
             var dotsPanel = new Panel
@@ -638,7 +640,8 @@ namespace PatsKillerPro
                 animState = (animState + 1) % 3;
             };
             animTimer.Start();
-            y += lblWelcome.Height + 8;
+            // spacing after animated dots
+            y += dotsPanel.Height + 18;
 
             // "Waiting for authentication..."
             var lblWaiting = new Label
@@ -651,7 +654,7 @@ namespace PatsKillerPro
             };
             lblWaiting.Location = new Point((_waitingPanel.Width - lblWaiting.PreferredWidth) / 2, y);
             _waitingPanel.Controls.Add(lblWaiting);
-            y += lblSubtitle.Height + 18;
+            y += lblWaiting.Height + 18;
 
             // Reopen Browser button
             var btnReopen = new Button
@@ -669,7 +672,7 @@ namespace PatsKillerPro
             btnReopen.FlatAppearance.BorderSize = 1;
             btnReopen.Click += BtnReopenBrowser_Click;
             _waitingPanel.Controls.Add(btnReopen);
-            y += btnSignIn.Height + 16;
+            y += btnReopen.Height + 16;
 
             // Cancel link
             var lblCancel = new Label
@@ -736,7 +739,8 @@ namespace PatsKillerPro
                 }
             };
             _successPanel.Controls.Add(successIcon);
-            y += logoPic.Height + 15;
+            // spacing after success icon
+            y += successIcon.Height + 20;
 
             // "Welcome!"
             var lblWelcome = new Label
@@ -749,7 +753,7 @@ namespace PatsKillerPro
             };
             lblWelcome.Location = new Point((_successPanel.Width - lblWelcome.PreferredWidth) / 2, y);
             _successPanel.Controls.Add(lblWelcome);
-            y += lblSubtitle.Height + 18;
+            y += lblWelcome.Height + 18;
 
             // "Signed in as"
             var lblSignedAs = new Label
@@ -776,7 +780,7 @@ namespace PatsKillerPro
             };
             lblEmail.Location = new Point((_successPanel.Width - lblEmail.PreferredWidth) / 2, y);
             _successPanel.Controls.Add(lblEmail);
-            y += lblSubtitle.Height + 18;
+            y += lblEmail.Height + 22;
 
             // Token count box
             var tokenBox = new Panel
@@ -883,7 +887,8 @@ namespace PatsKillerPro
                 }
             };
             _errorPanel.Controls.Add(errorIcon);
-            y += logoPic.Height + 15;
+            // spacing after icon
+            y += errorIcon.Height + 20;
 
             // "Sign In Failed"
             var lblTitle = new Label
@@ -896,7 +901,7 @@ namespace PatsKillerPro
             };
             lblTitle.Location = new Point((_errorPanel.Width - lblTitle.PreferredWidth) / 2, y);
             _errorPanel.Controls.Add(lblTitle);
-            y += lblSubtitle.Height + 18;
+            y += lblTitle.Height + 18;
 
             // Error message
             var lblMsg = new Label
@@ -911,7 +916,7 @@ namespace PatsKillerPro
             };
             lblMsg.Location = new Point((_errorPanel.Width - lblMsg.PreferredWidth) / 2, y);
             _errorPanel.Controls.Add(lblMsg);
-            y += btnSignIn.Height + 16;
+            y += lblMsg.Height + 26;
 
             // Try Again button
             var btnRetry = new Button
@@ -928,7 +933,7 @@ namespace PatsKillerPro
             btnRetry.FlatAppearance.BorderSize = 0;
             btnRetry.Click += async (s, e) => await StartGoogleAuthAsync();
             _errorPanel.Controls.Add(btnRetry);
-            y += btnGoogle.Height + 16;
+            y += btnRetry.Height + 16;
 
             // Back to Login link
             var lblBack = new Label
