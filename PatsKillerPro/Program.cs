@@ -36,7 +36,7 @@ namespace PatsKillerPro
                 Logger.Info("PatsKiller Pro v1.0.0 starting...");
                 
                 // Configure application
-                Application.SetHighDpiMode(HighDpiMode.SystemAware);
+                Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 

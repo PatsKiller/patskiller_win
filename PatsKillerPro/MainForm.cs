@@ -54,17 +54,45 @@ namespace PatsKillerPro
             LoadSession();
         }
 
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            // Fit the entire app (including Activity Log) into the visible working area by default.
+            // This avoids "missing log" on smaller screens and eliminates first-launch scrolling.
+            var wa = Screen.FromControl(this).WorkingArea;
+            var inset = Dpi(8);
+
+            var target = new Rectangle(
+                wa.Left + inset,
+                wa.Top + inset,
+                Math.Max(MinimumSize.Width, wa.Width - (inset * 2)),
+                Math.Max(MinimumSize.Height, wa.Height - (inset * 2))
+            );
+
+            // Clamp to the working area (Windows will enforce this anyway, but be explicit)
+            target.Width = Math.Min(target.Width, wa.Width);
+            target.Height = Math.Min(target.Height, wa.Height);
+
+            StartPosition = FormStartPosition.Manual;
+            Bounds = target;
+        }
+
         private void InitializeComponent()
         {
             this.Text = "PatsKiller Pro 2026";
-            this.ClientSize = new Size(1500, 1000);
-            this.MinimumSize = new Size(1300, 900);
+            // Default size is later snapped to the current monitor's working area in OnShown()
+            this.ClientSize = new Size(1400, 900);
+            // Keep the app usable on common laptop screens (e.g., 1366x768)
+            this.MinimumSize = new Size(1100, 720);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = BG;
             this.ForeColor = TEXT;
             this.Font = new Font("Segoe UI", 10F);
             this.DoubleBuffered = true;
-            this.AutoScaleMode = AutoScaleMode.Dpi;
+            // We do our own DPI sizing via DeviceDpi + Dpi() helpers
+            this.AutoScaleMode = AutoScaleMode.None;
+            this.AutoScroll = false;
         }
 
         private void ApplyDarkTitleBar()
@@ -81,9 +109,9 @@ namespace PatsKillerPro
             _header = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = Dpi(90),
+                Height = Dpi(84),
                 BackColor = SURFACE,
-                Padding = DpiPad(20, 14, 20, 14)
+                Padding = DpiPad(18, 12, 18, 12)
             };
             _header.Paint += (s, e) =>
             {
@@ -211,10 +239,10 @@ namespace PatsKillerPro
             _tabBar = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = Dpi(60),
+                Height = Dpi(56),
                 BackColor = SURFACE,
                 Visible = false,
-                Padding = DpiPad(20, 10, 20, 10)
+                Padding = DpiPad(18, 8, 18, 8)
             };
             _tabBar.Paint += (s, e) =>
             {
@@ -227,7 +255,7 @@ namespace PatsKillerPro
                 Dock = DockStyle.Fill,
                 BackColor = Color.Transparent,
                 WrapContents = false,
-                AutoScroll = true,
+                AutoScroll = false,
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
@@ -246,10 +274,10 @@ namespace PatsKillerPro
             _logPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = Dpi(140),
+                Height = Dpi(120),
                 BackColor = SURFACE,
                 Visible = false,
-                Padding = DpiPad(24, 12, 24, 12)
+                Padding = DpiPad(18, 10, 18, 10)
             };
             _logPanel.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawLine(p, 0, 0, _logPanel.Width, 0); };
 
@@ -293,7 +321,7 @@ namespace PatsKillerPro
 
         private void BuildPatsTab()
         {
-            _patsTab = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false, AutoScroll = true, Padding = DpiPad(20, 15, 20, 15) };
+            _patsTab = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false, AutoScroll = false, Padding = DpiPad(18, 12, 18, 12) };
 
             var layout = new TableLayoutPanel
             {
@@ -301,19 +329,23 @@ namespace PatsKillerPro
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent,
-                ColumnCount = 1,
-                RowCount = 0,
+                ColumnCount = 2,
+                RowCount = 3,
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _patsTab.Controls.Add(layout);
 
             // === SECTION 1: J2534 DEVICE CONNECTION ===
             var sec1 = Section("J2534 DEVICE CONNECTION");
-            var row1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var row1 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             
-            _cmbDevices = MakeCombo(400);
+            _cmbDevices = MakeCombo(320);
             _cmbDevices.Items.Add("Select J2534 Device...");
             _cmbDevices.SelectedIndex = 0;
             _cmbDevices.Margin = DpiPad(0, 6, 20, 0);
@@ -331,7 +363,7 @@ namespace PatsKillerPro
             row1.Controls.Add(_lblStatus);
 
             sec1.Controls.Add(row1);
-            layout.Controls.Add(sec1);
+            layout.Controls.Add(sec1, 0, 0);
 
             // === SECTION 2: VEHICLE INFORMATION ===
             var sec2 = Section("VEHICLE INFORMATION");
@@ -339,7 +371,7 @@ namespace PatsKillerPro
             grid2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             grid2.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            var row2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false, Margin = new Padding(0) };
+            var row2 = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true, Margin = new Padding(0) };
             
             var btnVin = AutoBtn("Read VIN", ACCENT);
             btnVin.Click += BtnReadVin_Click;
@@ -358,7 +390,7 @@ namespace PatsKillerPro
             row2.Controls.Add(_cmbVehicles);
 
             // Keys badge (right side, no manual coordinates)
-            var keysBg = new Panel { Size = new Size(Dpi(130), Dpi(55)), BackColor = SURFACE, Margin = DpiPad(20, 0, 0, 0) };
+            var keysBg = new Panel { Size = new Size(Dpi(130), Dpi(50)), BackColor = SURFACE, Margin = DpiPad(20, 0, 0, 0) };
             keysBg.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, keysBg.Width - 1, keysBg.Height - 1); };
             keysBg.Controls.Add(new Label { Text = "KEYS", Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = TEXT_MUTED, Dock = DockStyle.Top, Height = Dpi(18), TextAlign = ContentAlignment.MiddleCenter });
             _lblKeys = new Label { Text = "--", Font = new Font("Segoe UI", 22, FontStyle.Bold), ForeColor = SUCCESS, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
@@ -368,11 +400,12 @@ namespace PatsKillerPro
             grid2.Controls.Add(keysBg, 1, 0);
             sec2.Controls.Add(grid2);
 
-            layout.Controls.Add(sec2);
+            layout.Controls.Add(sec2, 0, 1);
+            layout.SetColumnSpan(sec2, 2);
 
             // === SECTION 3: PATS SECURITY CODES ===
             var sec3 = Section("PATS SECURITY CODES");
-            var row3 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var row3 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             
             row3.Controls.Add(new Label { Text = "OUTCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = DpiPad(0, 12, 10, 0) });
             
@@ -397,11 +430,11 @@ namespace PatsKillerPro
             row3.Controls.Add(_txtIncode);
 
             sec3.Controls.Add(row3);
-            layout.Controls.Add(sec3);
+            layout.Controls.Add(sec3, 1, 0);
 
             // === SECTION 4: KEY PROGRAMMING OPERATIONS ===
             var sec4 = Section("KEY PROGRAMMING OPERATIONS");
-            var row4 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var row4 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             
             var btnProg = AutoBtn("Program Key", SUCCESS);
             btnProg.Font = new Font("Segoe UI", 11, FontStyle.Bold);
@@ -429,13 +462,14 @@ namespace PatsKillerPro
             var tip = new Label { Text = "💡 Tip: Program Key costs 1 token per session (unlimited keys). Insert key, click Program, repeat for additional keys.", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, AutoSize = true, Margin = DpiPad(0, 10, 0, 0) };
             sec4.Controls.Add(tip);
 
-            layout.Controls.Add(sec4);
+            layout.Controls.Add(sec4, 0, 2);
+            layout.SetColumnSpan(sec4, 2);
             _content.Controls.Add(_patsTab);
         }
 
         private void BuildDiagTab()
         {
-            _diagTab = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false, AutoScroll = true, Padding = DpiPad(20, 15, 20, 15) };
+            _diagTab = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false, AutoScroll = false, Padding = DpiPad(18, 12, 18, 12) };
 
             var layout = new TableLayoutPanel
             {
@@ -443,50 +477,54 @@ namespace PatsKillerPro
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent,
-                ColumnCount = 1,
+                ColumnCount = 2,
+                RowCount = 2,
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _diagTab.Controls.Add(layout);
 
             var sec1 = Section("DTC CLEAR OPERATIONS (1 TOKEN EACH)");
-            var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             r1.Controls.Add(AutoBtn("Clear P160A", ACCENT)); ((Button)r1.Controls[0]).Click += BtnP160A_Click;
             r1.Controls.Add(AutoBtn("Clear B10A2", ACCENT)); ((Button)r1.Controls[1]).Click += BtnB10A2_Click;
             r1.Controls.Add(AutoBtn("Clear Crush Event", ACCENT)); ((Button)r1.Controls[2]).Click += BtnCrush_Click;
             r1.Controls.Add(AutoBtn("Unlock Gateway", ACCENT)); ((Button)r1.Controls[3]).Click += BtnGateway_Click;
             sec1.Controls.Add(r1);
 
-            layout.Controls.Add(sec1);
+            layout.Controls.Add(sec1, 0, 0);
 
             var sec2 = Section("KEYPAD CODE OPERATIONS");
-            var r2 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var r2 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var k1 = AutoBtn("Read Keypad Code", BTN_BG); k1.Click += BtnKeypad_Click; r2.Controls.Add(k1);
             var k2 = AutoBtn("Write Keypad Code", BTN_BG); k2.Click += BtnKeypad_Click; r2.Controls.Add(k2);
             r2.Controls.Add(new Label { Text = "For vehicles with door keypad entry", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, AutoSize = true, Margin = DpiPad(25, 14, 0, 0) });
             sec2.Controls.Add(r2);
-            layout.Controls.Add(sec2);
+            layout.Controls.Add(sec2, 1, 0);
 
             var sec3 = Section("BCM ADVANCED OPERATIONS");
-            var r3 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var r3 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var bcm = AutoBtn("BCM Factory Reset", DANGER); bcm.Click += BtnBcm_Click; r3.Controls.Add(bcm);
             r3.Controls.Add(new Label { Text = "⚠ WARNING: Requires As-Built reprogramming after reset!", Font = new Font("Segoe UI", 10), ForeColor = DANGER, AutoSize = true, Margin = DpiPad(25, 14, 0, 0) });
             sec3.Controls.Add(r3);
-            layout.Controls.Add(sec3);
+            layout.Controls.Add(sec3, 0, 1);
 
             var sec4 = Section("MODULE INFORMATION");
-            var r4 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var r4 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var mod = AutoBtn("Read All Module Info", BTN_BG); mod.Click += BtnModInfo_Click; r4.Controls.Add(mod);
             sec4.Controls.Add(r4);
-            layout.Controls.Add(sec4);
+            layout.Controls.Add(sec4, 1, 1);
 
             _content.Controls.Add(_diagTab);
         }
 
         private void BuildFreeTab()
         {
-            _freeTab = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false, AutoScroll = true, Padding = DpiPad(20, 15, 20, 15) };
+            _freeTab = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false, AutoScroll = false, Padding = DpiPad(18, 12, 18, 12) };
 
             var layout = new TableLayoutPanel
             {
@@ -494,40 +532,47 @@ namespace PatsKillerPro
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent,
-                ColumnCount = 1,
+                ColumnCount = 2,
+                RowCount = 3,
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _freeTab.Controls.Add(layout);
 
-            var banner = new Panel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.FromArgb(20, 34, 197, 94), Margin = DpiPad(0, 0, 0, 15) };
+            var banner = new Panel { Dock = DockStyle.Top, Height = Dpi(48), BackColor = Color.FromArgb(20, 34, 197, 94), Margin = DpiPad(0, 0, 0, 15) };
             banner.Paint += (s, e) => { using var p = new Pen(SUCCESS, 2); e.Graphics.DrawRectangle(p, 1, 1, banner.Width - 3, banner.Height - 3); };
             banner.Controls.Add(new Label { Text = "✓ All operations on this tab are FREE - No token cost!", Font = new Font("Segoe UI", 13, FontStyle.Bold), ForeColor = SUCCESS, Dock = DockStyle.Fill, Padding = DpiPad(24, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft });
-            layout.Controls.Add(banner);
+            layout.Controls.Add(banner, 0, 0);
+            layout.SetColumnSpan(banner, 2);
 
             var sec1 = Section("BASIC VEHICLE OPERATIONS");
-            var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var f1 = AutoBtn("Clear All DTCs", BTN_BG); f1.Click += BtnDtc_Click; r1.Controls.Add(f1);
             var f2 = AutoBtn("Clear KAM", BTN_BG); f2.Click += BtnKam_Click; r1.Controls.Add(f2);
             var f3 = AutoBtn("Vehicle Reset", BTN_BG); f3.Click += BtnReset_Click; r1.Controls.Add(f3);
             sec1.Controls.Add(r1);
-            layout.Controls.Add(sec1);
+            layout.Controls.Add(sec1, 0, 1);
 
             var sec2 = Section("READ OPERATIONS");
-            var r2 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var r2 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var rd1 = AutoBtn("Read Keys Count", BTN_BG); rd1.Click += BtnReadKeys_Click; r2.Controls.Add(rd1);
             var rd2 = AutoBtn("Read Module Info", BTN_BG); rd2.Click += BtnModInfo_Click; r2.Controls.Add(rd2);
             sec2.Controls.Add(r2);
-            layout.Controls.Add(sec2);
+            layout.Controls.Add(sec2, 1, 1);
 
             var sec3 = Section("RESOURCES & SUPPORT");
-            var r3 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = Dpi(55), BackColor = Color.Transparent, WrapContents = true, AutoSize = false };
+            var r3 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var u1 = AutoBtn("User Guide", ACCENT); u1.Click += (s, e) => OpenUrl("https://patskiller.com/faqs"); r3.Controls.Add(u1);
             var u2 = AutoBtn("Buy Tokens", SUCCESS); u2.Click += (s, e) => OpenUrl("https://patskiller.com/buy-tokens"); r3.Controls.Add(u2);
             var u3 = AutoBtn("Contact Support", BTN_BG); u3.Click += (s, e) => OpenUrl("https://patskiller.com/contact"); r3.Controls.Add(u3);
             sec3.Controls.Add(r3);
-            layout.Controls.Add(sec3);
+            layout.Controls.Add(sec3, 0, 2);
+            layout.SetColumnSpan(sec3, 2);
 
             _content.Controls.Add(_freeTab);
         }
@@ -571,9 +616,9 @@ namespace PatsKillerPro
                 BackColor = CARD,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Top,
-                Margin = DpiPad(0, 0, 0, 15),
-                Padding = DpiPad(20, 50, 20, 15)
+                Dock = DockStyle.Fill,
+                Margin = DpiPad(0, 0, 0, 12),
+                Padding = DpiPad(18, 44, 18, 12)
             };
             p.Paint += (s, e) => {
                 using var pen = new Pen(BORDER);
@@ -582,8 +627,8 @@ namespace PatsKillerPro
                 e.Graphics.DrawRectangle(pen, 0, 0, W - 1, H - 1);
                 using var f = new Font("Segoe UI", 11F, FontStyle.Bold);
                 using var b = new SolidBrush(TEXT_DIM);
-                e.Graphics.DrawString(title, f, b, Dpi(22), Dpi(14));
-                e.Graphics.DrawLine(pen, Dpi(18), Dpi(44), W - Dpi(18), Dpi(44));
+                e.Graphics.DrawString(title, f, b, Dpi(20), Dpi(12));
+                e.Graphics.DrawLine(pen, Dpi(16), Dpi(36), W - Dpi(16), Dpi(36));
             };
             return p;
         }
@@ -594,8 +639,8 @@ namespace PatsKillerPro
             {
                 Text = text,
                 AutoSize = true,
-                Padding = DpiPad(22, 12, 22, 12),
-                Margin = DpiPad(0, 0, 15, 0),
+                Padding = DpiPad(18, 10, 18, 10),
+                Margin = DpiPad(0, 0, 12, 0),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = bg,
                 ForeColor = TEXT,
@@ -613,8 +658,8 @@ namespace PatsKillerPro
             {
                 Text = text,
                 AutoSize = true,
-                Padding = DpiPad(24, 10, 24, 10),
-                Margin = DpiPad(0, 0, 10, 0),
+                Padding = DpiPad(22, 9, 22, 9),
+                Margin = DpiPad(0, 0, 8, 0),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = active ? ACCENT : BTN_BG,
                 ForeColor = TEXT,
