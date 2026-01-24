@@ -84,8 +84,8 @@ namespace PatsKillerPro
         {
             this.SuspendLayout();
             this.Text = "PatsKiller Pro 2026";
-            this.ClientSize = new Size(1150, 820);
-            this.MinimumSize = new Size(1000, 750);
+            this.ClientSize = new Size(1200, 850);
+            this.MinimumSize = new Size(1050, 750);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = ColorBg;
             this.ForeColor = ColorText;
@@ -106,77 +106,79 @@ namespace PatsKillerPro
         #region Build UI
         private void BuildUI()
         {
-            // === HEADER ===
+            // Header - 80px
             _headerPanel = new Panel { Dock = DockStyle.Top, Height = 80, BackColor = ColorSurface };
-            _headerPanel.Paint += (s, e) => { using (var p = new Pen(ColorBorder)) { e.Graphics.DrawLine(p, 0, 79, Width, 79); } };
-
-            // Left Header (Title)
-            var headerLeft = new Panel { Dock = DockStyle.Left, Width = 500, BackColor = Color.Transparent };
-            var logo = new Label { Text = "PK", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.White, BackColor = ColorAccent, Size = new Size(40, 40), Location = new Point(20, 20), TextAlign = ContentAlignment.MiddleCenter };
-            var title = new Label { Text = "PatsKiller Pro", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(70, 18) };
-            var subtitle = new Label { Text = "Ford & Lincoln PATS Key Programming", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(72, 48) };
-            headerLeft.Controls.Add(logo);
-            headerLeft.Controls.Add(title);
-            headerLeft.Controls.Add(subtitle);
-            _headerPanel.Controls.Add(headerLeft);
-
-            // Right Header (User Info)
-            var headerRight = new FlowLayoutPanel 
-            { 
-                Dock = DockStyle.Right, 
-                Width = 400, 
-                FlowDirection = FlowDirection.TopDown, 
-                WrapContents = false,
-                Padding = new Padding(0, 15, 20, 0)
-            };
+            _headerPanel.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawLine(p, 0, 79, Width, 79); };
             
-            _lblTokens = new Label { Text = "Tokens: --", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = ColorSuccess, AutoSize = true, Anchor = AnchorStyles.Right };
-            _lblUser = new Label { Text = "Not logged in", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, AutoSize = true, Anchor = AnchorStyles.Right };
-            _btnLogout = MakeButton("Logout", 80, 28);
-            _btnLogout.Margin = new Padding(0, 5, 0, 0);
-            _btnLogout.Anchor = AnchorStyles.Right;
+            var logo = new Label { Text = "PK", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.White, BackColor = ColorAccent, Size = new Size(44, 44), Location = new Point(20, 18), TextAlign = ContentAlignment.MiddleCenter };
+            _headerPanel.Controls.Add(logo);
+            
+            var title = new Label { Text = "PatsKiller Pro", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(75, 16) };
+            _headerPanel.Controls.Add(title);
+            
+            var subtitle = new Label { Text = "Ford & Lincoln PATS Key Programming", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(77, 46) };
+            _headerPanel.Controls.Add(subtitle);
+            
+            _lblTokens = new Label { Text = "Tokens: --", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = ColorSuccess, AutoSize = true };
+            _headerPanel.Controls.Add(_lblTokens);
+            
+            _lblUser = new Label { Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, AutoSize = true };
+            _headerPanel.Controls.Add(_lblUser);
+            
+            _btnLogout = new Button { Text = "Logout", AutoSize = true, Padding = new Padding(12, 6, 12, 6), FlatStyle = FlatStyle.Flat, BackColor = ColorButtonBg, ForeColor = ColorText, Font = new Font("Segoe UI", 9F, FontStyle.Bold), Cursor = Cursors.Hand };
+            _btnLogout.FlatAppearance.BorderColor = ColorBorder;
             _btnLogout.Click += (s, e) => DoLogout();
             _btnLogout.Visible = false;
-
-            headerRight.Controls.Add(_lblTokens);
-            headerRight.Controls.Add(_lblUser);
-            headerRight.Controls.Add(_btnLogout);
-            _headerPanel.Controls.Add(headerRight);
+            _headerPanel.Controls.Add(_btnLogout);
             
+            _headerPanel.Resize += (s, e) => LayoutHeader();
             Controls.Add(_headerPanel);
 
-            // === TAB BAR ===
-            _tabBar = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = ColorSurface, Visible = false };
-            _tabBar.Paint += (s, e) => { using (var p = new Pen(ColorBorder)) { e.Graphics.DrawLine(p, 0, 49, Width, 49); } };
+            // Tab Bar - 55px with AutoSize buttons
+            _tabBar = new Panel { Dock = DockStyle.Top, Height = 55, BackColor = ColorSurface, Visible = false };
+            _tabBar.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawLine(p, 0, 54, Width, 54); };
             
-            var tabFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 8, 0, 0) };
+            var tabFlow = new FlowLayoutPanel
+            {
+                Location = new Point(15, 10),
+                Size = new Size(700, 42),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Color.Transparent
+            };
+            
             _tabPats = MakeTabButton("PATS Key Programming", true);
             _tabPats.Click += (s, e) => SwitchTab(0);
+            tabFlow.Controls.Add(_tabPats);
+            
             _tabDiag = MakeTabButton("Diagnostics", false);
             _tabDiag.Click += (s, e) => SwitchTab(1);
+            tabFlow.Controls.Add(_tabDiag);
+            
             _tabFree = MakeTabButton("Free Functions", false);
             _tabFree.Click += (s, e) => SwitchTab(2);
-            
-            tabFlow.Controls.Add(_tabPats);
-            tabFlow.Controls.Add(_tabDiag);
             tabFlow.Controls.Add(_tabFree);
-            _tabBar.Controls.Add(tabFlow);
             
+            _tabBar.Controls.Add(tabFlow);
             Controls.Add(_tabBar);
 
-            // === LOG PANEL ===
+            // Log Panel - 110px
             _logPanel = new Panel { Dock = DockStyle.Bottom, Height = 110, BackColor = ColorSurface, Visible = false };
-            _logPanel.Paint += (s, e) => { using (var p = new Pen(ColorBorder)) { e.Graphics.DrawLine(p, 0, 0, Width, 0); } };
+            _logPanel.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawLine(p, 0, 0, Width, 0); };
+            
             var logTitle = new Label { Text = "ACTIVITY LOG", Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = ColorTextDim, Location = new Point(20, 8), AutoSize = true };
-            _txtLog = new RichTextBox { Location = new Point(20, 28), BackColor = ColorBg, ForeColor = ColorText, Font = new Font("Consolas", 9.5F), BorderStyle = BorderStyle.None, ReadOnly = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom, Height = 70, Width = 1100 };
             _logPanel.Controls.Add(logTitle);
+            
+            _txtLog = new RichTextBox { Location = new Point(20, 28), BackColor = ColorBg, ForeColor = ColorText, Font = new Font("Consolas", 9.5F), BorderStyle = BorderStyle.None, ReadOnly = true };
             _logPanel.Controls.Add(_txtLog);
+            _logPanel.Resize += (s, e) => { _txtLog.Width = _logPanel.Width - 40; _txtLog.Height = _logPanel.Height - 38; };
             Controls.Add(_logPanel);
 
-            // === CONTENT PANEL ===
+            // Content Panel
             _contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = ColorBg, Visible = false, AutoScroll = true };
             Controls.Add(_contentPanel);
 
+            // Build tab contents
             BuildPatsPanel();
             BuildDiagPanel();
             BuildFreePanel();
@@ -185,146 +187,183 @@ namespace PatsKillerPro
             ShowLogin();
         }
 
+        private void LayoutHeader()
+        {
+            int right = _headerPanel.Width - 25;
+            _btnLogout.Location = new Point(right - _btnLogout.Width, 24);
+            _lblTokens.Location = new Point(_btnLogout.Left - _lblTokens.Width - 25, 20);
+            _lblUser.Location = new Point(_btnLogout.Left - _lblUser.Width - 25, 48);
+        }
+
         private void BuildPatsPanel()
         {
-            _patsPanel = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(20) };
+            _patsPanel = new Panel { Location = new Point(20, 15), Size = new Size(1140, 580), BackColor = ColorBg };
             
-            // 1. Device Connection
-            var sec1 = MakeSection("J2534 DEVICE CONNECTION");
-            var flow1 = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 45, 0, 20), AutoSize = true };
+            int y = 0;
+            int W = 1100;
+
+            // === SECTION 1: J2534 Device Connection ===
+            var sec1 = MakeSection("J2534 DEVICE CONNECTION", W, 100);
+            sec1.Location = new Point(0, y);
             
-            _cmbDevices = MakeComboBox(300);
+            var row1 = new FlowLayoutPanel
+            {
+                Location = new Point(20, 45),
+                Size = new Size(W - 40, 50),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Color.Transparent
+            };
+            
+            _cmbDevices = MakeComboBox(320);
+            _cmbDevices.Margin = new Padding(0, 2, 15, 0);
             _cmbDevices.Items.Add("Select J2534 Device...");
             _cmbDevices.SelectedIndex = 0;
-            flow1.Controls.Add(_cmbDevices);
+            row1.Controls.Add(_cmbDevices);
             
-            var btnScan = MakeButton("Scan Devices", 130, 36);
+            var btnScan = MakeAutoButton("Scan Devices", ColorButtonBg);
             btnScan.Click += BtnScan_Click;
-            btnScan.Margin = new Padding(10, 0, 0, 0);
-            flow1.Controls.Add(btnScan);
+            row1.Controls.Add(btnScan);
             
-            var btnConnect = MakeButton("Connect", 100, 36);
-            btnConnect.BackColor = ColorSuccess;
+            var btnConnect = MakeAutoButton("Connect", ColorSuccess);
             btnConnect.Click += BtnConnect_Click;
-            btnConnect.Margin = new Padding(10, 0, 0, 0);
-            flow1.Controls.Add(btnConnect);
+            row1.Controls.Add(btnConnect);
             
-            _lblStatus = new Label { Text = "● Not Connected", Font = new Font("Segoe UI", 10), ForeColor = ColorWarning, AutoSize = true, Margin = new Padding(15, 8, 0, 0) };
-            flow1.Controls.Add(_lblStatus);
-            sec1.Controls.Add(flow1);
+            _lblStatus = new Label { Text = "● Not Connected", Font = new Font("Segoe UI", 10), ForeColor = ColorWarning, AutoSize = true, Margin = new Padding(20, 10, 0, 0) };
+            row1.Controls.Add(_lblStatus);
+            
+            sec1.Controls.Add(row1);
             _patsPanel.Controls.Add(sec1);
+            y += 115;
 
-            // 2. Vehicle Info
-            var sec2 = MakeSection("VEHICLE INFORMATION");
-            sec2.Margin = new Padding(0, 20, 0, 0); // Space above
-            var flow2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 45, 0, 20), AutoSize = true };
-
-            var btnReadVin = MakeButton("Read VIN", 100, 36);
-            btnReadVin.BackColor = ColorAccent;
+            // === SECTION 2: Vehicle Information ===
+            var sec2 = MakeSection("VEHICLE INFORMATION", W, 100);
+            sec2.Location = new Point(0, y);
+            
+            var row2 = new FlowLayoutPanel
+            {
+                Location = new Point(20, 45),
+                Size = new Size(W - 150, 50),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Color.Transparent
+            };
+            
+            var btnReadVin = MakeAutoButton("Read VIN", ColorAccent);
             btnReadVin.Click += BtnReadVin_Click;
-            flow2.Controls.Add(btnReadVin);
+            row2.Controls.Add(btnReadVin);
             
-            _lblVin = new Label { Text = "VIN: -----------------", Font = new Font("Consolas", 11), ForeColor = ColorTextDim, AutoSize = true, Margin = new Padding(10, 8, 0, 0) };
-            flow2.Controls.Add(_lblVin);
+            _lblVin = new Label { Text = "VIN: -----------------", Font = new Font("Consolas", 11), ForeColor = ColorTextDim, AutoSize = true, Margin = new Padding(10, 10, 15, 0) };
+            row2.Controls.Add(_lblVin);
             
-            // Break to new line for dropdown to prevent cutoff
-            flow2.SetFlowBreak(_lblVin, true);
+            var lblSelect = new Label { Text = "Or select vehicle:", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, AutoSize = true, Margin = new Padding(10, 10, 10, 0) };
+            row2.Controls.Add(lblSelect);
             
-            var lblSelect = new Label { Text = "Or select vehicle:", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, AutoSize = true, Margin = new Padding(0, 15, 0, 0) };
-            flow2.Controls.Add(lblSelect);
-            
-            _cmbVehicles = MakeComboBox(400);
-            _cmbVehicles.Margin = new Padding(10, 10, 0, 0);
+            // WIDENED to 350px to fit full vehicle names
+            _cmbVehicles = MakeComboBox(350);
+            _cmbVehicles.Margin = new Padding(0, 2, 0, 0);
             foreach (var v in VehiclePlatforms.GetAllVehicles()) _cmbVehicles.Items.Add(v.DisplayName);
             if (_cmbVehicles.Items.Count > 0) _cmbVehicles.SelectedIndex = 0;
-            flow2.Controls.Add(_cmbVehicles);
+            row2.Controls.Add(_cmbVehicles);
             
-            // Keys Badge (Manual placement inside flow or separate)
-            var pnlKeys = new Panel { Size = new Size(80, 40), BackColor = ColorSurface, Margin = new Padding(20, 10, 0, 0) };
-            pnlKeys.Paint += (s, e) => { using (var p = new Pen(ColorBorder)) { e.Graphics.DrawRectangle(p, 0, 0, 79, 39); } };
-            var lblKC = new Label { Text = "KEYS:", Font = new Font("Segoe UI", 7), ForeColor = ColorTextMuted, Location = new Point(3, 3), AutoSize = true };
-            _lblKeysCount = new Label { Text = "--", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = ColorSuccess, Location = new Point(30, 8), AutoSize = true };
-            pnlKeys.Controls.Add(lblKC);
-            pnlKeys.Controls.Add(_lblKeysCount);
-            flow2.Controls.Add(pnlKeys);
-
-            sec2.Controls.Add(flow2);
+            sec2.Controls.Add(row2);
+            
+            // Keys badge
+            var keysBg = new Panel { Size = new Size(90, 55), Location = new Point(W - 110, 38), BackColor = ColorSurface };
+            keysBg.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawRectangle(p, 0, 0, 89, 54); };
+            var keysLbl = new Label { Text = "KEYS", Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = ColorTextMuted, Size = new Size(90, 16), Location = new Point(0, 5), TextAlign = ContentAlignment.MiddleCenter };
+            keysBg.Controls.Add(keysLbl);
+            _lblKeysCount = new Label { Text = "--", Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = ColorSuccess, Size = new Size(90, 32), Location = new Point(0, 20), TextAlign = ContentAlignment.MiddleCenter };
+            keysBg.Controls.Add(_lblKeysCount);
+            sec2.Controls.Add(keysBg);
+            
             _patsPanel.Controls.Add(sec2);
+            y += 115;
 
-            // 3. Security Codes (TableLayout to fix overlaps)
-            var sec3 = MakeSection("PATS SECURITY CODES");
-            sec3.Margin = new Padding(0, 20, 0, 0);
+            // === SECTION 3: PATS Security Codes ===
+            var sec3 = MakeSection("PATS SECURITY CODES", W, 100);
+            sec3.Location = new Point(0, y);
             
-            var table3 = new TableLayoutPanel 
-            { 
-                Dock = DockStyle.Fill, 
-                ColumnCount = 6, 
-                RowCount = 1, 
-                Padding = new Padding(20, 45, 20, 20),
-                AutoSize = true
+            var row3 = new FlowLayoutPanel
+            {
+                Location = new Point(20, 45),
+                Size = new Size(W - 40, 50),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Color.Transparent
             };
-            // Define columns: Auto, Fixed, Auto, Auto, Auto, Fixed
-            table3.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); // Label
-            table3.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140)); // Box
-            table3.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100)); // Copy
-            table3.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); // Get
-            table3.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); // Label
-            table3.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140)); // Box
-
-            var lblOut = new Label { Text = "OUTCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Anchor = AnchorStyles.Left };
-            _txtOutcode = MakeTextBox(130, 36); _txtOutcode.ReadOnly = true; _txtOutcode.TextAlign = HorizontalAlignment.Center;
             
-            var btnCopy = MakeButton("Copy", 90, 36);
+            var lblOut = new Label { Text = "OUTCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Margin = new Padding(0, 10, 8, 0) };
+            row3.Controls.Add(lblOut);
+            
+            _txtOutcode = MakeTextBox(140);
+            _txtOutcode.ReadOnly = true;
+            _txtOutcode.Font = new Font("Consolas", 11, FontStyle.Bold);
+            _txtOutcode.TextAlign = HorizontalAlignment.Center;
+            _txtOutcode.Margin = new Padding(0, 2, 12, 0);
+            row3.Controls.Add(_txtOutcode);
+            
+            var btnCopy = MakeAutoButton("Copy", ColorButtonBg);
             btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); Log("info", "Copied to clipboard"); } };
+            row3.Controls.Add(btnCopy);
             
-            var btnGet = MakeButton("Get Incode", 160, 36);
-            btnGet.BackColor = ColorWarning; btnGet.ForeColor = Color.Black;
+            var btnGet = MakeAutoButton("Get Incode Online", ColorWarning);
+            btnGet.ForeColor = Color.Black;
             btnGet.Click += (s, e) => OpenUrl("https://patskiller.com/calculator");
+            row3.Controls.Add(btnGet);
             
-            var lblIn = new Label { Text = "INCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Anchor = AnchorStyles.Right };
-            _txtIncode = MakeTextBox(130, 36); _txtIncode.TextAlign = HorizontalAlignment.Center;
-
-            table3.Controls.Add(lblOut, 0, 0);
-            table3.Controls.Add(_txtOutcode, 1, 0);
-            table3.Controls.Add(btnCopy, 2, 0);
-            table3.Controls.Add(btnGet, 3, 0);
-            table3.Controls.Add(lblIn, 4, 0);
-            table3.Controls.Add(_txtIncode, 5, 0);
+            var lblIn = new Label { Text = "INCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Margin = new Padding(25, 10, 8, 0) };
+            row3.Controls.Add(lblIn);
             
-            sec3.Controls.Add(table3);
+            _txtIncode = MakeTextBox(140);
+            _txtIncode.Font = new Font("Consolas", 11, FontStyle.Bold);
+            _txtIncode.TextAlign = HorizontalAlignment.Center;
+            _txtIncode.Margin = new Padding(0, 2, 0, 0);
+            row3.Controls.Add(_txtIncode);
+            
+            sec3.Controls.Add(row3);
             _patsPanel.Controls.Add(sec3);
+            y += 115;
 
-            // 4. Operations
-            var sec4 = MakeSection("KEY PROGRAMMING OPERATIONS");
-            sec4.Margin = new Padding(0, 20, 0, 0);
-            var flow4 = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 45, 0, 20), AutoSize = true, WrapContents = true };
+            // === SECTION 4: Key Programming Operations ===
+            var sec4 = MakeSection("KEY PROGRAMMING OPERATIONS", W, 120);
+            sec4.Location = new Point(0, y);
             
-            // Buttons with explicitly enforced heights to prevent squashing
-            var btnProg = MakeAutoSizedButton("Program Key", ColorSuccess);
+            var row4 = new FlowLayoutPanel
+            {
+                Location = new Point(20, 45),
+                Size = new Size(W - 40, 50),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Color.Transparent
+            };
+            
+            var btnProg = MakeAutoButton("Program Key", ColorSuccess);
+            btnProg.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             btnProg.Click += BtnProgramKeys_Click;
-            flow4.Controls.Add(btnProg);
+            row4.Controls.Add(btnProg);
             
-            var btnErase = MakeAutoSizedButton("Erase All Keys", ColorDanger);
+            var btnErase = MakeAutoButton("Erase All Keys", ColorDanger);
             btnErase.Click += BtnEraseKeys_Click;
-            flow4.Controls.Add(btnErase);
+            row4.Controls.Add(btnErase);
             
-            var btnParam = MakeAutoSizedButton("Parameter Reset", ColorButtonBg);
+            var btnParam = MakeAutoButton("Parameter Reset", ColorButtonBg);
             btnParam.Click += BtnParamReset_Click;
-            flow4.Controls.Add(btnParam);
+            row4.Controls.Add(btnParam);
             
-            var btnEscl = MakeAutoSizedButton("Initialize ESCL", ColorButtonBg);
+            var btnEscl = MakeAutoButton("Initialize ESCL", ColorButtonBg);
             btnEscl.Click += BtnEscl_Click;
-            flow4.Controls.Add(btnEscl);
+            row4.Controls.Add(btnEscl);
             
-            var btnDisable = MakeAutoSizedButton("Disable BCM", ColorButtonBg);
+            var btnDisable = MakeAutoButton("Disable BCM", ColorButtonBg);
             btnDisable.Click += BtnDisableBcm_Click;
-            flow4.Controls.Add(btnDisable);
+            row4.Controls.Add(btnDisable);
             
-            var tip = new Label { Text = "TIP: 1 token per session. Insert key → Program → Remove → Repeat.", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Margin = new Padding(5, 15, 0, 0) };
-            flow4.SetFlowBreak(btnDisable, true);
-            flow4.Controls.Add(tip);
-
-            sec4.Controls.Add(flow4);
+            sec4.Controls.Add(row4);
+            
+            var tip = new Label { Text = "TIP: Program Key = 1 token per session (unlimited keys). Insert key → Program → Remove → Repeat.", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(25, 97) };
+            sec4.Controls.Add(tip);
+            
             _patsPanel.Controls.Add(sec4);
 
             _contentPanel.Controls.Add(_patsPanel);
@@ -332,48 +371,166 @@ namespace PatsKillerPro
 
         private void BuildDiagPanel()
         {
-            _diagPanel = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(20), Visible = false };
+            _diagPanel = new Panel { Location = new Point(20, 15), Size = new Size(1140, 500), BackColor = ColorBg, Visible = false };
             
-            var sec1 = MakeSection("DTC CLEAR OPERATIONS");
-            var f1 = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 45, 0, 20), AutoSize = true };
+            int y = 0;
+            int W = 1100;
+
+            // DTC Operations
+            var sec1 = MakeSection("DTC CLEAR OPERATIONS (1 TOKEN EACH)", W, 100);
+            sec1.Location = new Point(0, y);
             
-            var btnP160A = MakeAutoSizedButton("Clear P160A", ColorAccent); btnP160A.Click += BtnClearP160A_Click; f1.Controls.Add(btnP160A);
-            var btnB10A2 = MakeAutoSizedButton("Clear B10A2", ColorAccent); btnB10A2.Click += BtnClearB10A2_Click; f1.Controls.Add(btnB10A2);
-            var btnCrush = MakeAutoSizedButton("Clear Crush", ColorAccent); btnCrush.Click += BtnClearCrush_Click; f1.Controls.Add(btnCrush);
-            var btnGate = MakeAutoSizedButton("Unlock Gateway", ColorAccent); btnGate.Click += BtnGatewayUnlock_Click; f1.Controls.Add(btnGate);
-            sec1.Controls.Add(f1);
+            var row1 = new FlowLayoutPanel { Location = new Point(20, 45), Size = new Size(W - 40, 50), FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
+            
+            var btnP160A = MakeAutoButton("Clear P160A", ColorAccent);
+            btnP160A.Click += BtnClearP160A_Click;
+            row1.Controls.Add(btnP160A);
+            
+            var btnB10A2 = MakeAutoButton("Clear B10A2", ColorAccent);
+            btnB10A2.Click += BtnClearB10A2_Click;
+            row1.Controls.Add(btnB10A2);
+            
+            var btnCrush = MakeAutoButton("Clear Crush", ColorAccent);
+            btnCrush.Click += BtnClearCrush_Click;
+            row1.Controls.Add(btnCrush);
+            
+            var btnGateway = MakeAutoButton("Unlock Gateway", ColorAccent);
+            btnGateway.Click += BtnGatewayUnlock_Click;
+            row1.Controls.Add(btnGateway);
+            
+            sec1.Controls.Add(row1);
             _diagPanel.Controls.Add(sec1);
+            y += 115;
+
+            // Keypad
+            var sec2 = MakeSection("KEYPAD CODE OPERATIONS", W, 100);
+            sec2.Location = new Point(0, y);
             
-            var sec2 = MakeSection("KEYPAD OPERATIONS");
-            sec2.Margin = new Padding(0, 20, 0, 0);
-            var f2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 45, 0, 20), AutoSize = true };
-            var btnReadKp = MakeAutoSizedButton("Read Keypad Code", ColorButtonBg); btnReadKp.Click += BtnKeypadCode_Click; f2.Controls.Add(btnReadKp);
-            var btnWriteKp = MakeAutoSizedButton("Write Keypad Code", ColorButtonBg); btnWriteKp.Click += BtnKeypadCode_Click; f2.Controls.Add(btnWriteKp);
-            sec2.Controls.Add(f2);
+            var row2 = new FlowLayoutPanel { Location = new Point(20, 45), Size = new Size(W - 40, 50), FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
+            
+            var btnReadKp = MakeAutoButton("Read Keypad Code", ColorButtonBg);
+            btnReadKp.Click += BtnKeypadCode_Click;
+            row2.Controls.Add(btnReadKp);
+            
+            var btnWriteKp = MakeAutoButton("Write Keypad Code", ColorButtonBg);
+            btnWriteKp.Click += BtnKeypadCode_Click;
+            row2.Controls.Add(btnWriteKp);
+            
+            var kpNote = new Label { Text = "For vehicles with door keypad entry", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Margin = new Padding(20, 12, 0, 0) };
+            row2.Controls.Add(kpNote);
+            
+            sec2.Controls.Add(row2);
             _diagPanel.Controls.Add(sec2);
+            y += 115;
+
+            // BCM
+            var sec3 = MakeSection("BCM ADVANCED OPERATIONS", W, 100);
+            sec3.Location = new Point(0, y);
+            
+            var row3 = new FlowLayoutPanel { Location = new Point(20, 45), Size = new Size(W - 40, 50), FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
+            
+            var btnBcm = MakeAutoButton("BCM Factory Reset", ColorDanger);
+            btnBcm.Click += BtnBcmFactory_Click;
+            row3.Controls.Add(btnBcm);
+            
+            var bcmWarn = new Label { Text = "⚠ WARNING: Requires As-Built reprogramming with scan tool after reset!", Font = new Font("Segoe UI", 9), ForeColor = ColorDanger, AutoSize = true, Margin = new Padding(20, 12, 0, 0) };
+            row3.Controls.Add(bcmWarn);
+            
+            sec3.Controls.Add(row3);
+            _diagPanel.Controls.Add(sec3);
+            y += 115;
+
+            // Module Info
+            var sec4 = MakeSection("MODULE INFORMATION", W, 100);
+            sec4.Location = new Point(0, y);
+            
+            var row4 = new FlowLayoutPanel { Location = new Point(20, 45), Size = new Size(W - 40, 50), FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
+            
+            var btnMod = MakeAutoButton("Read All Module Info", ColorButtonBg);
+            btnMod.Click += BtnReadModuleInfo_Click;
+            row4.Controls.Add(btnMod);
+            
+            sec4.Controls.Add(row4);
+            _diagPanel.Controls.Add(sec4);
 
             _contentPanel.Controls.Add(_diagPanel);
         }
 
         private void BuildFreePanel()
         {
-            _freePanel = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(20), Visible = false };
+            _freePanel = new Panel { Location = new Point(20, 15), Size = new Size(1140, 450), BackColor = ColorBg, Visible = false };
             
-            var banner = new Panel { Height = 45, Dock = DockStyle.Top, BackColor = Color.FromArgb(20, 34, 197, 94), Margin = new Padding(0,0,0,20) };
-            var bl = new Label { Text = "✓ All operations here are FREE", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = ColorSuccess, Location = new Point(20, 12), AutoSize = true };
-            banner.Controls.Add(bl);
-            _freePanel.Controls.Add(banner);
+            int y = 0;
+            int W = 1100;
 
-            var sec1 = MakeSection("BASIC OPERATIONS");
-            sec1.Top = 60; // Offset below banner
-            var f1 = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 45, 0, 20), AutoSize = true };
+            // Banner
+            var banner = new Panel { Size = new Size(W, 50), Location = new Point(0, y), BackColor = Color.FromArgb(20, 34, 197, 94) };
+            banner.Paint += (s, e) => { using var p = new Pen(ColorSuccess, 2); e.Graphics.DrawRectangle(p, 1, 1, W - 3, 47); };
+            var bannerLbl = new Label { Text = "✓ All operations on this tab are FREE - No token cost!", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = ColorSuccess, AutoSize = true, Location = new Point(25, 14) };
+            banner.Controls.Add(bannerLbl);
+            _freePanel.Controls.Add(banner);
+            y += 65;
+
+            // Basic Ops
+            var sec1 = MakeSection("BASIC VEHICLE OPERATIONS", W, 100);
+            sec1.Location = new Point(0, y);
             
-            var btnDtc = MakeAutoSizedButton("Clear All DTCs", ColorButtonBg); btnDtc.Click += BtnClearDtc_Click; f1.Controls.Add(btnDtc);
-            var btnKam = MakeAutoSizedButton("Clear KAM", ColorButtonBg); btnKam.Click += BtnClearKam_Click; f1.Controls.Add(btnKam);
-            var btnRes = MakeAutoSizedButton("Vehicle Reset", ColorButtonBg); btnRes.Click += BtnVehicleReset_Click; f1.Controls.Add(btnRes);
-            var btnKeys = MakeAutoSizedButton("Read Keys Count", ColorButtonBg); btnKeys.Click += BtnReadKeysCount_Click; f1.Controls.Add(btnKeys);
-            sec1.Controls.Add(f1);
+            var row1 = new FlowLayoutPanel { Location = new Point(20, 45), Size = new Size(W - 40, 50), FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
+            
+            var btnDtc = MakeAutoButton("Clear All DTCs", ColorButtonBg);
+            btnDtc.Click += BtnClearDtc_Click;
+            row1.Controls.Add(btnDtc);
+            
+            var btnKam = MakeAutoButton("Clear KAM", ColorButtonBg);
+            btnKam.Click += BtnClearKam_Click;
+            row1.Controls.Add(btnKam);
+            
+            var btnReset = MakeAutoButton("Vehicle Reset", ColorButtonBg);
+            btnReset.Click += BtnVehicleReset_Click;
+            row1.Controls.Add(btnReset);
+            
+            sec1.Controls.Add(row1);
             _freePanel.Controls.Add(sec1);
+            y += 115;
+
+            // Read Ops
+            var sec2 = MakeSection("READ OPERATIONS", W, 100);
+            sec2.Location = new Point(0, y);
+            
+            var row2 = new FlowLayoutPanel { Location = new Point(20, 45), Size = new Size(W - 40, 50), FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
+            
+            var btnReadKeys = MakeAutoButton("Read Keys Count", ColorButtonBg);
+            btnReadKeys.Click += BtnReadKeysCount_Click;
+            row2.Controls.Add(btnReadKeys);
+            
+            var btnReadMod = MakeAutoButton("Read Module Info", ColorButtonBg);
+            btnReadMod.Click += BtnReadModuleInfo_Click;
+            row2.Controls.Add(btnReadMod);
+            
+            sec2.Controls.Add(row2);
+            _freePanel.Controls.Add(sec2);
+            y += 115;
+
+            // Resources
+            var sec3 = MakeSection("RESOURCES & SUPPORT", W, 100);
+            sec3.Location = new Point(0, y);
+            
+            var row3 = new FlowLayoutPanel { Location = new Point(20, 45), Size = new Size(W - 40, 50), FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
+            
+            var btnGuide = MakeAutoButton("User Guide", ColorAccent);
+            btnGuide.Click += (s, e) => OpenUrl("https://patskiller.com/faqs");
+            row3.Controls.Add(btnGuide);
+            
+            var btnBuy = MakeAutoButton("Buy Tokens", ColorSuccess);
+            btnBuy.Click += (s, e) => OpenUrl("https://patskiller.com/buy-tokens");
+            row3.Controls.Add(btnBuy);
+            
+            var btnSupport = MakeAutoButton("Contact Support", ColorButtonBg);
+            btnSupport.Click += (s, e) => OpenUrl("https://patskiller.com/contact");
+            row3.Controls.Add(btnSupport);
+            
+            sec3.Controls.Add(row3);
+            _freePanel.Controls.Add(sec3);
 
             _contentPanel.Controls.Add(_freePanel);
         }
@@ -381,76 +538,120 @@ namespace PatsKillerPro
         private void BuildLoginPanel()
         {
             _loginPanel = new Panel { Dock = DockStyle.Fill, BackColor = ColorBg };
-            var card = new Panel { Size = new Size(400, 460), BackColor = ColorCard };
-            card.Paint += (s, e) => { using (var p = new Pen(ColorBorder, 2)) { e.Graphics.DrawRectangle(p, 1, 1, 397, 457); } };
             
-            // Simple center logic
-            card.Location = new Point((this.ClientSize.Width - 400)/2, (this.ClientSize.Height - 460)/2);
-            _loginPanel.Resize += (s,e) => card.Location = new Point((_loginPanel.Width - 400)/2, (_loginPanel.Height - 460)/2);
-
-            var lblTitle = new Label { Text = "Welcome", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(140, 40) };
-            card.Controls.Add(lblTitle);
-
-            var lblE = new Label { Text = "Email", ForeColor = ColorTextDim, Location = new Point(40, 120), AutoSize = true };
-            card.Controls.Add(lblE);
-            _txtEmail = MakeTextBox(320, 40); _txtEmail.Location = new Point(40, 145);
+            var card = new Panel { Size = new Size(420, 480), BackColor = ColorCard };
+            card.Paint += (s, e) => { using var p = new Pen(ColorBorder, 2); e.Graphics.DrawRectangle(p, 1, 1, 417, 477); };
+            
+            int y = 35;
+            
+            var lblWelcome = new Label { Text = "Welcome to PatsKiller Pro", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = ColorText, Size = new Size(400, 35), Location = new Point(10, y), TextAlign = ContentAlignment.MiddleCenter };
+            card.Controls.Add(lblWelcome);
+            y += 45;
+            
+            var lblSub = new Label { Text = "Sign in to access your tokens", Font = new Font("Segoe UI", 10), ForeColor = ColorTextMuted, Size = new Size(400, 25), Location = new Point(10, y), TextAlign = ContentAlignment.MiddleCenter };
+            card.Controls.Add(lblSub);
+            y += 50;
+            
+            var btnGoogle = new Button { Text = "Continue with Google", Size = new Size(340, 50), Location = new Point(40, y), FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Color.FromArgb(50, 50, 50), Font = new Font("Segoe UI", 11, FontStyle.Bold), Cursor = Cursors.Hand };
+            btnGoogle.FlatAppearance.BorderColor = ColorBorder;
+            btnGoogle.Click += BtnGoogleLogin_Click;
+            card.Controls.Add(btnGoogle);
+            y += 70;
+            
+            var lblOr = new Label { Text = "─────── or sign in with email ───────", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, Size = new Size(340, 22), Location = new Point(40, y), TextAlign = ContentAlignment.MiddleCenter };
+            card.Controls.Add(lblOr);
+            y += 38;
+            
+            var lblEmail = new Label { Text = "Email", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, Location = new Point(40, y), AutoSize = true };
+            card.Controls.Add(lblEmail);
+            y += 24;
+            
+            _txtEmail = MakeTextBox(340);
+            _txtEmail.Location = new Point(40, y);
             card.Controls.Add(_txtEmail);
-
-            var lblP = new Label { Text = "Password", ForeColor = ColorTextDim, Location = new Point(40, 200), AutoSize = true };
-            card.Controls.Add(lblP);
-            _txtPassword = MakeTextBox(320, 40); _txtPassword.Location = new Point(40, 225); _txtPassword.UseSystemPasswordChar = true;
+            y += 50;
+            
+            var lblPass = new Label { Text = "Password", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, Location = new Point(40, y), AutoSize = true };
+            card.Controls.Add(lblPass);
+            y += 24;
+            
+            _txtPassword = MakeTextBox(340);
+            _txtPassword.Location = new Point(40, y);
+            _txtPassword.UseSystemPasswordChar = true;
+            _txtPassword.KeyPress += (s, e) => { if (e.KeyChar == 13) DoLogin(); };
             card.Controls.Add(_txtPassword);
-
-            var btnL = MakeButton("Sign In", 320, 45); btnL.Location = new Point(40, 290); btnL.BackColor = ColorAccent;
-            btnL.Click += (s, e) => DoLogin();
-            card.Controls.Add(btnL);
-
-            var btnG = MakeButton("Google Login", 320, 45); btnG.Location = new Point(40, 350); btnG.BackColor = Color.White; btnG.ForeColor = Color.Black;
-            btnG.Click += BtnGoogleLogin_Click;
-            card.Controls.Add(btnG);
-
+            y += 55;
+            
+            var btnLogin = new Button { Text = "Sign In", Size = new Size(340, 48), Location = new Point(40, y), FlatStyle = FlatStyle.Flat, BackColor = ColorAccent, ForeColor = ColorText, Font = new Font("Segoe UI", 12, FontStyle.Bold), Cursor = Cursors.Hand };
+            btnLogin.FlatAppearance.BorderColor = ColorBorder;
+            btnLogin.Click += (s, e) => DoLogin();
+            card.Controls.Add(btnLogin);
+            
             _loginPanel.Controls.Add(card);
+            _loginPanel.Resize += (s, e) => { card.Location = new Point((_loginPanel.Width - 420) / 2, (_loginPanel.Height - 480) / 2 - 20); };
+            
             Controls.Add(_loginPanel);
         }
         #endregion
 
         #region UI Helpers
-        private Panel MakeSection(string title)
+        private Panel MakeSection(string title, int w, int h)
         {
-            var p = new Panel { Width = 1000, AutoSize = true, BackColor = ColorCard, Margin = new Padding(0, 0, 0, 20) };
+            var p = new Panel { Size = new Size(w, h), BackColor = ColorCard };
             p.Paint += (s, e) => {
-                using (var pen = new Pen(ColorBorder)) { e.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1); }
-                using (var font = new Font("Segoe UI", 10F, FontStyle.Bold))
-                using (var brush = new SolidBrush(ColorTextDim)) { e.Graphics.DrawString(title, font, brush, 20, 12); }
-                using (var pen = new Pen(ColorBorder)) { e.Graphics.DrawLine(pen, 15, 36, p.Width - 15, 36); }
+                using var pen = new Pen(ColorBorder);
+                e.Graphics.DrawRectangle(pen, 0, 0, w - 1, h - 1);
+                using var font = new Font("Segoe UI", 10F, FontStyle.Bold);
+                using var brush = new SolidBrush(ColorTextDim);
+                e.Graphics.DrawString(title, font, brush, 20, 12);
+                e.Graphics.DrawLine(pen, 15, 38, w - 15, 38);
             };
             return p;
         }
 
-        private Button MakeButton(string text, int w, int h)
+        // AutoSize button - GROWS TO FIT TEXT - no more truncation!
+        private Button MakeAutoButton(string text, Color bgColor)
         {
-            return new Button { Text = text, Size = new Size(w, h), FlatStyle = FlatStyle.Flat, BackColor = ColorButtonBg, ForeColor = ColorText, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), Cursor = Cursors.Hand, FlatAppearance = { BorderColor = ColorBorder, BorderSize = 1 } };
-        }
-
-        private Button MakeAutoSizedButton(string text, Color bg)
-        {
-            var b = MakeButton(text, 0, 0); // Size ignored initially
-            b.BackColor = bg;
-            b.AutoSize = true;
-            b.MinimumSize = new Size(120, 45); 
-            b.Padding = new Padding(10, 0, 10, 0);
-            b.Margin = new Padding(0, 0, 10, 10);
+            var b = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                Padding = new Padding(18, 10, 18, 10),  // Generous inner padding
+                Margin = new Padding(0, 0, 12, 0),     // Gap between buttons
+                FlatStyle = FlatStyle.Flat,
+                BackColor = bgColor,
+                ForeColor = ColorText,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            b.FlatAppearance.BorderColor = ColorBorder;
+            b.FlatAppearance.BorderSize = 1;
             return b;
         }
 
+        // Tab button - also AutoSize
         private Button MakeTabButton(string text, bool active)
         {
-            return new Button { Text = text, Size = new Size(200, 34), FlatStyle = FlatStyle.Flat, BackColor = active ? ColorTabActive : ColorTabInactive, ForeColor = ColorText, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand, FlatAppearance = { BorderSize = 0 }, Margin = new Padding(0, 0, 5, 0) };
+            var b = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                Padding = new Padding(20, 8, 20, 8),  // More padding for tabs
+                Margin = new Padding(0, 0, 10, 0),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = active ? ColorTabActive : ColorTabInactive,
+                ForeColor = ColorText,
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            b.FlatAppearance.BorderSize = 0;
+            return b;
         }
 
-        private TextBox MakeTextBox(int w, int h) => new TextBox { Size = new Size(w, h), BackColor = ColorSurface, ForeColor = ColorText, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 10) };
-        private ComboBox MakeComboBox(int w) => new ComboBox { Size = new Size(w, 36), BackColor = ColorSurface, ForeColor = ColorText, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10), DropDownStyle = ComboBoxStyle.DropDownList };
-        
+        private TextBox MakeTextBox(int w) => new TextBox { Size = new Size(w, 38), BackColor = ColorSurface, ForeColor = ColorText, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 10) };
+
+        private ComboBox MakeComboBox(int w) => new ComboBox { Size = new Size(w, 38), BackColor = ColorSurface, ForeColor = ColorText, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10), DropDownStyle = ComboBoxStyle.DropDownList };
+
         private void Log(string type, string msg)
         {
             if (_txtLog == null || _txtLog.IsDisposed) return;
@@ -479,14 +680,19 @@ namespace PatsKillerPro
         #endregion
 
         #region Navigation
-        private void ShowLogin() { _loginPanel.Visible = true; _tabBar.Visible = false; _contentPanel.Visible = false; _logPanel.Visible = false; _headerPanel.Visible = false; }
-        private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = true; _contentPanel.Visible = true; _logPanel.Visible = true; _headerPanel.Visible = true; SwitchTab(0); }
-        private void SwitchTab(int i) {
+        private void ShowLogin() { _loginPanel.Visible = true; _tabBar.Visible = false; _contentPanel.Visible = false; _logPanel.Visible = false; _btnLogout.Visible = false; }
+
+        private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = true; _contentPanel.Visible = true; _logPanel.Visible = true; _btnLogout.Visible = true; LayoutHeader(); SwitchTab(0); }
+
+        private void SwitchTab(int i)
+        {
             _activeTab = i;
             _tabPats.BackColor = i == 0 ? ColorTabActive : ColorTabInactive;
             _tabDiag.BackColor = i == 1 ? ColorTabActive : ColorTabInactive;
             _tabFree.BackColor = i == 2 ? ColorTabActive : ColorTabInactive;
-            _patsPanel.Visible = i == 0; _diagPanel.Visible = i == 1; _freePanel.Visible = i == 2;
+            _patsPanel.Visible = i == 0;
+            _diagPanel.Visible = i == 1;
+            _freePanel.Visible = i == 2;
         }
         #endregion
 
@@ -500,7 +706,6 @@ namespace PatsKillerPro
                 _userEmail = email; _authToken = token; _tokenBalance = 10;
                 _lblTokens.Text = $"Tokens: {_tokenBalance}";
                 _lblUser.Text = _userEmail;
-                _btnLogout.Visible = true;
                 ShowMain();
                 Log("info", $"Logged in as {_userEmail}");
             }
@@ -517,19 +722,9 @@ namespace PatsKillerPro
                 _userEmail = email; _authToken = "token_" + DateTime.Now.Ticks; _tokenBalance = 10;
                 Settings.SetString("email", email); Settings.SetString("auth_token", _authToken); Settings.Save();
                 _lblTokens.Text = $"Tokens: {_tokenBalance}"; _lblUser.Text = _userEmail;
-                _btnLogout.Visible = true;
                 ShowMain(); Log("success", $"Logged in as {email}");
             }
             catch (Exception ex) { ShowError("Login Failed", "Error", ex); }
-        }
-
-        private void DoLogout()
-        {
-            _userEmail = ""; _authToken = ""; _tokenBalance = 0;
-            Settings.Remove("auth_token"); Settings.Save();
-            _txtPassword.Text = ""; _lblTokens.Text = "Tokens: --"; _lblUser.Text = "Not logged in";
-            _btnLogout.Visible = false;
-            ShowLogin(); Log("info", "Logged out");
         }
 
         private void BtnGoogleLogin_Click(object? sender, EventArgs e)
@@ -537,19 +732,24 @@ namespace PatsKillerPro
             try
             {
                 Log("info", "Opening Google login...");
-                using (var form = new GoogleLoginForm())
+                using var form = new GoogleLoginForm();
+                if (form.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(form.AuthToken))
                 {
-                    if (form.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(form.AuthToken))
-                    {
-                        _authToken = form.AuthToken; _userEmail = form.UserEmail ?? "Google User"; _tokenBalance = form.TokenCount;
-                        Settings.SetString("auth_token", _authToken); Settings.SetString("email", _userEmail); Settings.Save();
-                        _lblTokens.Text = $"Tokens: {_tokenBalance}"; _lblUser.Text = _userEmail;
-                        _btnLogout.Visible = true;
-                        ShowMain(); Log("success", $"Logged in as {_userEmail}");
-                    }
+                    _authToken = form.AuthToken; _userEmail = form.UserEmail ?? "Google User"; _tokenBalance = form.TokenCount;
+                    Settings.SetString("auth_token", _authToken); Settings.SetString("email", _userEmail); Settings.Save();
+                    _lblTokens.Text = $"Tokens: {_tokenBalance}"; _lblUser.Text = _userEmail;
+                    ShowMain(); Log("success", $"Logged in as {_userEmail}");
                 }
             }
             catch (Exception ex) { ShowError("Login Failed", ex.Message, ex); }
+        }
+
+        private void DoLogout()
+        {
+            _userEmail = ""; _authToken = ""; _tokenBalance = 0;
+            Settings.Remove("auth_token"); Settings.Save();
+            _txtPassword.Text = ""; _lblTokens.Text = "Tokens: --"; _lblUser.Text = "";
+            ShowLogin(); Log("info", "Logged out");
         }
         #endregion
 
@@ -651,224 +851,22 @@ namespace PatsKillerPro
         #endregion
 
         #region Diagnostics
-        private async void BtnClearP160A_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_P160A, "Clear P160A")) return; 
-            try 
-            { 
-                Log("info", "Clearing P160A..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var pats = new PatsOperations(uds); 
-                await Task.Run(() => pats.ClearP160A()); 
-                MessageBox.Show("P160A cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Cleared"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnClearB10A2_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_B10A2, "Clear B10A2")) return; 
-            try 
-            { 
-                Log("info", "Clearing B10A2..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var pats = new PatsOperations(uds); 
-                await Task.Run(() => pats.ClearB10A2()); 
-                MessageBox.Show("B10A2 cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Cleared"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnClearCrush_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_CRUSH, "Clear Crush")) return; 
-            try 
-            { 
-                Log("info", "Clearing crush..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var pats = new PatsOperations(uds); 
-                await Task.Run(() => pats.ClearCrushEvent()); 
-                MessageBox.Show("Crush cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Cleared"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnGatewayUnlock_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            try 
-            { 
-                var uds = new UdsService(_hsCanChannel); 
-                var pats = new PatsOperations(uds); 
-                if (!await Task.Run(() => pats.DetectGateway())) 
-                { 
-                    MessageBox.Show("No gateway (pre-2020).", "Gateway", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                    return; 
-                } 
-                if (!ConfirmToken(PatsOperations.TOKEN_COST_GATEWAY_UNLOCK, "Unlock Gateway")) return; 
-                var incode = _txtIncode.Text.Trim(); 
-                if (string.IsNullOrEmpty(incode)) 
-                { 
-                    MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); 
-                    return; 
-                } 
-                await Task.Run(() => pats.UnlockGateway(incode)); 
-                MessageBox.Show("Gateway unlocked!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Unlocked"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnKeypadCode_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            var c = MessageBox.Show("YES = Read\nNO = Write", "Keypad", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question); 
-            if (c == DialogResult.Cancel) return; 
-            if (c == DialogResult.Yes) 
-            { 
-                if (!ConfirmToken(PatsOperations.TOKEN_COST_KEYPAD_READ, "Read Keypad")) return; 
-                try 
-                { 
-                    var uds = new UdsService(_hsCanChannel); 
-                    var pats = new PatsOperations(uds); 
-                    var code = await Task.Run(() => pats.ReadKeypadCode()); 
-                    MessageBox.Show($"Code: {code}", "Keypad", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                    Log("success", $"Keypad: {code}"); 
-                } 
-                catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-            } 
-            else 
-            { 
-                var nc = Microsoft.VisualBasic.Interaction.InputBox("Enter 5-digit code:", "Write Keypad", ""); 
-                if (string.IsNullOrEmpty(nc) || nc.Length != 5) return; 
-                if (!ConfirmToken(PatsOperations.TOKEN_COST_KEYPAD_WRITE, "Write Keypad")) return; 
-                try 
-                { 
-                    var uds = new UdsService(_hsCanChannel); 
-                    var pats = new PatsOperations(uds); 
-                    await Task.Run(() => pats.WriteKeypadCode(nc)); 
-                    MessageBox.Show($"Set: {nc}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                    Log("success", "Keypad set"); 
-                } 
-                catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-            } 
-        }
-
-        private async void BtnBcmFactory_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            if (MessageBox.Show("This resets ALL BCM settings!\nScanner required after!\n\nContinue?", "WARNING", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; 
-            if (!ConfirmToken(PatsOperations.TOKEN_COST_BCM_FACTORY, "BCM Factory Reset")) return; 
-            var i1 = Microsoft.VisualBasic.Interaction.InputBox("Incode 1:", "BCM Factory", _txtIncode.Text); 
-            if (string.IsNullOrEmpty(i1)) return; 
-            var i2 = Microsoft.VisualBasic.Interaction.InputBox("Incode 2:", "BCM Factory", ""); 
-            if (string.IsNullOrEmpty(i2)) return; 
-            var i3 = Microsoft.VisualBasic.Interaction.InputBox("Incode 3 (optional):", "BCM Factory", ""); 
-            var incodes = string.IsNullOrEmpty(i3) ? new[] { i1, i2 } : new[] { i1, i2, i3 }; 
-            try 
-            { 
-                Log("warning", "BCM Factory Reset..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var pats = new PatsOperations(uds); 
-                await Task.Run(() => pats.BcmFactoryDefaults(incodes)); 
-                MessageBox.Show("BCM reset!\nScanner required!", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning); 
-                Log("success", "BCM reset"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
+        private async void BtnClearP160A_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_P160A, "Clear P160A")) return; try { Log("info", "Clearing P160A..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearP160A()); MessageBox.Show("P160A cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Cleared"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnClearB10A2_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_B10A2, "Clear B10A2")) return; try { Log("info", "Clearing B10A2..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearB10A2()); MessageBox.Show("B10A2 cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Cleared"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnClearCrush_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } if (!ConfirmToken(PatsOperations.TOKEN_COST_CLEAR_CRUSH, "Clear Crush")) return; try { Log("info", "Clearing crush..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearCrushEvent()); MessageBox.Show("Crush cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Cleared"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnGatewayUnlock_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } try { var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); if (!await Task.Run(() => pats.DetectGateway())) { MessageBox.Show("No gateway (pre-2020).", "Gateway", MessageBoxButtons.OK, MessageBoxIcon.Information); return; } if (!ConfirmToken(PatsOperations.TOKEN_COST_GATEWAY_UNLOCK, "Unlock Gateway")) return; var incode = _txtIncode.Text.Trim(); if (string.IsNullOrEmpty(incode)) { MessageBox.Show("Enter incode.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } await Task.Run(() => pats.UnlockGateway(incode)); MessageBox.Show("Gateway unlocked!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Unlocked"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnKeypadCode_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } var c = MessageBox.Show("YES = Read\nNO = Write", "Keypad", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question); if (c == DialogResult.Cancel) return; if (c == DialogResult.Yes) { if (!ConfirmToken(PatsOperations.TOKEN_COST_KEYPAD_READ, "Read Keypad")) return; try { var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); var code = await Task.Run(() => pats.ReadKeypadCode()); MessageBox.Show($"Code: {code}", "Keypad", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", $"Keypad: {code}"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } } else { var nc = Microsoft.VisualBasic.Interaction.InputBox("Enter 5-digit code:", "Write Keypad", ""); if (string.IsNullOrEmpty(nc) || nc.Length != 5) return; if (!ConfirmToken(PatsOperations.TOKEN_COST_KEYPAD_WRITE, "Write Keypad")) return; try { var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.WriteKeypadCode(nc)); MessageBox.Show($"Set: {nc}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Keypad set"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } } }
+        private async void BtnBcmFactory_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } if (MessageBox.Show("This resets ALL BCM settings!\nScanner required after!\n\nContinue?", "WARNING", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; if (!ConfirmToken(PatsOperations.TOKEN_COST_BCM_FACTORY, "BCM Factory Reset")) return; var i1 = Microsoft.VisualBasic.Interaction.InputBox("Incode 1:", "BCM Factory", _txtIncode.Text); if (string.IsNullOrEmpty(i1)) return; var i2 = Microsoft.VisualBasic.Interaction.InputBox("Incode 2:", "BCM Factory", ""); if (string.IsNullOrEmpty(i2)) return; var i3 = Microsoft.VisualBasic.Interaction.InputBox("Incode 3 (optional):", "BCM Factory", ""); var incodes = string.IsNullOrEmpty(i3) ? new[] { i1, i2 } : new[] { i1, i2, i3 }; try { Log("warning", "BCM Factory Reset..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.BcmFactoryDefaults(incodes)); MessageBox.Show("BCM reset!\nScanner required!", "Done", MessageBoxButtons.OK, MessageBoxIcon.Warning); Log("success", "BCM reset"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
         #endregion
 
         #region Free Functions
-        private async void BtnClearDtc_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            try 
-            { 
-                Log("info", "Clearing DTCs..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                await Task.Run(() => uds.ClearDTCs()); 
-                MessageBox.Show("DTCs cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Cleared"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnClearKam_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            try 
-            { 
-                Log("info", "Clearing KAM..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var pats = new PatsOperations(uds); 
-                await Task.Run(() => pats.ClearKAM()); 
-                MessageBox.Show("KAM cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Cleared"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnVehicleReset_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            try 
-            { 
-                Log("info", "Resetting..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var pats = new PatsOperations(uds); 
-                await Task.Run(() => pats.VehicleReset()); 
-                MessageBox.Show("Reset complete!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Reset done"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnReadKeysCount_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            try 
-            { 
-                Log("info", "Reading keys..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var count = await Task.Run(() => uds.ReadKeysCount()); 
-                _lblKeysCount.Text = count.ToString(); 
-                MessageBox.Show($"Keys: {count}", "Count", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", $"Keys: {count}"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
-
-        private async void BtnReadModuleInfo_Click(object? sender, EventArgs e) 
-        { 
-            if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } 
-            try 
-            { 
-                Log("info", "Reading modules..."); 
-                var uds = new UdsService(_hsCanChannel); 
-                var info = await Task.Run(() => uds.ReadAllModuleInfo()); 
-                MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information); 
-                Log("success", "Done"); 
-            } 
-            catch (Exception ex) { ShowError("Failed", "Failed", ex); } 
-        }
+        private async void BtnClearDtc_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } try { Log("info", "Clearing DTCs..."); var uds = new UdsService(_hsCanChannel); await Task.Run(() => uds.ClearDTCs()); MessageBox.Show("DTCs cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Cleared"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnClearKam_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } try { Log("info", "Clearing KAM..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.ClearKAM()); MessageBox.Show("KAM cleared!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Cleared"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnVehicleReset_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } try { Log("info", "Resetting..."); var uds = new UdsService(_hsCanChannel); var pats = new PatsOperations(uds); await Task.Run(() => pats.VehicleReset()); MessageBox.Show("Reset complete!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Reset done"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnReadKeysCount_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } try { Log("info", "Reading keys..."); var uds = new UdsService(_hsCanChannel); var count = await Task.Run(() => uds.ReadKeysCount()); _lblKeysCount.Text = count.ToString(); MessageBox.Show($"Keys: {count}", "Count", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", $"Keys: {count}"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
+        private async void BtnReadModuleInfo_Click(object? sender, EventArgs e) { if (_hsCanChannel == null) { MessageBox.Show("Connect first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } try { Log("info", "Reading modules..."); var uds = new UdsService(_hsCanChannel); var info = await Task.Run(() => uds.ReadAllModuleInfo()); MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information); Log("success", "Done"); } catch (Exception ex) { ShowError("Failed", "Failed", ex); } }
         #endregion
 
-        protected override void OnFormClosing(FormClosingEventArgs e) 
-        { 
-            try 
-            { 
-                _hsCanChannel?.Dispose(); 
-                _device?.Dispose(); 
-                _deviceManager?.Dispose(); 
-            } 
-            catch { } 
-            base.OnFormClosing(e); 
-        }
+        protected override void OnFormClosing(FormClosingEventArgs e) { try { _hsCanChannel?.Dispose(); _device?.Dispose(); _deviceManager?.Dispose(); } catch { } base.OnFormClosing(e); }
     }
 }
