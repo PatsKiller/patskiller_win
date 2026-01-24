@@ -52,7 +52,6 @@ namespace PatsKillerPro
         private int Dpi(int px) => (int)Math.Round(px * (DeviceDpi / 96f));
         private Padding DpiPad(int l, int t, int r, int b) => new Padding(Dpi(l), Dpi(t), Dpi(r), Dpi(b));
 
-        private Image? _logoImage;
 
         public MainForm()
         {
@@ -114,9 +113,9 @@ namespace PatsKillerPro
             var host = new Panel
             {
                 Size = new Size(sz, sz),
-                BackColor = ACCENT,
+                BackColor = Color.Transparent,
                 Margin = new Padding(0, 0, Dpi(12), 0),
-                Padding = DpiPad(6, 6, 6, 6)
+                Padding = new Padding(0)
             };
 
             _logoImage ??= TryLoadLogoImage();
@@ -139,7 +138,7 @@ namespace PatsKillerPro
             {
                 Text = "P",
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = Color.White,
+                ForeColor = ACCENT,
                 BackColor = Color.Transparent,
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter
@@ -677,7 +676,7 @@ namespace PatsKillerPro
             card.Controls.Add(new Label { Text = "Password", Font = new Font("Segoe UI", 10), ForeColor = TEXT_DIM, Location = new Point(40, cy), AutoSize = true }); cy += 25;
             _txtPassword = MakeTextBox(370); _txtPassword.Location = new Point(40, cy); _txtPassword.UseSystemPasswordChar = true; _txtPassword.KeyPress += (s, e) => { if (e.KeyChar == 13) DoLogin(); }; card.Controls.Add(_txtPassword); cy += 58;
 
-            var btnL = new Button { Text = "Sign In", Size = new Size(370, 52), Location = new Point(40, cy), FlatStyle = FlatStyle.Flat, BackColor = ACCENT, ForeColor = TEXT, Font = new Font("Segoe UI", 13, FontStyle.Bold), Cursor = Cursors.Hand };
+            var btnL = new Button { Text = "Sign In", Size = new Size(370, 52), Location = new Point(40, cy), FlatStyle = FlatStyle.Flat, BackColor = Color.Transparent, ForeColor = TEXT, Font = new Font("Segoe UI", 13, FontStyle.Bold), Cursor = Cursors.Hand };
             btnL.FlatAppearance.BorderColor = BORDER;
             btnL.Click += (s, e) => DoLogin();
             card.Controls.Add(btnL);
