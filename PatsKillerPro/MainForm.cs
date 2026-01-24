@@ -84,7 +84,7 @@ namespace PatsKillerPro
         {
             this.SuspendLayout();
             this.Text = "PatsKiller Pro 2026";
-            this.ClientSize = new Size(1200, 850);
+            this.ClientSize = new Size(1150, 820);
             this.MinimumSize = new Size(1000, 750);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = ColorBg;
@@ -106,17 +106,17 @@ namespace PatsKillerPro
         #region Build UI
         private void BuildUI()
         {
-            // Header
-            _headerPanel = new Panel { Dock = DockStyle.Top, Height = 70, BackColor = ColorSurface };
-            _headerPanel.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawLine(p, 0, 69, Width, 69); };
+            // Header - 80px
+            _headerPanel = new Panel { Dock = DockStyle.Top, Height = 80, BackColor = ColorSurface };
+            _headerPanel.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawLine(p, 0, 79, Width, 79); };
             
-            var logo = new Label { Text = "PK", Font = new Font("Segoe UI", 16, FontStyle.Bold), ForeColor = Color.White, BackColor = ColorAccent, Size = new Size(44, 44), Location = new Point(20, 13), TextAlign = ContentAlignment.MiddleCenter };
+            var logo = new Label { Text = "PK", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.White, BackColor = ColorAccent, Size = new Size(40, 40), Location = new Point(20, 20), TextAlign = ContentAlignment.MiddleCenter };
             _headerPanel.Controls.Add(logo);
             
-            var title = new Label { Text = "PatsKiller Pro", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(75, 12) };
+            var title = new Label { Text = "PatsKiller Pro", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(70, 18) };
             _headerPanel.Controls.Add(title);
             
-            var subtitle = new Label { Text = "Ford & Lincoln PATS Key Programming", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(77, 42) };
+            var subtitle = new Label { Text = "Ford & Lincoln PATS Key Programming", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(72, 48) };
             _headerPanel.Controls.Add(subtitle);
             
             _lblTokens = new Label { Text = "Tokens: --", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = ColorSuccess, AutoSize = true };
@@ -130,14 +130,10 @@ namespace PatsKillerPro
             _btnLogout.Visible = false;
             _headerPanel.Controls.Add(_btnLogout);
             
-            _headerPanel.Resize += (s, e) => {
-                _btnLogout.Location = new Point(_headerPanel.Width - 100, 19);
-                _lblTokens.Location = new Point(_headerPanel.Width - 220, 15);
-                _lblUser.Location = new Point(_headerPanel.Width - 220, 42);
-            };
+            _headerPanel.Resize += (s, e) => LayoutHeader();
             Controls.Add(_headerPanel);
 
-            // Tab Bar
+            // Tab Bar - 50px
             _tabBar = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = ColorSurface, Visible = false };
             _tabBar.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawLine(p, 0, 49, Width, 49); };
             
@@ -147,31 +143,31 @@ namespace PatsKillerPro
             _tabBar.Controls.Add(_tabPats);
             
             _tabDiag = MakeTabButton("Diagnostics", false);
-            _tabDiag.Location = new Point(230, 8);
+            _tabDiag.Location = new Point(240, 8);
             _tabDiag.Click += (s, e) => SwitchTab(1);
             _tabBar.Controls.Add(_tabDiag);
             
             _tabFree = MakeTabButton("Free Functions", false);
-            _tabFree.Location = new Point(390, 8);
+            _tabFree.Location = new Point(400, 8);
             _tabFree.Click += (s, e) => SwitchTab(2);
             _tabBar.Controls.Add(_tabFree);
             
             Controls.Add(_tabBar);
 
-            // Log Panel
-            _logPanel = new Panel { Dock = DockStyle.Bottom, Height = 120, BackColor = ColorSurface, Visible = false };
+            // Log Panel - 110px
+            _logPanel = new Panel { Dock = DockStyle.Bottom, Height = 110, BackColor = ColorSurface, Visible = false };
             _logPanel.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawLine(p, 0, 0, Width, 0); };
             
             var logTitle = new Label { Text = "ACTIVITY LOG", Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = ColorTextDim, Location = new Point(20, 8), AutoSize = true };
             _logPanel.Controls.Add(logTitle);
             
-            _txtLog = new RichTextBox { Location = new Point(20, 30), BackColor = ColorBg, ForeColor = ColorText, Font = new Font("Consolas", 9.5F), BorderStyle = BorderStyle.None, ReadOnly = true };
+            _txtLog = new RichTextBox { Location = new Point(20, 28), BackColor = ColorBg, ForeColor = ColorText, Font = new Font("Consolas", 9.5F), BorderStyle = BorderStyle.None, ReadOnly = true };
             _logPanel.Controls.Add(_txtLog);
-            _logPanel.Resize += (s, e) => { _txtLog.Width = _logPanel.Width - 40; _txtLog.Height = _logPanel.Height - 40; };
+            _logPanel.Resize += (s, e) => { _txtLog.Width = _logPanel.Width - 40; _txtLog.Height = _logPanel.Height - 38; };
             Controls.Add(_logPanel);
 
             // Content Panel
-            _contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = ColorBg, Visible = false, AutoScroll = true, Padding = new Padding(20) };
+            _contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = ColorBg, Visible = false, AutoScroll = true };
             Controls.Add(_contentPanel);
 
             // Build tab contents
@@ -183,320 +179,337 @@ namespace PatsKillerPro
             ShowLogin();
         }
 
+        private void LayoutHeader()
+        {
+            int right = _headerPanel.Width - 20;
+            _btnLogout.Location = new Point(right - 80, 24);
+            _lblTokens.Location = new Point(right - 80 - 20 - _lblTokens.Width, 18);
+            _lblUser.Location = new Point(right - 80 - 20 - _lblUser.Width, 48);
+        }
+
         private void BuildPatsPanel()
         {
-            _patsPanel = new Panel { Location = new Point(20, 20), BackColor = ColorBg, AutoSize = true };
+            _patsPanel = new Panel { Location = new Point(20, 15), Size = new Size(1090, 560), BackColor = ColorBg };
             
             int y = 0;
-            int sectionWidth = 1100;
+            int W = 1050; // Section width
 
-            // === SECTION 1: Device Connection ===
-            var sec1 = MakeSection("J2534 DEVICE CONNECTION", sectionWidth, 100);
+            // === SECTION 1: J2534 Device Connection ===
+            var sec1 = MakeSection("J2534 DEVICE CONNECTION", W, 95);
             sec1.Location = new Point(0, y);
             
-            _cmbDevices = MakeComboBox(320);
-            _cmbDevices.Location = new Point(25, 50);
+            _cmbDevices = MakeComboBox(300);
+            _cmbDevices.Location = new Point(25, 48);
             _cmbDevices.Items.Add("Select J2534 Device...");
             _cmbDevices.SelectedIndex = 0;
             sec1.Controls.Add(_cmbDevices);
             
-            var btnScan = MakeButton("Scan Devices", 130, 38);
-            btnScan.Location = new Point(360, 48);
+            var btnScan = MakeButton("Scan Devices", 130, 36);
+            btnScan.Location = new Point(340, 47);
             btnScan.Click += BtnScan_Click;
             sec1.Controls.Add(btnScan);
             
-            var btnConnect = MakeButton("Connect", 110, 38);
-            btnConnect.Location = new Point(505, 48);
+            var btnConnect = MakeButton("Connect", 100, 36);
+            btnConnect.Location = new Point(485, 47);
             btnConnect.BackColor = ColorSuccess;
             btnConnect.Click += BtnConnect_Click;
             sec1.Controls.Add(btnConnect);
             
-            _lblStatus = new Label { Text = "● Not Connected", Font = new Font("Segoe UI", 10), ForeColor = ColorWarning, AutoSize = true, Location = new Point(640, 55) };
+            _lblStatus = new Label { Text = "● Not Connected", Font = new Font("Segoe UI", 10), ForeColor = ColorWarning, AutoSize = true, Location = new Point(610, 53) };
             sec1.Controls.Add(_lblStatus);
             
             _patsPanel.Controls.Add(sec1);
-            y += 120;
+            y += 110;
 
             // === SECTION 2: Vehicle Information ===
-            var sec2 = MakeSection("VEHICLE INFORMATION", sectionWidth, 120);
+            var sec2 = MakeSection("VEHICLE INFORMATION", W, 95);
             sec2.Location = new Point(0, y);
             
-            var btnReadVin = MakeButton("Read VIN", 120, 40);
-            btnReadVin.Location = new Point(25, 50);
+            var btnReadVin = MakeButton("Read VIN", 100, 36);
+            btnReadVin.Location = new Point(25, 48);
             btnReadVin.BackColor = ColorAccent;
             btnReadVin.Click += BtnReadVin_Click;
             sec2.Controls.Add(btnReadVin);
             
-            _lblVin = new Label { Text = "VIN: -----------------", Font = new Font("Consolas", 11), ForeColor = ColorTextDim, AutoSize = true, Location = new Point(160, 58) };
+            _lblVin = new Label { Text = "VIN: -----------------", Font = new Font("Consolas", 11), ForeColor = ColorTextDim, AutoSize = true, Location = new Point(140, 54) };
             sec2.Controls.Add(_lblVin);
             
-            var lblSelect = new Label { Text = "Or select:", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, AutoSize = true, Location = new Point(450, 58) };
+            var lblSelect = new Label { Text = "Or select vehicle:", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, AutoSize = true, Location = new Point(400, 54) };
             sec2.Controls.Add(lblSelect);
             
-            _cmbVehicles = MakeComboBox(280);
-            _cmbVehicles.Location = new Point(520, 52);
+            _cmbVehicles = MakeComboBox(250);
+            _cmbVehicles.Location = new Point(520, 48);
             foreach (var v in VehiclePlatforms.GetAllVehicles()) _cmbVehicles.Items.Add(v.DisplayName);
             if (_cmbVehicles.Items.Count > 0) _cmbVehicles.SelectedIndex = 0;
             sec2.Controls.Add(_cmbVehicles);
             
             // Keys badge
-            var keysBg = new Panel { Size = new Size(100, 70), Location = new Point(980, 40), BackColor = ColorSurface };
-            keysBg.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawRectangle(p, 0, 0, 99, 69); };
-            var keysLbl = new Label { Text = "KEYS", Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = ColorTextMuted, Size = new Size(100, 18), Location = new Point(0, 8), TextAlign = ContentAlignment.MiddleCenter };
+            var keysBg = new Panel { Size = new Size(90, 55), Location = new Point(940, 35), BackColor = ColorSurface };
+            keysBg.Paint += (s, e) => { using var p = new Pen(ColorBorder); e.Graphics.DrawRectangle(p, 0, 0, 89, 54); };
+            var keysLbl = new Label { Text = "KEYS", Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = ColorTextMuted, Size = new Size(90, 16), Location = new Point(0, 5), TextAlign = ContentAlignment.MiddleCenter };
             keysBg.Controls.Add(keysLbl);
-            _lblKeysCount = new Label { Text = "--", Font = new Font("Segoe UI", 24, FontStyle.Bold), ForeColor = ColorSuccess, Size = new Size(100, 40), Location = new Point(0, 26), TextAlign = ContentAlignment.MiddleCenter };
+            _lblKeysCount = new Label { Text = "--", Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = ColorSuccess, Size = new Size(90, 32), Location = new Point(0, 20), TextAlign = ContentAlignment.MiddleCenter };
             keysBg.Controls.Add(_lblKeysCount);
             sec2.Controls.Add(keysBg);
             
             _patsPanel.Controls.Add(sec2);
-            y += 140;
+            y += 110;
 
-            // === SECTION 3: Security Codes ===
-            var sec3 = MakeSection("PATS SECURITY CODES", sectionWidth, 100);
+            // === SECTION 3: PATS Security Codes ===
+            var sec3 = MakeSection("PATS SECURITY CODES", W, 95);
             sec3.Location = new Point(0, y);
             
-            var lblOut = new Label { Text = "OUTCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(25, 55) };
+            var lblOut = new Label { Text = "OUTCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(25, 53) };
             sec3.Controls.Add(lblOut);
             
-            _txtOutcode = MakeTextBox(140, 38);
-            _txtOutcode.Location = new Point(110, 50);
+            _txtOutcode = MakeTextBox(130, 36);
+            _txtOutcode.Location = new Point(115, 47);
             _txtOutcode.ReadOnly = true;
-            _txtOutcode.Font = new Font("Consolas", 12, FontStyle.Bold);
+            _txtOutcode.Font = new Font("Consolas", 11, FontStyle.Bold);
             _txtOutcode.TextAlign = HorizontalAlignment.Center;
             sec3.Controls.Add(_txtOutcode);
             
-            var btnCopy = MakeButton("Copy", 70, 38);
-            btnCopy.Location = new Point(265, 50);
-            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); Log("info", "Copied"); } };
+            var btnCopy = MakeButton("Copy", 80, 36);
+            btnCopy.Location = new Point(260, 47);
+            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); Log("info", "Copied to clipboard"); } };
             sec3.Controls.Add(btnCopy);
             
-            var btnGet = MakeButton("Get Incode Online", 160, 38);
-            btnGet.Location = new Point(370, 50);
+            var btnGet = MakeButton("Get Incode Online", 160, 36);
+            btnGet.Location = new Point(360, 47);
             btnGet.BackColor = ColorWarning;
             btnGet.ForeColor = Color.Black;
             btnGet.Click += (s, e) => OpenUrl("https://patskiller.com/calculator");
             sec3.Controls.Add(btnGet);
             
-            var lblIn = new Label { Text = "INCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(565, 55) };
+            var lblIn = new Label { Text = "INCODE:", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorText, AutoSize = true, Location = new Point(550, 53) };
             sec3.Controls.Add(lblIn);
             
-            _txtIncode = MakeTextBox(140, 38);
-            _txtIncode.Location = new Point(640, 50);
-            _txtIncode.Font = new Font("Consolas", 12, FontStyle.Bold);
+            _txtIncode = MakeTextBox(130, 36);
+            _txtIncode.Location = new Point(630, 47);
+            _txtIncode.Font = new Font("Consolas", 11, FontStyle.Bold);
             _txtIncode.TextAlign = HorizontalAlignment.Center;
             sec3.Controls.Add(_txtIncode);
             
             _patsPanel.Controls.Add(sec3);
-            y += 120;
+            y += 110;
 
-            // === SECTION 4: Key Operations ===
-            var sec4 = MakeSection("KEY PROGRAMMING OPERATIONS", sectionWidth, 130);
+            // === SECTION 4: Key Programming Operations ===
+            var sec4 = MakeSection("KEY PROGRAMMING OPERATIONS", W, 115);
             sec4.Location = new Point(0, y);
             
-            var btnProg = MakeButton("Program Key", 150, 48);
-            btnProg.Location = new Point(25, 50);
+            int bx = 25;
+            int bw = 135;
+            int bgap = 15;
+            
+            var btnProg = MakeButton("Program Key", bw, 44);
+            btnProg.Location = new Point(bx, 48);
             btnProg.BackColor = ColorSuccess;
-            btnProg.Font = new Font("Segoe UI", 11, FontStyle.Bold);
+            btnProg.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             btnProg.Click += BtnProgramKeys_Click;
             sec4.Controls.Add(btnProg);
+            bx += bw + bgap;
             
-            var btnErase = MakeButton("Erase All Keys", 150, 48);
-            btnErase.Location = new Point(195, 50);
+            var btnErase = MakeButton("Erase All Keys", bw, 44);
+            btnErase.Location = new Point(bx, 48);
             btnErase.BackColor = ColorDanger;
             btnErase.Click += BtnEraseKeys_Click;
             sec4.Controls.Add(btnErase);
+            bx += bw + bgap;
             
-            var btnParam = MakeButton("Parameter Reset", 155, 48);
-            btnParam.Location = new Point(365, 50);
+            var btnParam = MakeButton("Parameter Reset", bw + 15, 44);
+            btnParam.Location = new Point(bx, 48);
             btnParam.Click += BtnParamReset_Click;
             sec4.Controls.Add(btnParam);
+            bx += bw + 15 + bgap;
             
-            var btnEscl = MakeButton("Initialize ESCL", 145, 48);
-            btnEscl.Location = new Point(540, 50);
+            var btnEscl = MakeButton("Initialize ESCL", bw, 44);
+            btnEscl.Location = new Point(bx, 48);
             btnEscl.Click += BtnEscl_Click;
             sec4.Controls.Add(btnEscl);
+            bx += bw + bgap;
             
-            var btnDisable = MakeButton("Disable BCM", 135, 48);
-            btnDisable.Location = new Point(705, 50);
+            var btnDisable = MakeButton("Disable BCM", bw - 10, 44);
+            btnDisable.Location = new Point(bx, 48);
             btnDisable.Click += BtnDisableBcm_Click;
             sec4.Controls.Add(btnDisable);
             
-            var tip = new Label { Text = "TIP: Program Key = 1 token per session (unlimited keys). Insert key → Program → Remove → Repeat.", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(25, 105) };
+            var tip = new Label { Text = "TIP: Program Key = 1 token per session (unlimited keys). Insert key → Program → Remove → Repeat.", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(25, 97) };
             sec4.Controls.Add(tip);
             
             _patsPanel.Controls.Add(sec4);
 
-            _patsPanel.Size = new Size(sectionWidth + 40, y + 150);
             _contentPanel.Controls.Add(_patsPanel);
         }
 
         private void BuildDiagPanel()
         {
-            _diagPanel = new Panel { Location = new Point(20, 20), BackColor = ColorBg, AutoSize = true, Visible = false };
+            _diagPanel = new Panel { Location = new Point(20, 15), Size = new Size(1090, 500), BackColor = ColorBg, Visible = false };
             
             int y = 0;
-            int sectionWidth = 1100;
+            int W = 1050;
 
             // DTC Operations
-            var sec1 = MakeSection("DTC CLEAR OPERATIONS (1 TOKEN EACH)", sectionWidth, 100);
+            var sec1 = MakeSection("DTC CLEAR OPERATIONS (1 TOKEN EACH)", W, 95);
             sec1.Location = new Point(0, y);
             
-            var btnP160A = MakeButton("Clear P160A", 140, 42);
-            btnP160A.Location = new Point(25, 50);
+            int bx = 25;
+            var btnP160A = MakeButton("Clear P160A", 130, 40);
+            btnP160A.Location = new Point(bx, 48);
             btnP160A.BackColor = ColorAccent;
             btnP160A.Click += BtnClearP160A_Click;
             sec1.Controls.Add(btnP160A);
+            bx += 145;
             
-            var btnB10A2 = MakeButton("Clear B10A2", 140, 42);
-            btnB10A2.Location = new Point(185, 50);
+            var btnB10A2 = MakeButton("Clear B10A2", 130, 40);
+            btnB10A2.Location = new Point(bx, 48);
             btnB10A2.BackColor = ColorAccent;
             btnB10A2.Click += BtnClearB10A2_Click;
             sec1.Controls.Add(btnB10A2);
+            bx += 145;
             
-            var btnCrush = MakeButton("Clear Crush", 130, 42);
-            btnCrush.Location = new Point(345, 50);
+            var btnCrush = MakeButton("Clear Crush", 130, 40);
+            btnCrush.Location = new Point(bx, 48);
             btnCrush.BackColor = ColorAccent;
             btnCrush.Click += BtnClearCrush_Click;
             sec1.Controls.Add(btnCrush);
+            bx += 145;
             
-            var btnGateway = MakeButton("Unlock Gateway", 150, 42);
-            btnGateway.Location = new Point(495, 50);
+            var btnGateway = MakeButton("Unlock Gateway", 150, 40);
+            btnGateway.Location = new Point(bx, 48);
             btnGateway.BackColor = ColorAccent;
             btnGateway.Click += BtnGatewayUnlock_Click;
             sec1.Controls.Add(btnGateway);
             
             _diagPanel.Controls.Add(sec1);
-            y += 120;
+            y += 110;
 
             // Keypad
-            var sec2 = MakeSection("KEYPAD CODE OPERATIONS", sectionWidth, 100);
+            var sec2 = MakeSection("KEYPAD CODE OPERATIONS", W, 95);
             sec2.Location = new Point(0, y);
             
-            var btnReadKp = MakeButton("Read Keypad Code", 170, 42);
-            btnReadKp.Location = new Point(25, 50);
+            var btnReadKp = MakeButton("Read Keypad Code", 165, 40);
+            btnReadKp.Location = new Point(25, 48);
             btnReadKp.Click += BtnKeypadCode_Click;
             sec2.Controls.Add(btnReadKp);
             
-            var btnWriteKp = MakeButton("Write Keypad Code", 175, 42);
-            btnWriteKp.Location = new Point(215, 50);
+            var btnWriteKp = MakeButton("Write Keypad Code", 170, 40);
+            btnWriteKp.Location = new Point(205, 48);
             btnWriteKp.Click += BtnKeypadCode_Click;
             sec2.Controls.Add(btnWriteKp);
             
-            var kpNote = new Label { Text = "For vehicles with door keypad entry", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(420, 58) };
+            var kpNote = new Label { Text = "For vehicles with door keypad entry", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, AutoSize = true, Location = new Point(400, 56) };
             sec2.Controls.Add(kpNote);
             
             _diagPanel.Controls.Add(sec2);
-            y += 120;
+            y += 110;
 
             // BCM
-            var sec3 = MakeSection("BCM ADVANCED OPERATIONS", sectionWidth, 100);
+            var sec3 = MakeSection("BCM ADVANCED OPERATIONS", W, 95);
             sec3.Location = new Point(0, y);
             
-            var btnBcm = MakeButton("BCM Factory Reset", 175, 42);
-            btnBcm.Location = new Point(25, 50);
+            var btnBcm = MakeButton("BCM Factory Reset", 165, 40);
+            btnBcm.Location = new Point(25, 48);
             btnBcm.BackColor = ColorDanger;
             btnBcm.Click += BtnBcmFactory_Click;
             sec3.Controls.Add(btnBcm);
             
-            var bcmWarn = new Label { Text = "⚠ WARNING: Requires As-Built reprogramming with scan tool after reset!", Font = new Font("Segoe UI", 9), ForeColor = ColorDanger, AutoSize = true, Location = new Point(220, 58) };
+            var bcmWarn = new Label { Text = "⚠ WARNING: Requires As-Built reprogramming with scan tool after reset!", Font = new Font("Segoe UI", 9), ForeColor = ColorDanger, AutoSize = true, Location = new Point(210, 56) };
             sec3.Controls.Add(bcmWarn);
             
             _diagPanel.Controls.Add(sec3);
-            y += 120;
+            y += 110;
 
             // Module Info
-            var sec4 = MakeSection("MODULE INFORMATION", sectionWidth, 100);
+            var sec4 = MakeSection("MODULE INFORMATION", W, 95);
             sec4.Location = new Point(0, y);
             
-            var btnMod = MakeButton("Read All Module Info", 185, 42);
-            btnMod.Location = new Point(25, 50);
+            var btnMod = MakeButton("Read All Module Info", 180, 40);
+            btnMod.Location = new Point(25, 48);
             btnMod.Click += BtnReadModuleInfo_Click;
             sec4.Controls.Add(btnMod);
             
             _diagPanel.Controls.Add(sec4);
 
-            _diagPanel.Size = new Size(sectionWidth + 40, y + 120);
             _contentPanel.Controls.Add(_diagPanel);
         }
 
         private void BuildFreePanel()
         {
-            _freePanel = new Panel { Location = new Point(20, 20), BackColor = ColorBg, AutoSize = true, Visible = false };
+            _freePanel = new Panel { Location = new Point(20, 15), Size = new Size(1090, 420), BackColor = ColorBg, Visible = false };
             
             int y = 0;
-            int sectionWidth = 1100;
+            int W = 1050;
 
             // Banner
-            var banner = new Panel { Size = new Size(sectionWidth, 50), Location = new Point(0, y), BackColor = Color.FromArgb(20, 34, 197, 94) };
-            banner.Paint += (s, e) => { using var p = new Pen(ColorSuccess, 2); e.Graphics.DrawRectangle(p, 1, 1, sectionWidth - 3, 47); };
-            var bannerLbl = new Label { Text = "✓ All operations on this tab are FREE - No token cost!", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = ColorSuccess, AutoSize = true, Location = new Point(25, 14) };
+            var banner = new Panel { Size = new Size(W, 45), Location = new Point(0, y), BackColor = Color.FromArgb(20, 34, 197, 94) };
+            banner.Paint += (s, e) => { using var p = new Pen(ColorSuccess, 2); e.Graphics.DrawRectangle(p, 1, 1, W - 3, 42); };
+            var bannerLbl = new Label { Text = "✓ All operations on this tab are FREE - No token cost!", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = ColorSuccess, AutoSize = true, Location = new Point(25, 12) };
             banner.Controls.Add(bannerLbl);
             _freePanel.Controls.Add(banner);
-            y += 70;
+            y += 60;
 
             // Basic Ops
-            var sec1 = MakeSection("BASIC VEHICLE OPERATIONS", sectionWidth, 100);
+            var sec1 = MakeSection("BASIC VEHICLE OPERATIONS", W, 95);
             sec1.Location = new Point(0, y);
             
-            var btnDtc = MakeButton("Clear All DTCs", 150, 42);
-            btnDtc.Location = new Point(25, 50);
+            var btnDtc = MakeButton("Clear All DTCs", 145, 40);
+            btnDtc.Location = new Point(25, 48);
             btnDtc.Click += BtnClearDtc_Click;
             sec1.Controls.Add(btnDtc);
             
-            var btnKam = MakeButton("Clear KAM", 130, 42);
-            btnKam.Location = new Point(195, 50);
+            var btnKam = MakeButton("Clear KAM", 125, 40);
+            btnKam.Location = new Point(185, 48);
             btnKam.Click += BtnClearKam_Click;
             sec1.Controls.Add(btnKam);
             
-            var btnReset = MakeButton("Vehicle Reset", 140, 42);
-            btnReset.Location = new Point(345, 50);
+            var btnReset = MakeButton("Vehicle Reset", 135, 40);
+            btnReset.Location = new Point(325, 48);
             btnReset.Click += BtnVehicleReset_Click;
             sec1.Controls.Add(btnReset);
             
             _freePanel.Controls.Add(sec1);
-            y += 120;
+            y += 110;
 
             // Read Ops
-            var sec2 = MakeSection("READ OPERATIONS", sectionWidth, 100);
+            var sec2 = MakeSection("READ OPERATIONS", W, 95);
             sec2.Location = new Point(0, y);
             
-            var btnReadKeys = MakeButton("Read Keys Count", 160, 42);
-            btnReadKeys.Location = new Point(25, 50);
+            var btnReadKeys = MakeButton("Read Keys Count", 155, 40);
+            btnReadKeys.Location = new Point(25, 48);
             btnReadKeys.Click += BtnReadKeysCount_Click;
             sec2.Controls.Add(btnReadKeys);
             
-            var btnReadMod = MakeButton("Read Module Info", 165, 42);
-            btnReadMod.Location = new Point(205, 50);
+            var btnReadMod = MakeButton("Read Module Info", 160, 40);
+            btnReadMod.Location = new Point(195, 48);
             btnReadMod.Click += BtnReadModuleInfo_Click;
             sec2.Controls.Add(btnReadMod);
             
             _freePanel.Controls.Add(sec2);
-            y += 120;
+            y += 110;
 
             // Resources
-            var sec3 = MakeSection("RESOURCES & SUPPORT", sectionWidth, 100);
+            var sec3 = MakeSection("RESOURCES & SUPPORT", W, 95);
             sec3.Location = new Point(0, y);
             
-            var btnGuide = MakeButton("User Guide", 130, 42);
-            btnGuide.Location = new Point(25, 50);
+            var btnGuide = MakeButton("User Guide", 125, 40);
+            btnGuide.Location = new Point(25, 48);
             btnGuide.BackColor = ColorAccent;
             btnGuide.Click += (s, e) => OpenUrl("https://patskiller.com/faqs");
             sec3.Controls.Add(btnGuide);
             
-            var btnBuy = MakeButton("Buy Tokens", 130, 42);
-            btnBuy.Location = new Point(175, 50);
+            var btnBuy = MakeButton("Buy Tokens", 125, 40);
+            btnBuy.Location = new Point(165, 48);
             btnBuy.BackColor = ColorSuccess;
             btnBuy.Click += (s, e) => OpenUrl("https://patskiller.com/buy-tokens");
             sec3.Controls.Add(btnBuy);
             
-            var btnSupport = MakeButton("Contact Support", 155, 42);
-            btnSupport.Location = new Point(325, 50);
+            var btnSupport = MakeButton("Contact Support", 150, 40);
+            btnSupport.Location = new Point(305, 48);
             btnSupport.Click += (s, e) => OpenUrl("https://patskiller.com/contact");
             sec3.Controls.Add(btnSupport);
             
             _freePanel.Controls.Add(sec3);
 
-            _freePanel.Size = new Size(sectionWidth + 40, y + 120);
             _contentPanel.Controls.Add(_freePanel);
         }
 
@@ -504,53 +517,53 @@ namespace PatsKillerPro
         {
             _loginPanel = new Panel { Dock = DockStyle.Fill, BackColor = ColorBg };
             
-            var card = new Panel { Size = new Size(420, 480), BackColor = ColorCard };
-            card.Paint += (s, e) => { using var p = new Pen(ColorBorder, 2); e.Graphics.DrawRectangle(p, 1, 1, 417, 477); };
+            var card = new Panel { Size = new Size(400, 460), BackColor = ColorCard };
+            card.Paint += (s, e) => { using var p = new Pen(ColorBorder, 2); e.Graphics.DrawRectangle(p, 1, 1, 397, 457); };
             
-            int y = 35;
+            int y = 30;
             
-            var lblWelcome = new Label { Text = "Welcome to PatsKiller Pro", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = ColorText, Size = new Size(400, 35), Location = new Point(10, y), TextAlign = ContentAlignment.MiddleCenter };
+            var lblWelcome = new Label { Text = "Welcome to PatsKiller Pro", Font = new Font("Segoe UI", 17, FontStyle.Bold), ForeColor = ColorText, Size = new Size(380, 35), Location = new Point(10, y), TextAlign = ContentAlignment.MiddleCenter };
             card.Controls.Add(lblWelcome);
+            y += 40;
+            
+            var lblSub = new Label { Text = "Sign in to access your tokens", Font = new Font("Segoe UI", 10), ForeColor = ColorTextMuted, Size = new Size(380, 25), Location = new Point(10, y), TextAlign = ContentAlignment.MiddleCenter };
+            card.Controls.Add(lblSub);
             y += 45;
             
-            var lblSub = new Label { Text = "Sign in to access your tokens", Font = new Font("Segoe UI", 10), ForeColor = ColorTextMuted, Size = new Size(400, 25), Location = new Point(10, y), TextAlign = ContentAlignment.MiddleCenter };
-            card.Controls.Add(lblSub);
-            y += 50;
-            
-            var btnGoogle = MakeButton("Continue with Google", 340, 50);
+            var btnGoogle = MakeButton("Continue with Google", 320, 48);
             btnGoogle.Location = new Point(40, y);
             btnGoogle.BackColor = Color.White;
             btnGoogle.ForeColor = Color.FromArgb(50, 50, 50);
             btnGoogle.Font = new Font("Segoe UI", 11, FontStyle.Bold);
             btnGoogle.Click += BtnGoogleLogin_Click;
             card.Controls.Add(btnGoogle);
-            y += 70;
+            y += 65;
             
-            var lblOr = new Label { Text = "─────── or sign in with email ───────", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, Size = new Size(340, 25), Location = new Point(40, y), TextAlign = ContentAlignment.MiddleCenter };
+            var lblOr = new Label { Text = "─────── or sign in with email ───────", Font = new Font("Segoe UI", 9), ForeColor = ColorTextMuted, Size = new Size(320, 22), Location = new Point(40, y), TextAlign = ContentAlignment.MiddleCenter };
             card.Controls.Add(lblOr);
-            y += 40;
+            y += 35;
             
             var lblEmail = new Label { Text = "Email", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, Location = new Point(40, y), AutoSize = true };
             card.Controls.Add(lblEmail);
-            y += 25;
+            y += 22;
             
-            _txtEmail = MakeTextBox(340, 42);
+            _txtEmail = MakeTextBox(320, 40);
             _txtEmail.Location = new Point(40, y);
             card.Controls.Add(_txtEmail);
-            y += 55;
+            y += 50;
             
             var lblPass = new Label { Text = "Password", Font = new Font("Segoe UI", 9), ForeColor = ColorTextDim, Location = new Point(40, y), AutoSize = true };
             card.Controls.Add(lblPass);
-            y += 25;
+            y += 22;
             
-            _txtPassword = MakeTextBox(340, 42);
+            _txtPassword = MakeTextBox(320, 40);
             _txtPassword.Location = new Point(40, y);
             _txtPassword.UseSystemPasswordChar = true;
             _txtPassword.KeyPress += (s, e) => { if (e.KeyChar == 13) DoLogin(); };
             card.Controls.Add(_txtPassword);
-            y += 60;
+            y += 55;
             
-            var btnLogin = MakeButton("Sign In", 340, 48);
+            var btnLogin = MakeButton("Sign In", 320, 46);
             btnLogin.Location = new Point(40, y);
             btnLogin.BackColor = ColorAccent;
             btnLogin.Font = new Font("Segoe UI", 12, FontStyle.Bold);
@@ -558,7 +571,7 @@ namespace PatsKillerPro
             card.Controls.Add(btnLogin);
             
             _loginPanel.Controls.Add(card);
-            _loginPanel.Resize += (s, e) => { card.Location = new Point((_loginPanel.Width - 420) / 2, (_loginPanel.Height - 480) / 2 - 20); };
+            _loginPanel.Resize += (s, e) => { card.Location = new Point((_loginPanel.Width - 400) / 2, (_loginPanel.Height - 460) / 2 - 20); };
             
             Controls.Add(_loginPanel);
         }
@@ -571,10 +584,10 @@ namespace PatsKillerPro
             p.Paint += (s, e) => {
                 using var pen = new Pen(ColorBorder);
                 e.Graphics.DrawRectangle(pen, 0, 0, w - 1, h - 1);
-                using var font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+                using var font = new Font("Segoe UI", 10F, FontStyle.Bold);
                 using var brush = new SolidBrush(ColorTextDim);
-                e.Graphics.DrawString(title, font, brush, 20, 15);
-                e.Graphics.DrawLine(pen, 15, 38, w - 15, 38);
+                e.Graphics.DrawString(title, font, brush, 20, 12);
+                e.Graphics.DrawLine(pen, 15, 36, w - 15, 36);
             };
             return p;
         }
@@ -589,20 +602,15 @@ namespace PatsKillerPro
 
         private Button MakeTabButton(string text, bool active)
         {
-            var b = new Button { Text = text, Size = new Size(195, 34), FlatStyle = FlatStyle.Flat, BackColor = active ? ColorTabActive : ColorTabInactive, ForeColor = ColorText, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand };
+            int w = text.Length > 12 ? 210 : 150;
+            var b = new Button { Text = text, Size = new Size(w, 34), FlatStyle = FlatStyle.Flat, BackColor = active ? ColorTabActive : ColorTabInactive, ForeColor = ColorText, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand };
             b.FlatAppearance.BorderSize = 0;
             return b;
         }
 
-        private TextBox MakeTextBox(int w, int h)
-        {
-            return new TextBox { Size = new Size(w, h), BackColor = ColorSurface, ForeColor = ColorText, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 10) };
-        }
+        private TextBox MakeTextBox(int w, int h) => new TextBox { Size = new Size(w, h), BackColor = ColorSurface, ForeColor = ColorText, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 10) };
 
-        private ComboBox MakeComboBox(int w)
-        {
-            return new ComboBox { Size = new Size(w, 36), BackColor = ColorSurface, ForeColor = ColorText, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10), DropDownStyle = ComboBoxStyle.DropDownList };
-        }
+        private ComboBox MakeComboBox(int w) => new ComboBox { Size = new Size(w, 36), BackColor = ColorSurface, ForeColor = ColorText, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10), DropDownStyle = ComboBoxStyle.DropDownList };
 
         private void Log(string type, string msg)
         {
@@ -634,7 +642,7 @@ namespace PatsKillerPro
         #region Navigation
         private void ShowLogin() { _loginPanel.Visible = true; _tabBar.Visible = false; _contentPanel.Visible = false; _logPanel.Visible = false; _btnLogout.Visible = false; }
 
-        private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = true; _contentPanel.Visible = true; _logPanel.Visible = true; _btnLogout.Visible = true; SwitchTab(0); }
+        private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = true; _contentPanel.Visible = true; _logPanel.Visible = true; _btnLogout.Visible = true; LayoutHeader(); SwitchTab(0); }
 
         private void SwitchTab(int i)
         {
