@@ -646,6 +646,9 @@ namespace PatsKillerPro
                 // Set up TokenBalanceService with token values
                 TokenBalanceService.Instance.SetAuthContext(AuthToken!, UserEmail!, null);
                 
+                // Set up IncodeService for provider API calls
+                IncodeService.Instance.SetAuthContext(AuthToken!, UserEmail!, null);
+                
                 // Log the successful login
                 ProActivityLogger.Instance.LogLogin(UserEmail!, success: true);
                 

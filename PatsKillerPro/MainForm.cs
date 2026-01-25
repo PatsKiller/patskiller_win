@@ -1,20 +1,23 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using PatsKillerPro.Utils;
 using PatsKillerPro.Services;
 
 namespace PatsKillerPro
 {
     /// <summary>
-    /// Main application form with integrated TokenBalanceService and ProActivityLogger.
+    /// Main application form with full service integration.
+    /// All operations implemented using:
+    /// - J2534Service: Device and vehicle communication
+    /// - IncodeService: Provider API for incode calculation
+    /// - TokenBalanceService: Token management
+    /// - ProActivityLogger: Activity logging
     /// 
     /// TOKEN COSTS:
     /// - Key Session: 1 token (unlimited keys while same outcode)
-    /// - Parameter Reset: 1 token per module (auto-detected: BCM, ABS, PCM = 3 typically)
+    /// - Parameter Reset: 1 token per module (BCM, ABS, PCM)
     /// - Utility Operations: 1 token each
     /// - Gateway Unlock: 1 token (then key ops FREE for 10 min)
     /// - Diagnostics: FREE
@@ -37,7 +40,6 @@ namespace PatsKillerPro
             public static Color ButtonSuccess = Color.FromArgb(34, 197, 94);
             public static Color ButtonDanger = Color.FromArgb(239, 68, 68);
             public static Color ButtonWarning = Color.FromArgb(245, 158, 11);
-            public static Color ButtonDisabled = Color.FromArgb(209, 213, 219);
             public static Color Success = Color.FromArgb(22, 163, 74);
             public static Color Warning = Color.FromArgb(202, 138, 4);
             public static Color Error = Color.FromArgb(220, 38, 38);
@@ -50,23 +52,10 @@ namespace PatsKillerPro
         }
 
         // ============ STATE ============
-        private bool _deviceConnected;
-        private bool _vehicleConnected;
-        private bool _incodeVerified;
         private bool _gatewaySessionActive;
         private int _gatewaySessionSecondsRemaining;
-        private bool _is2020Plus;
-        private string _currentVin = "";
-        private string _currentOutcode = "";
         private string _currentIncode = "";
-        private string? _currentVehicleYear;
-        private string? _currentVehicleModel;
-
-        // Parameter Reset State
-        private bool _paramResetActive;
-        private int _paramResetCurrentStep;
-        private ParamResetModule[]? _paramResetModules;
-        private bool _skipAbsModule;
+        private List<J2534DeviceInfo> _availableDevices = new();
 
         // ============ UI CONTROLS ============
         private Panel _headerPanel = null!;
@@ -75,63 +64,51 @@ namespace PatsKillerPro
         private Label _lblPurchaseTokens = null!;
         private Label _lblPromoTokens = null!;
         private Button _btnAccount = null!;
-        
         private Panel _sessionBanner = null!;
         private Label _lblSessionStatus = null!;
         private Label _lblSessionTimer = null!;
-        
         private TabControl _tabControl = null!;
         private TabPage _tabPats = null!;
         private TabPage _tabUtility = null!;
         private TabPage _tabFree = null!;
-        
         private ComboBox _cmbDevice = null!;
         private Button _btnScan = null!;
         private Button _btnConnect = null!;
         private Button _btnDisconnect = null!;
         private Button _btnReadVehicle = null!;
-        
         private Panel _vehicleInfoPanel = null!;
         private Label _lblVin = null!;
         private Label _lblVehicleDesc = null!;
         private Label _lblOutcode = null!;
+        private Label _lblBattery = null!;
         private TextBox _txtIncode = null!;
+        private Button _btnGetIncode = null!;
         private Button _btnSubmitIncode = null!;
         private Label _lblIncodeStatus = null!;
-        
         private Panel _keyOperationsPanel = null!;
         private Button _btnEraseKeys = null!;
         private Button _btnProgramKeys = null!;
-        
+        private Label _lblKeyCount = null!;
         private Panel _paramResetPanel = null!;
         private CheckBox _chkSkipAbs = null!;
         private Button _btnStartParamReset = null!;
         private Label _lblParamResetStatus = null!;
         private ProgressBar _paramResetProgress = null!;
-        
         private Panel _gatewayPanel = null!;
         private Button _btnGatewayUnlock = null!;
-        
         private RichTextBox _rtbLog = null!;
         private StatusStrip _statusBar = null!;
         private ToolStripStatusLabel _lblStatus = null!;
-        
         private System.Windows.Forms.Timer _gatewayTimer = null!;
 
-        // ============ CONSTRUCTOR ============
         public MainForm()
         {
             InitializeComponent();
             BuildUI();
             WireEvents();
-            
-            // Subscribe to token balance changes
             TokenBalanceService.Instance.BalanceChanged += OnTokenBalanceChanged;
-            
             LogInfo("PatsKiller Pro v2.0 started");
             LogInfo("Click Scan to detect J2534 devices");
-            
-            // Log app start
             ProActivityLogger.Instance.LogAppStart();
         }
 
@@ -140,8 +117,8 @@ namespace PatsKillerPro
             this.SuspendLayout();
             this.AutoScaleDimensions = new SizeF(7F, 15F);
             this.AutoScaleMode = AutoScaleMode.Font;
-            this.ClientSize = new Size(700, 850);
-            this.MinimumSize = new Size(650, 750);
+            this.ClientSize = new Size(720, 900);
+            this.MinimumSize = new Size(700, 800);
             this.Name = "MainForm";
             this.Text = "PatsKiller Pro v2.0";
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -151,7 +128,6 @@ namespace PatsKillerPro
             this.ResumeLayout(false);
         }
 
-        // ============ UI BUILDING ============
         private void BuildUI()
         {
             BuildHeader();
@@ -159,339 +135,131 @@ namespace PatsKillerPro
             BuildTabControl();
             BuildActivityLog();
             BuildStatusBar();
-            
             UpdateTokenDisplay();
         }
 
         private void BuildHeader()
         {
-            _headerPanel = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 45,
-                BackColor = AppColors.HeaderBackground,
-                Padding = new Padding(10, 0, 10, 0)
-            };
-
-            _lblTitle = new Label
-            {
-                Text = "🔑 PatsKiller Pro v2.0",
-                ForeColor = AppColors.HeaderText,
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(10, 12)
-            };
-
-            var lblBadge = new Label
-            {
-                Text = "FORD PATS",
-                ForeColor = AppColors.HeaderText,
-                BackColor = AppColors.ButtonPrimary,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                Padding = new Padding(6, 2, 6, 2),
-                AutoSize = true,
-                Location = new Point(200, 14)
-            };
-
-            // Right side - tokens and user
-            _lblPromoTokens = new Label
-            {
-                Text = "",
-                ForeColor = AppColors.PromoTokenText,
-                BackColor = AppColors.PromoTokenBg,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Padding = new Padding(8, 4, 8, 4),
-                AutoSize = true,
-                Visible = false
-            };
-
-            _lblPurchaseTokens = new Label
-            {
-                Text = "",
-                ForeColor = AppColors.HeaderText,
-                BackColor = AppColors.PurchaseTokenBg,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Padding = new Padding(8, 4, 8, 4),
-                AutoSize = true,
-                Visible = false
-            };
-
-            _lblUserEmail = new Label
-            {
-                Text = "",
-                ForeColor = AppColors.HeaderText,
-                Font = new Font("Segoe UI", 9),
-                AutoSize = true,
-                Visible = false
-            };
-
-            _btnAccount = new Button
-            {
-                Text = "▼",
-                ForeColor = AppColors.HeaderText,
-                BackColor = Color.Transparent,
-                FlatStyle = FlatStyle.Flat,
-                Size = new Size(30, 30)
-            };
+            _headerPanel = new Panel { Dock = DockStyle.Top, Height = 45, BackColor = AppColors.HeaderBackground };
+            _lblTitle = new Label { Text = "🔑 PatsKiller Pro v2.0", ForeColor = AppColors.HeaderText, Font = new Font("Segoe UI", 12, FontStyle.Bold), AutoSize = true, Location = new Point(10, 12) };
+            var lblBadge = new Label { Text = "FORD PATS", ForeColor = AppColors.HeaderText, BackColor = AppColors.ButtonPrimary, Font = new Font("Segoe UI", 8, FontStyle.Bold), Padding = new Padding(6, 2, 6, 2), AutoSize = true, Location = new Point(200, 14) };
+            _lblPromoTokens = new Label { Text = "", ForeColor = AppColors.PromoTokenText, BackColor = AppColors.PromoTokenBg, Font = new Font("Segoe UI", 9, FontStyle.Bold), Padding = new Padding(8, 4, 8, 4), AutoSize = true, Visible = false };
+            _lblPurchaseTokens = new Label { Text = "", ForeColor = AppColors.HeaderText, BackColor = AppColors.PurchaseTokenBg, Font = new Font("Segoe UI", 9, FontStyle.Bold), Padding = new Padding(8, 4, 8, 4), AutoSize = true, Visible = false };
+            _lblUserEmail = new Label { Text = "", ForeColor = AppColors.HeaderText, Font = new Font("Segoe UI", 9), AutoSize = true, Visible = false };
+            _btnAccount = new Button { Text = "▼", ForeColor = AppColors.HeaderText, BackColor = Color.Transparent, FlatStyle = FlatStyle.Flat, Size = new Size(30, 30) };
             _btnAccount.FlatAppearance.BorderSize = 0;
-
             _headerPanel.Controls.AddRange(new Control[] { _lblTitle, lblBadge });
             PositionHeaderRightControls();
-
             this.Controls.Add(_headerPanel);
         }
 
         private void PositionHeaderRightControls()
         {
-            int rightX = _headerPanel.Width - 15;
-            
+            int rightX = 680;
             _btnAccount.Location = new Point(rightX - 30, 8);
             _headerPanel.Controls.Add(_btnAccount);
             rightX -= 40;
-
-            if (_lblPromoTokens.Visible)
-            {
-                _lblPromoTokens.Location = new Point(rightX - _lblPromoTokens.PreferredWidth, 10);
-                _headerPanel.Controls.Add(_lblPromoTokens);
-                rightX -= _lblPromoTokens.PreferredWidth + 10;
-            }
-
-            _lblPurchaseTokens.Location = new Point(rightX - _lblPurchaseTokens.PreferredWidth, 10);
+            if (_lblPromoTokens.Visible) { _lblPromoTokens.Location = new Point(rightX - _lblPromoTokens.PreferredWidth, 10); _headerPanel.Controls.Add(_lblPromoTokens); rightX -= _lblPromoTokens.PreferredWidth + 10; }
+            _lblPurchaseTokens.Location = new Point(rightX - 60, 10);
             _headerPanel.Controls.Add(_lblPurchaseTokens);
-            rightX -= _lblPurchaseTokens.PreferredWidth + 10;
-
-            _lblUserEmail.Location = new Point(rightX - _lblUserEmail.PreferredWidth, 14);
-            _headerPanel.Controls.Add(_lblUserEmail);
         }
 
         private void BuildSessionBanner()
         {
-            _sessionBanner = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 35,
-                BackColor = AppColors.SessionBannerBg,
-                Visible = false,
-                Padding = new Padding(10, 5, 10, 5)
-            };
-
-            _lblSessionStatus = new Label
-            {
-                Text = "🔓 Gateway Session Active - Key programming is FREE!",
-                ForeColor = AppColors.SessionBannerText,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(10, 7)
-            };
-
-            _lblSessionTimer = new Label
-            {
-                Text = "10:00",
-                ForeColor = AppColors.SessionBannerText,
-                Font = new Font("Consolas", 12, FontStyle.Bold),
-                AutoSize = true,
-                Anchor = AnchorStyles.Right,
-                Location = new Point(580, 5)
-            };
-
+            _sessionBanner = new Panel { Dock = DockStyle.Top, Height = 35, BackColor = AppColors.SessionBannerBg, Visible = false };
+            _lblSessionStatus = new Label { Text = "🔓 Gateway Session Active - Key programming is FREE!", ForeColor = AppColors.SessionBannerText, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Location = new Point(10, 7) };
+            _lblSessionTimer = new Label { Text = "10:00", ForeColor = AppColors.SessionBannerText, Font = new Font("Consolas", 12, FontStyle.Bold), AutoSize = true, Location = new Point(600, 5) };
             _sessionBanner.Controls.AddRange(new Control[] { _lblSessionStatus, _lblSessionTimer });
             this.Controls.Add(_sessionBanner);
             _sessionBanner.BringToFront();
-
             _gatewayTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             _gatewayTimer.Tick += GatewayTimer_Tick;
         }
 
         private void BuildTabControl()
         {
-            _tabControl = new TabControl
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Padding = new Point(15, 5)
-            };
-
-            _tabPats = new TabPage
-            {
-                Text = "🔑 PATS Operations",
-                BackColor = AppColors.PanelBackground,
-                Padding = new Padding(10)
-            };
+            _tabControl = new TabControl { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 10, FontStyle.Bold) };
+            _tabPats = new TabPage { Text = "🔑 PATS Operations", BackColor = AppColors.PanelBackground, Padding = new Padding(10) };
             BuildPatsTab();
-
-            _tabUtility = new TabPage
-            {
-                Text = "🔧 Utility (1 token)",
-                BackColor = AppColors.PanelBackground,
-                Padding = new Padding(10)
-            };
+            _tabUtility = new TabPage { Text = "🔧 Utility (1 token)", BackColor = AppColors.PanelBackground, Padding = new Padding(10) };
             BuildUtilityTab();
-
-            _tabFree = new TabPage
-            {
-                Text = "⚙️ Free Functions",
-                BackColor = AppColors.PanelBackground,
-                Padding = new Padding(10)
-            };
+            _tabFree = new TabPage { Text = "⚙️ Free Functions", BackColor = AppColors.PanelBackground, Padding = new Padding(10) };
             BuildFreeTab();
-
             _tabControl.TabPages.AddRange(new[] { _tabPats, _tabUtility, _tabFree });
             this.Controls.Add(_tabControl);
         }
 
         private void BuildPatsTab()
         {
-            var container = new Panel
-            {
-                Dock = DockStyle.Fill,
-                AutoScroll = true
-            };
-
+            var container = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
             int y = 10;
 
-            // Device Selection Panel
-            var devicePanel = CreateGroupPanel("🔌 J2534 Device", 120);
-            devicePanel.Location = new Point(10, y);
-
-            _cmbDevice = new ComboBox
-            {
-                Location = new Point(15, 30),
-                Size = new Size(350, 25),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            _cmbDevice.Items.Add("Select J2534 Device...");
-
-            _btnScan = CreateButton("🔍 Scan", AppColors.ButtonPrimary, new Size(80, 30));
-            _btnScan.Location = new Point(375, 28);
-
-            _btnConnect = CreateButton("Connect", AppColors.ButtonSuccess, new Size(90, 30));
-            _btnConnect.Location = new Point(15, 70);
-            _btnConnect.Enabled = false;
-
-            _btnDisconnect = CreateButton("Disconnect", AppColors.ButtonDanger, new Size(90, 30));
-            _btnDisconnect.Location = new Point(115, 70);
-            _btnDisconnect.Enabled = false;
-
-            _btnReadVehicle = CreateButton("📖 Read Vehicle", AppColors.ButtonPrimary, new Size(130, 30));
-            _btnReadVehicle.Location = new Point(215, 70);
-            _btnReadVehicle.Enabled = false;
-
+            // Device Panel
+            var devicePanel = new Panel { Size = new Size(580, 120), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, y) };
+            devicePanel.Controls.Add(new Label { Text = "🔌 J2534 Device", Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(10, 5), AutoSize = true });
+            _cmbDevice = new ComboBox { Location = new Point(15, 30), Size = new Size(350, 25), DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbDevice.Items.Add("Click Scan to detect devices...");
+            _cmbDevice.SelectedIndex = 0;
+            _btnScan = new Button { Text = "🔍 Scan", BackColor = AppColors.ButtonPrimary, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(80, 30), Location = new Point(375, 28) };
+            _btnConnect = new Button { Text = "Connect", BackColor = AppColors.ButtonSuccess, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(90, 30), Location = new Point(15, 70), Enabled = false };
+            _btnDisconnect = new Button { Text = "Disconnect", BackColor = AppColors.ButtonDanger, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(90, 30), Location = new Point(115, 70), Enabled = false };
+            _btnReadVehicle = new Button { Text = "📖 Read Vehicle", BackColor = AppColors.ButtonPrimary, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(130, 30), Location = new Point(215, 70), Enabled = false };
             devicePanel.Controls.AddRange(new Control[] { _cmbDevice, _btnScan, _btnConnect, _btnDisconnect, _btnReadVehicle });
             container.Controls.Add(devicePanel);
             y += 135;
 
             // Vehicle Info Panel
-            _vehicleInfoPanel = CreateGroupPanel("🚗 Vehicle Information", 100);
-            _vehicleInfoPanel.Location = new Point(10, y);
-            _vehicleInfoPanel.Visible = false;
-
-            _lblVin = new Label { Location = new Point(15, 30), AutoSize = true, Font = new Font("Consolas", 11, FontStyle.Bold) };
-            _lblVehicleDesc = new Label { Location = new Point(15, 55), AutoSize = true };
-            _lblOutcode = new Label { Location = new Point(15, 75), AutoSize = true, Font = new Font("Consolas", 11, FontStyle.Bold), ForeColor = AppColors.ButtonPrimary };
-
-            _vehicleInfoPanel.Controls.AddRange(new Control[] { _lblVin, _lblVehicleDesc, _lblOutcode });
+            _vehicleInfoPanel = new Panel { Size = new Size(580, 110), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, y), Visible = false };
+            _vehicleInfoPanel.Controls.Add(new Label { Text = "🚗 Vehicle Information", Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(10, 5), AutoSize = true });
+            _lblVin = new Label { Location = new Point(15, 28), AutoSize = true, Font = new Font("Consolas", 11, FontStyle.Bold) };
+            _lblVehicleDesc = new Label { Location = new Point(15, 50), AutoSize = true };
+            _lblOutcode = new Label { Location = new Point(15, 72), AutoSize = true, Font = new Font("Consolas", 11, FontStyle.Bold), ForeColor = AppColors.ButtonPrimary };
+            _lblBattery = new Label { Location = new Point(400, 72), AutoSize = true, ForeColor = AppColors.Info };
+            _vehicleInfoPanel.Controls.AddRange(new Control[] { _lblVin, _lblVehicleDesc, _lblOutcode, _lblBattery });
             container.Controls.Add(_vehicleInfoPanel);
-            y += 115;
+            y += 125;
 
             // Incode Panel
-            var incodePanel = CreateGroupPanel("🔐 Security Access", 80);
-            incodePanel.Location = new Point(10, y);
-            incodePanel.Name = "incodePanel";
-            incodePanel.Visible = false;
-
-            var lblIncodePrompt = new Label { Text = "Enter Incode:", Location = new Point(15, 32), AutoSize = true };
-            _txtIncode = new TextBox { Location = new Point(110, 28), Size = new Size(150, 25), Font = new Font("Consolas", 11), CharacterCasing = CharacterCasing.Upper };
-            _btnSubmitIncode = CreateButton("✓ Submit", AppColors.ButtonSuccess, new Size(90, 28));
-            _btnSubmitIncode.Location = new Point(270, 27);
-            _btnSubmitIncode.Enabled = false;
-            _lblIncodeStatus = new Label { Location = new Point(370, 32), AutoSize = true };
-
-            incodePanel.Controls.AddRange(new Control[] { lblIncodePrompt, _txtIncode, _btnSubmitIncode, _lblIncodeStatus });
+            var incodePanel = new Panel { Size = new Size(580, 90), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, y), Visible = false, Name = "incodePanel" };
+            incodePanel.Controls.Add(new Label { Text = "🔐 Security Access", Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(10, 5), AutoSize = true });
+            incodePanel.Controls.Add(new Label { Text = "Incode:", Location = new Point(15, 38), AutoSize = true });
+            _txtIncode = new TextBox { Location = new Point(70, 34), Size = new Size(120, 25), Font = new Font("Consolas", 11), CharacterCasing = CharacterCasing.Upper };
+            _btnGetIncode = new Button { Text = "Calculate", BackColor = AppColors.ButtonPrimary, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(85, 28), Location = new Point(200, 33) };
+            _btnSubmitIncode = new Button { Text = "✓ Submit", BackColor = AppColors.ButtonSuccess, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(80, 28), Location = new Point(295, 33), Enabled = false };
+            _lblIncodeStatus = new Label { Location = new Point(385, 38), AutoSize = true };
+            incodePanel.Controls.AddRange(new Control[] { _txtIncode, _btnGetIncode, _btnSubmitIncode, _lblIncodeStatus });
             container.Controls.Add(incodePanel);
-            y += 95;
-
-            // Key Operations Panel
-            _keyOperationsPanel = CreateGroupPanel("🔑 Key Operations (1 token per session)", 90);
-            _keyOperationsPanel.Location = new Point(10, y);
-            _keyOperationsPanel.Visible = false;
-
-            _btnEraseKeys = CreateButton("🗑️ Erase All Keys", AppColors.ButtonDanger, new Size(150, 35));
-            _btnEraseKeys.Location = new Point(15, 35);
-            _btnEraseKeys.Enabled = false;
-
-            _btnProgramKeys = CreateButton("🔑 Program Keys", AppColors.ButtonSuccess, new Size(150, 35));
-            _btnProgramKeys.Location = new Point(180, 35);
-            _btnProgramKeys.Enabled = false;
-
-            var lblKeyInfo = new Label
-            {
-                Text = "💡 1 token = unlimited keys in session (same outcode)",
-                Location = new Point(350, 42),
-                AutoSize = true,
-                ForeColor = AppColors.Info
-            };
-
-            _keyOperationsPanel.Controls.AddRange(new Control[] { _btnEraseKeys, _btnProgramKeys, lblKeyInfo });
-            container.Controls.Add(_keyOperationsPanel);
             y += 105;
 
+            // Key Operations Panel
+            _keyOperationsPanel = new Panel { Size = new Size(580, 100), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, y), Visible = false };
+            _keyOperationsPanel.Controls.Add(new Label { Text = "🔑 Key Operations (1 token per session)", Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(10, 5), AutoSize = true });
+            _btnEraseKeys = new Button { Text = "🗑️ Erase All Keys", BackColor = AppColors.ButtonDanger, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(150, 35), Location = new Point(15, 35), Enabled = false };
+            _btnProgramKeys = new Button { Text = "🔑 Program Keys", BackColor = AppColors.ButtonSuccess, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(150, 35), Location = new Point(180, 35), Enabled = false };
+            _lblKeyCount = new Label { Text = "", Location = new Point(350, 42), AutoSize = true, ForeColor = AppColors.Info };
+            _keyOperationsPanel.Controls.Add(new Label { Text = "💡 1 token = unlimited keys in session", Location = new Point(15, 75), AutoSize = true, ForeColor = AppColors.Info });
+            _keyOperationsPanel.Controls.AddRange(new Control[] { _btnEraseKeys, _btnProgramKeys, _lblKeyCount });
+            container.Controls.Add(_keyOperationsPanel);
+            y += 115;
+
             // Parameter Reset Panel
-            _paramResetPanel = CreateGroupPanel("🔄 Parameter Reset (1 token per module)", 130);
-            _paramResetPanel.Location = new Point(10, y);
-            _paramResetPanel.Visible = false;
-
-            var lblParamDesc = new Label
-            {
-                Text = "Auto-detects modules: BCM + ABS + PCM (3-4 tokens total)",
-                Location = new Point(15, 28),
-                AutoSize = true,
-                ForeColor = AppColors.Info
-            };
-
-            _chkSkipAbs = new CheckBox
-            {
-                Text = "Skip ABS (2 modules only) - Saves 1 token!",
-                Location = new Point(15, 50),
-                AutoSize = true,
-                ForeColor = AppColors.Success
-            };
-
-            _btnStartParamReset = CreateButton("🔄 Start Parameter Reset", AppColors.ButtonPrimary, new Size(200, 35));
-            _btnStartParamReset.Location = new Point(15, 80);
-            _btnStartParamReset.Enabled = false;
-
+            _paramResetPanel = new Panel { Size = new Size(580, 140), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, y), Visible = false };
+            _paramResetPanel.Controls.Add(new Label { Text = "🔄 Parameter Reset (1 token per module)", Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(10, 5), AutoSize = true });
+            _paramResetPanel.Controls.Add(new Label { Text = "Auto-detects: BCM + ABS + PCM (3 tokens typical)", Location = new Point(15, 28), AutoSize = true, ForeColor = AppColors.Info });
+            _chkSkipAbs = new CheckBox { Text = "Skip ABS (2 modules only) - Saves 1 token!", Location = new Point(15, 50), AutoSize = true, ForeColor = AppColors.Success };
+            _btnStartParamReset = new Button { Text = "🔄 Start Parameter Reset", BackColor = AppColors.ButtonPrimary, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(200, 35), Location = new Point(15, 80), Enabled = false };
             _lblParamResetStatus = new Label { Location = new Point(230, 88), AutoSize = true };
-
-            _paramResetProgress = new ProgressBar
-            {
-                Location = new Point(15, 115),
-                Size = new Size(430, 10),
-                Visible = false
-            };
-
-            _paramResetPanel.Controls.AddRange(new Control[] { lblParamDesc, _chkSkipAbs, _btnStartParamReset, _lblParamResetStatus, _paramResetProgress });
+            _paramResetProgress = new ProgressBar { Location = new Point(15, 120), Size = new Size(430, 12), Visible = false };
+            _paramResetPanel.Controls.AddRange(new Control[] { _chkSkipAbs, _btnStartParamReset, _lblParamResetStatus, _paramResetProgress });
             container.Controls.Add(_paramResetPanel);
-            y += 145;
+            y += 155;
 
-            // Gateway Panel (2020+)
-            _gatewayPanel = CreateGroupPanel("🔓 Gateway Unlock (2020+)", 80);
-            _gatewayPanel.Location = new Point(10, y);
-            _gatewayPanel.BackColor = Color.FromArgb(254, 243, 199);
-            _gatewayPanel.Visible = false;
-
-            var lblGatewayDesc = new Label
-            {
-                Text = "✨ Unlock Gateway = FREE key programming for 10 minutes!",
-                Location = new Point(15, 28),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(146, 64, 14)
-            };
-
-            _btnGatewayUnlock = CreateButton("🔓 Gateway Unlock (1 token)", AppColors.ButtonWarning, new Size(220, 35));
-            _btnGatewayUnlock.Location = new Point(15, 50);
-            _btnGatewayUnlock.Enabled = false;
-
-            _gatewayPanel.Controls.AddRange(new Control[] { lblGatewayDesc, _btnGatewayUnlock });
+            // Gateway Panel
+            _gatewayPanel = new Panel { Size = new Size(580, 85), BackColor = Color.FromArgb(254, 243, 199), BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, y), Visible = false };
+            _gatewayPanel.Controls.Add(new Label { Text = "🔓 Gateway Unlock (2020+)", Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(10, 5), AutoSize = true, ForeColor = Color.FromArgb(146, 64, 14) });
+            _gatewayPanel.Controls.Add(new Label { Text = "✨ Unlock Gateway = FREE key programming for 10 minutes!", Location = new Point(15, 28), AutoSize = true, ForeColor = Color.FromArgb(146, 64, 14) });
+            _btnGatewayUnlock = new Button { Text = "🔓 Gateway Unlock (1 token)", BackColor = AppColors.ButtonWarning, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Size = new Size(220, 35), Location = new Point(15, 52), Enabled = false };
+            _gatewayPanel.Controls.Add(_btnGatewayUnlock);
             container.Controls.Add(_gatewayPanel);
 
             _tabPats.Controls.Add(container);
@@ -499,112 +267,38 @@ namespace PatsKillerPro
 
         private void BuildUtilityTab()
         {
-            var container = new FlowLayoutPanel
+            var container = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(10) };
+            container.Controls.Add(new Label { Text = "🔧 Utility Operations (1 token each)", Font = new Font("Segoe UI", 11, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 10) });
+            var utilities = new[] { ("Clear Theft Flag", "clear_theft", "Theft Detected - Vehicle Immobilized"), ("Clear Crash Flag", "clear_crash", "Collision/Accident Flag"), ("Clear Crash Input", "clear_crash_input", "Crash Input Failure"), ("BCM Factory Defaults", "bcm_defaults", "Restore BCM config") };
+            foreach (var (title, op, desc) in utilities)
             {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoScroll = true,
-                Padding = new Padding(10)
-            };
-
-            var lblHeader = new Label
-            {
-                Text = "🔧 Utility Operations (1 token each)",
-                Font = new Font("Segoe UI", 11, FontStyle.Bold),
-                AutoSize = true,
-                Margin = new Padding(0, 0, 0, 10)
-            };
-            container.Controls.Add(lblHeader);
-
-            // Utility buttons
-            var utilities = new[]
-            {
-                ("Clear Theft Flag", "Theft Detected - Vehicle Immobilized"),
-                ("Clear Crash Flag", "Collision/Accident Flag (DID 5B17)"),
-                ("Clear Crash Input", "Crash Input Failure"),
-                ("BCM Factory Defaults", "Restore BCM config (NOT PATS)")
-            };
-
-            foreach (var (title, desc) in utilities)
-            {
-                var btn = CreateUtilityButton(title, desc);
-                btn.Click += async (s, e) => await ExecuteUtilityOperationAsync(title);
+                var btn = new Button { Size = new Size(550, 50), BackColor = AppColors.ButtonWarning, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10), Margin = new Padding(0, 0, 0, 5), Text = $"{title}\n{desc} (1 token)", Tag = op };
+                btn.Click += BtnUtility_Click;
                 container.Controls.Add(btn);
             }
-
             _tabUtility.Controls.Add(container);
         }
 
         private void BuildFreeTab()
         {
-            var container = new FlowLayoutPanel
+            var container = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(10) };
+            container.Controls.Add(new Label { Text = "⚙️ Free Functions (No tokens required)", Font = new Font("Segoe UI", 11, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 10) });
+            var freeOps = new[] { ("Read VIN", "read_vin", "Read VIN from vehicle"), ("Read Key Count", "read_keys", "Count programmed keys"), ("Read DTCs", "read_dtc", "Read diagnostic codes"), ("Clear DTCs", "clear_dtc", "Clear all DTCs"), ("Read Battery", "read_battery", "Check battery voltage") };
+            foreach (var (title, op, desc) in freeOps)
             {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoScroll = true,
-                Padding = new Padding(10)
-            };
-
-            var lblHeader = new Label
-            {
-                Text = "⚙️ Free Functions (No tokens required)",
-                Font = new Font("Segoe UI", 11, FontStyle.Bold),
-                AutoSize = true,
-                Margin = new Padding(0, 0, 0, 10)
-            };
-            container.Controls.Add(lblHeader);
-
-            var freeOps = new[]
-            {
-                ("Read VIN", "Read VIN from vehicle modules"),
-                ("Read Key Count", "Count programmed keys"),
-                ("Read DTCs", "Read diagnostic trouble codes"),
-                ("Clear DTCs", "Clear all DTCs from modules"),
-                ("Read Battery", "Check vehicle battery voltage")
-            };
-
-            foreach (var (title, desc) in freeOps)
-            {
-                var btn = CreateUtilityButton(title, desc, true);
+                var btn = new Button { Size = new Size(550, 50), BackColor = AppColors.ButtonPrimary, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10), Margin = new Padding(0, 0, 0, 5), Text = $"{title}\n{desc}", Tag = op };
+                btn.Click += BtnFreeOperation_Click;
                 container.Controls.Add(btn);
             }
-
             _tabFree.Controls.Add(container);
         }
 
         private void BuildActivityLog()
         {
-            var logPanel = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 150,
-                Padding = new Padding(5)
-            };
-
-            var lblLog = new Label
-            {
-                Text = "📋 Activity Log",
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                AutoSize = true,
-                Location = new Point(5, 3)
-            };
-
-            _rtbLog = new RichTextBox
-            {
-                Dock = DockStyle.Fill,
-                BackColor = AppColors.LogBackground,
-                ForeColor = AppColors.LogInfo,
-                Font = new Font("Consolas", 9),
-                ReadOnly = true,
-                BorderStyle = BorderStyle.None
-            };
-
+            var logPanel = new Panel { Dock = DockStyle.Bottom, Height = 150, Padding = new Padding(5) };
+            logPanel.Controls.Add(new Label { Text = "📋 Activity Log", Font = new Font("Segoe UI", 9, FontStyle.Bold), AutoSize = true, Location = new Point(5, 3) });
+            _rtbLog = new RichTextBox { Dock = DockStyle.Fill, BackColor = AppColors.LogBackground, ForeColor = AppColors.LogInfo, Font = new Font("Consolas", 9), ReadOnly = true, BorderStyle = BorderStyle.None };
             logPanel.Controls.Add(_rtbLog);
-            logPanel.Controls.Add(lblLog);
-            lblLog.BringToFront();
-
             this.Controls.Add(logPanel);
         }
 
@@ -612,614 +306,263 @@ namespace PatsKillerPro
         {
             _statusBar = new StatusStrip();
             _lblStatus = new ToolStripStatusLabel { Text = "Ready", Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-            var lblVersion = new ToolStripStatusLabel { Text = "v2.0.0", Alignment = ToolStripItemAlignment.Right };
-            _statusBar.Items.AddRange(new ToolStripItem[] { _lblStatus, lblVersion });
+            _statusBar.Items.AddRange(new ToolStripItem[] { _lblStatus, new ToolStripStatusLabel { Text = "v2.0.0" } });
             this.Controls.Add(_statusBar);
         }
 
-        // ============ UI HELPERS ============
-        private Panel CreateGroupPanel(string title, int height)
-        {
-            var panel = new Panel
-            {
-                Size = new Size(560, height),
-                BackColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle
-            };
-
-            var lbl = new Label
-            {
-                Text = title,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Location = new Point(10, 5),
-                AutoSize = true
-            };
-            panel.Controls.Add(lbl);
-
-            return panel;
-        }
-
-        private Button CreateButton(string text, Color backColor, Size size)
-        {
-            return new Button
-            {
-                Text = text,
-                BackColor = backColor,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Size = size,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-        }
-
-        private Button CreateUtilityButton(string title, string desc, bool isFree = false)
-        {
-            var btn = new Button
-            {
-                Size = new Size(530, 50),
-                BackColor = isFree ? AppColors.ButtonPrimary : AppColors.ButtonWarning,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(10),
-                Margin = new Padding(0, 0, 0, 5),
-                Text = $"{title}\n{desc}" + (isFree ? "" : " (1 token)")
-            };
-            return btn;
-        }
-
-        // ============ EVENT WIRING ============
         private void WireEvents()
         {
             _btnScan.Click += BtnScan_Click;
             _btnConnect.Click += BtnConnect_Click;
             _btnDisconnect.Click += BtnDisconnect_Click;
             _btnReadVehicle.Click += BtnReadVehicle_Click;
-            _cmbDevice.SelectedIndexChanged += CmbDevice_SelectedIndexChanged;
-            _txtIncode.TextChanged += TxtIncode_TextChanged;
+            _cmbDevice.SelectedIndexChanged += (s, e) => _btnConnect.Enabled = _cmbDevice.SelectedIndex > 0 && _cmbDevice.SelectedIndex <= _availableDevices.Count;
+            _txtIncode.TextChanged += (s, e) => _btnSubmitIncode.Enabled = _txtIncode.Text.Length >= 4;
+            _btnGetIncode.Click += BtnGetIncode_Click;
             _btnSubmitIncode.Click += BtnSubmitIncode_Click;
-            _btnEraseKeys.Click += BtnEraseKeys_Click;
-            _btnProgramKeys.Click += BtnProgramKeys_Click;
+            _btnEraseKeys.Click += async (s, e) => await ExecuteKeyOperationAsync("erase");
+            _btnProgramKeys.Click += async (s, e) => await ExecuteKeyOperationAsync("program");
             _btnStartParamReset.Click += BtnStartParamReset_Click;
             _btnGatewayUnlock.Click += BtnGatewayUnlock_Click;
             _btnAccount.Click += BtnAccount_Click;
         }
 
-        // ============ TOKEN BALANCE HANDLING ============
-        private void OnTokenBalanceChanged(object? sender, TokenBalanceChangedEventArgs e)
-        {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action(() => OnTokenBalanceChanged(sender, e)));
-                return;
-            }
-
-            UpdateTokenDisplay();
-        }
+        private void OnTokenBalanceChanged(object? sender, TokenBalanceChangedEventArgs e) { if (InvokeRequired) { BeginInvoke(new Action(() => OnTokenBalanceChanged(sender, e))); return; } UpdateTokenDisplay(); }
 
         private void UpdateTokenDisplay()
         {
-            var service = TokenBalanceService.Instance;
-            
-            _lblPurchaseTokens.Text = service.RegularTokens.ToString();
+            _lblPurchaseTokens.Text = TokenBalanceService.Instance.RegularTokens.ToString();
             _lblPurchaseTokens.Visible = true;
-
-            if (service.PromoTokens > 0)
-            {
-                _lblPromoTokens.Text = $"{service.PromoTokens} promo";
-                _lblPromoTokens.Visible = true;
-            }
-            else
-            {
-                _lblPromoTokens.Visible = false;
-            }
-
-            PositionHeaderRightControls();
+            _lblPromoTokens.Visible = TokenBalanceService.Instance.PromoTokens > 0;
+            if (_lblPromoTokens.Visible) _lblPromoTokens.Text = $"{TokenBalanceService.Instance.PromoTokens} promo";
         }
 
-        // ============ DEVICE EVENTS ============
-        private void BtnScan_Click(object? sender, EventArgs e)
+        private async void BtnScan_Click(object? sender, EventArgs e)
         {
             LogInfo("Scanning for J2534 devices...");
+            _btnScan.Enabled = false;
             _cmbDevice.Items.Clear();
             _cmbDevice.Items.Add("Scanning...");
+            _availableDevices = await J2534Service.Instance.ScanForDevicesAsync();
+            _cmbDevice.Items.Clear();
+            _cmbDevice.Items.Add("Select J2534 Device...");
+            foreach (var d in _availableDevices) _cmbDevice.Items.Add(d.ToString());
             _cmbDevice.SelectedIndex = 0;
-            _btnScan.Enabled = false;
+            _btnScan.Enabled = true;
+            LogSuccess($"Found {_availableDevices.Count} device(s)");
+        }
 
-            // TODO: Replace with actual J2534 device scanning
-            Task.Delay(1000).ContinueWith(t =>
+        private async void BtnConnect_Click(object? sender, EventArgs e)
+        {
+            if (_cmbDevice.SelectedIndex <= 0) return;
+            var device = _availableDevices[_cmbDevice.SelectedIndex - 1];
+            LogInfo($"Connecting to {device.Name}...");
+            _btnConnect.Enabled = false;
+            var result = await J2534Service.Instance.ConnectDeviceAsync(device);
+            if (result.Success)
             {
-                this.Invoke(() =>
-                {
-                    _cmbDevice.Items.Clear();
-                    _cmbDevice.Items.Add("Select J2534 Device...");
-                    _cmbDevice.Items.Add("VCM II (Ford)");
-                    _cmbDevice.Items.Add("VXDIAG VCX");
-                    _cmbDevice.SelectedIndex = 0;
-                    _btnScan.Enabled = true;
-                    LogSuccess("Found 2 devices");
-                });
-            });
+                _btnConnect.Text = "✓ Connected"; _btnConnect.BackColor = AppColors.Success; _btnDisconnect.Enabled = true; _cmbDevice.Enabled = false; _btnReadVehicle.Enabled = true;
+                LogSuccess($"Connected to {device.Name}");
+                ProActivityLogger.Instance.LogJ2534Connection(device.Name, true);
+                _lblStatus.Text = "Device ready - Read vehicle";
+            }
+            else { LogError($"Connection failed: {result.Error}"); _btnConnect.Enabled = true; }
         }
 
-        private void CmbDevice_SelectedIndexChanged(object? sender, EventArgs e)
+        private async void BtnDisconnect_Click(object? sender, EventArgs e)
         {
-            _btnConnect.Enabled = _cmbDevice.SelectedIndex > 0;
-        }
-
-        private void BtnConnect_Click(object? sender, EventArgs e)
-        {
-            var deviceName = _cmbDevice.SelectedItem?.ToString() ?? "";
-            LogInfo($"Connecting to {deviceName}...");
-
-            // TODO: Replace with actual J2534 connection
-            Task.Delay(800).ContinueWith(t =>
-            {
-                this.Invoke(() =>
-                {
-                    _deviceConnected = true;
-                    _btnConnect.Text = "✓ Connected";
-                    _btnConnect.BackColor = AppColors.Success;
-                    _btnConnect.Enabled = false;
-                    _btnDisconnect.Enabled = true;
-                    _cmbDevice.Enabled = false;
-                    _btnReadVehicle.Enabled = true;
-                    LogSuccess($"Connected to {deviceName}");
-                    
-                    ProActivityLogger.Instance.LogJ2534Connection(deviceName, true);
-                    UpdateStatus("Device ready - Read vehicle to continue");
-                });
-            });
-        }
-
-        private void BtnDisconnect_Click(object? sender, EventArgs e)
-        {
-            var deviceName = _cmbDevice.SelectedItem?.ToString() ?? "device";
-            
-            // End any active key session
+            var name = J2534Service.Instance.ConnectedDeviceName ?? "device";
             TokenBalanceService.Instance.EndKeySession();
-            
-            _deviceConnected = false;
-            _vehicleConnected = false;
-            _incodeVerified = false;
-            _currentVin = "";
-            _currentOutcode = "";
-
-            _btnConnect.Text = "Connect";
-            _btnConnect.BackColor = AppColors.ButtonSuccess;
-            _btnConnect.Enabled = true;
-            _btnDisconnect.Enabled = false;
-            _cmbDevice.Enabled = true;
-            _btnReadVehicle.Enabled = false;
-
-            _vehicleInfoPanel.Visible = false;
-            FindControl<Panel>("incodePanel")!.Visible = false;
-            _keyOperationsPanel.Visible = false;
-            _paramResetPanel.Visible = false;
-            _gatewayPanel.Visible = false;
-
-            LogInfo($"Disconnected from {deviceName}");
-            ProActivityLogger.Instance.LogJ2534Disconnect(deviceName);
-            UpdateStatus("Disconnected");
+            await J2534Service.Instance.DisconnectDeviceAsync();
+            _btnConnect.Text = "Connect"; _btnConnect.BackColor = AppColors.ButtonSuccess; _btnConnect.Enabled = true; _btnDisconnect.Enabled = false; _cmbDevice.Enabled = true; _btnReadVehicle.Enabled = false;
+            _vehicleInfoPanel.Visible = false; FindControl<Panel>("incodePanel")!.Visible = false; _keyOperationsPanel.Visible = false; _paramResetPanel.Visible = false; _gatewayPanel.Visible = false; _sessionBanner.Visible = false;
+            LogInfo($"Disconnected from {name}");
+            ProActivityLogger.Instance.LogJ2534Disconnect(name);
         }
 
-        // ============ VEHICLE EVENTS ============
         private async void BtnReadVehicle_Click(object? sender, EventArgs e)
         {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            LogInfo("Reading vehicle VIN from CAN bus...");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            LogInfo("Reading vehicle from CAN bus...");
             _btnReadVehicle.Enabled = false;
-
-            // TODO: Replace with actual vehicle reading
-            await Task.Delay(1500);
-
-            _currentVin = "1FA6P8CF5L5123456";
-            _currentVehicleYear = "2020";
-            _currentVehicleModel = "Ford Mustang";
-            _currentOutcode = "BCM-" + Guid.NewGuid().ToString("N")[..8].ToUpper();
-            _is2020Plus = int.Parse(_currentVehicleYear) >= 2020;
-
-            LogInfo($"VIN: {_currentVin}");
-            LogInfo($"Vehicle: {_currentVehicleYear} {_currentVehicleModel}");
-            LogSuccess($"Outcode: {_currentOutcode}");
-
-            _vehicleConnected = true;
-            ShowVehicleInfo();
-
-            ProActivityLogger.Instance.LogVehicleDetection(_currentVin, _currentVehicleYear, _currentVehicleModel, true, (int)stopwatch.ElapsedMilliseconds);
-            UpdateStatus("Vehicle detected - Enter incode to continue");
+            var result = await J2534Service.Instance.ReadVehicleAsync();
+            if (!result.Success) { LogError($"Failed: {result.Error}"); _btnReadVehicle.Enabled = true; return; }
+            LogInfo($"VIN: {result.Vin}"); LogInfo($"Vehicle: {result.VehicleInfo}"); LogSuccess($"Outcode: {result.Outcode}"); LogInfo($"Battery: {result.BatteryVoltage:F1}V");
+            _lblVin.Text = $"VIN: {result.Vin}"; _lblVehicleDesc.Text = result.VehicleInfo?.ToString() ?? ""; _lblOutcode.Text = $"Outcode: {result.Outcode}"; _lblBattery.Text = $"🔋 {result.BatteryVoltage:F1}V";
+            _vehicleInfoPanel.Visible = true; FindControl<Panel>("incodePanel")!.Visible = true;
+            if (result.VehicleInfo?.Is2020Plus == true) { _gatewayPanel.Visible = true; _btnGatewayUnlock.Enabled = true; }
+            ProActivityLogger.Instance.LogVehicleDetection(result.Vin!, result.VehicleInfo?.Year, result.VehicleInfo?.Model, true, (int)sw.ElapsedMilliseconds);
+            _lblStatus.Text = "Vehicle detected - Get incode";
         }
 
-        private void ShowVehicleInfo()
+        private async void BtnGetIncode_Click(object? sender, EventArgs e)
         {
-            _lblVin.Text = $"VIN: {_currentVin}";
-            _lblVehicleDesc.Text = $"{_currentVehicleYear} {_currentVehicleModel}";
-            _lblOutcode.Text = $"Outcode: {_currentOutcode}";
-
-            _vehicleInfoPanel.Visible = true;
-            FindControl<Panel>("incodePanel")!.Visible = true;
-
-            if (_is2020Plus)
+            var outcode = J2534Service.Instance.CurrentOutcode;
+            if (string.IsNullOrEmpty(outcode)) { LogError("No outcode - read vehicle first"); return; }
+            LogInfo($"Calculating incode for: {outcode}...");
+            _btnGetIncode.Enabled = false; _lblIncodeStatus.Text = "Calculating..."; _lblIncodeStatus.ForeColor = AppColors.Info;
+            var result = await IncodeService.Instance.CalculateIncodeAsync(outcode, J2534Service.Instance.CurrentVin, "BCM");
+            if (result.Success && !string.IsNullOrEmpty(result.Incode))
             {
-                _gatewayPanel.Visible = true;
-                _btnGatewayUnlock.Enabled = true;
+                _txtIncode.Text = result.Incode; _lblIncodeStatus.Text = $"✓ via {result.ProviderUsed}"; _lblIncodeStatus.ForeColor = AppColors.Success;
+                LogSuccess($"Incode: {result.Incode} (via {result.ProviderUsed}, {result.ResponseTimeMs}ms)");
             }
-        }
-
-        // ============ INCODE HANDLING ============
-        private void TxtIncode_TextChanged(object? sender, EventArgs e)
-        {
-            _btnSubmitIncode.Enabled = _txtIncode.Text.Length >= 4;
+            else { _lblIncodeStatus.Text = "✗ Failed"; _lblIncodeStatus.ForeColor = AppColors.Error; LogError($"Failed: {result.Error}"); }
+            _btnGetIncode.Enabled = true;
         }
 
         private async void BtnSubmitIncode_Click(object? sender, EventArgs e)
         {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             _currentIncode = _txtIncode.Text.ToUpper();
-            LogInfo($"Validating incode: {_currentIncode}...");
-            _btnSubmitIncode.Enabled = false;
-            _lblIncodeStatus.Text = "Validating...";
-            _lblIncodeStatus.ForeColor = AppColors.Info;
-
-            // TODO: Replace with actual incode validation
-            await Task.Delay(1000);
-
-            _incodeVerified = true;
-            _lblIncodeStatus.Text = "✓ Verified";
-            _lblIncodeStatus.ForeColor = AppColors.Success;
-            LogSuccess("Incode verified - Security access granted");
-
-            // Show key operations
-            _keyOperationsPanel.Visible = true;
-            _paramResetPanel.Visible = true;
-            EnableKeyOperations();
-
-            UpdateStatus("Ready for operations");
-        }
-
-        private void EnableKeyOperations()
-        {
-            bool canOperate = _incodeVerified || _gatewaySessionActive;
-            _btnEraseKeys.Enabled = canOperate;
-            _btnProgramKeys.Enabled = canOperate;
-            _btnStartParamReset.Enabled = canOperate;
-        }
-
-        // ============ KEY PROGRAMMING (1 token per session) ============
-        private async void BtnEraseKeys_Click(object? sender, EventArgs e)
-        {
-            await ExecuteKeyOperationAsync("erase");
-        }
-
-        private async void BtnProgramKeys_Click(object? sender, EventArgs e)
-        {
-            await ExecuteKeyOperationAsync("program");
+            LogInfo($"Submitting incode: {_currentIncode}...");
+            _btnSubmitIncode.Enabled = false; _lblIncodeStatus.Text = "Validating...";
+            var result = await J2534Service.Instance.SubmitIncodeAsync("BCM", _currentIncode);
+            if (result.Success)
+            {
+                _lblIncodeStatus.Text = "✓ Verified"; _lblIncodeStatus.ForeColor = AppColors.Success;
+                LogSuccess("Security access granted");
+                _keyOperationsPanel.Visible = true; _paramResetPanel.Visible = true;
+                _btnEraseKeys.Enabled = true; _btnProgramKeys.Enabled = true; _btnStartParamReset.Enabled = true;
+                var kc = await J2534Service.Instance.ReadKeyCountAsync();
+                _lblKeyCount.Text = $"Keys: {kc.KeyCount}/{kc.MaxKeys}";
+            }
+            else { _lblIncodeStatus.Text = "✗ Invalid"; _lblIncodeStatus.ForeColor = AppColors.Error; LogError($"Rejected: {result.Error}"); _btnSubmitIncode.Enabled = true; }
         }
 
         private async Task ExecuteKeyOperationAsync(string operation)
         {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var vin = J2534Service.Instance.CurrentVin ?? ""; var outcode = J2534Service.Instance.CurrentOutcode ?? ""; var v = J2534Service.Instance.CurrentVehicle;
+            var sess = await TokenBalanceService.Instance.StartKeySessionAsync(vin, outcode);
+            if (!sess.Success) { LogError(sess.Error ?? "Token error"); MessageBox.Show(sess.Error, "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (!sess.SessionAlreadyActive) { LogInfo("Key session started (1 token)"); ProActivityLogger.Instance.LogKeySessionStart(vin, v?.Year, v?.Model, outcode, true, -1, (int)sw.ElapsedMilliseconds); }
+            else LogInfo("Continuing session (no charge)");
 
-            // Check/start key session (1 token for entire session)
-            var sessionResult = await TokenBalanceService.Instance.StartKeySessionAsync(_currentVin, _currentOutcode);
-            
-            if (!sessionResult.Success)
-            {
-                LogError($"Cannot start key session: {sessionResult.Error}");
-                MessageBox.Show(sessionResult.Error, "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            if (!sessionResult.SessionAlreadyActive)
-            {
-                LogInfo("Key session started (1 token)");
-                ProActivityLogger.Instance.LogKeySessionStart(_currentVin, _currentVehicleYear, _currentVehicleModel, _currentOutcode, true, -1, (int)stopwatch.ElapsedMilliseconds);
-            }
-            else
-            {
-                LogInfo("Continuing key session (no charge)");
-            }
-
-            // Perform operation (FREE within session)
             if (operation == "erase")
             {
                 LogInfo("Erasing all keys...");
-                await Task.Delay(2000); // TODO: Actual operation
-                LogSuccess("All keys erased successfully");
-                ProActivityLogger.Instance.LogEraseAllKeys(_currentVin, _currentVehicleYear, _currentVehicleModel, 3, true, 0, (int)stopwatch.ElapsedMilliseconds);
+                var r = await J2534Service.Instance.EraseAllKeysAsync(_currentIncode);
+                if (r.Success) { LogSuccess($"Erased {r.KeysAffected} keys"); _lblKeyCount.Text = $"Keys: {r.CurrentKeyCount}/8"; ProActivityLogger.Instance.LogEraseAllKeys(vin, v?.Year, v?.Model, r.KeysAffected, true, 0, (int)sw.ElapsedMilliseconds); }
+                else LogError($"Erase failed: {r.Error}");
             }
             else if (operation == "program")
             {
-                // Program multiple keys (all FREE within session)
-                for (int i = 1; i <= 2; i++)
+                for (int slot = 1; slot <= 2; slot++)
                 {
-                    LogInfo($"Programming key #{i}...");
-                    await Task.Delay(1500); // TODO: Actual operation
-                    LogSuccess($"Key #{i} programmed successfully");
-                    ProActivityLogger.Instance.LogKeyProgrammed(_currentVin, _currentVehicleYear, _currentVehicleModel, i, true, (int)stopwatch.ElapsedMilliseconds);
+                    LogInfo($"Programming key #{slot}...");
+                    var r = await J2534Service.Instance.ProgramKeyAsync(_currentIncode, slot);
+                    if (r.Success) { LogSuccess($"Key #{slot} done"); _lblKeyCount.Text = $"Keys: {r.CurrentKeyCount}/8"; ProActivityLogger.Instance.LogKeyProgrammed(vin, v?.Year, v?.Model, slot, true, (int)sw.ElapsedMilliseconds); }
+                    else { LogError($"Key #{slot} failed: {r.Error}"); break; }
                 }
             }
-
-            // Check if BCM gave new outcode (session ends)
-            // TODO: Actually read outcode from BCM
-            var newOutcode = _currentOutcode; // Simulated - same outcode means session continues
-
-            if (newOutcode != _currentOutcode)
-            {
-                LogWarning("BCM locked - session ended (new outcode required)");
-                TokenBalanceService.Instance.EndKeySession();
-                _currentOutcode = newOutcode;
-                _lblOutcode.Text = $"Outcode: {_currentOutcode}";
-            }
-
             TokenBalanceService.Instance.RefreshAfterOperation();
         }
 
-        // ============ PARAMETER RESET (1 token per module) ============
         private async void BtnStartParamReset_Click(object? sender, EventArgs e)
         {
-            // Auto-detect modules (like EZimmo)
-            _paramResetModules = _chkSkipAbs.Checked
-                ? new[] { new ParamResetModule("BCM", "0x726"), new ParamResetModule("PCM", "0x7E0") }
-                : new[] { new ParamResetModule("BCM", "0x726"), new ParamResetModule("ABS", "0x760"), new ParamResetModule("PCM", "0x7E0") };
-
-            int totalModules = _paramResetModules.Length;
-
-            // Check if enough tokens
-            if (!TokenBalanceService.Instance.HasEnoughTokens(totalModules))
+            var vin = J2534Service.Instance.CurrentVin ?? ""; var v = J2534Service.Instance.CurrentVehicle;
+            var modules = _chkSkipAbs.Checked ? new[] { ("BCM", "0x726"), ("PCM", "0x7E0") } : new[] { ("BCM", "0x726"), ("ABS", "0x760"), ("PCM", "0x7E0") };
+            if (!TokenBalanceService.Instance.HasEnoughTokens(modules.Length)) { LogError($"Need {modules.Length} tokens"); MessageBox.Show($"Need {modules.Length} tokens", "Insufficient", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            _btnStartParamReset.Enabled = false; _paramResetProgress.Visible = true; _paramResetProgress.Maximum = modules.Length; _paramResetProgress.Value = 0;
+            LogInfo($"Parameter Reset - {modules.Length} modules");
+            var totalSw = System.Diagnostics.Stopwatch.StartNew(); var done = new List<string>(); int tokens = 0;
+            foreach (var (mod, addr) in modules)
             {
-                LogError($"Need {totalModules} tokens for parameter reset");
-                MessageBox.Show($"Parameter reset requires {totalModules} tokens.\nYou have {TokenBalanceService.Instance.TotalTokens} tokens.", 
-                    "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                var modSw = System.Diagnostics.Stopwatch.StartNew();
+                _lblParamResetStatus.Text = $"{mod}...";
+                var d = await TokenBalanceService.Instance.DeductForParamResetAsync(mod, vin);
+                if (!d.Success) { LogError($"Deduct failed for {mod}"); break; }
+                tokens++;
+                LogInfo($"Reading {mod} outcode...");
+                var oc = await J2534Service.Instance.ReadModuleOutcodeAsync(mod);
+                if (!oc.Success) { LogError($"{mod} outcode failed"); break; }
+                LogSuccess($"{mod} Outcode: {oc.Outcode}");
+                LogInfo($"Calculating {mod} incode...");
+                var ic = await IncodeService.Instance.CalculateParamResetIncodeAsync(oc.Outcode!, mod, vin);
+                if (!ic.Success) { LogError($"{mod} incode failed: {ic.Error}"); break; }
+                LogSuccess($"{mod} Incode: {ic.Incode} (via {ic.ProviderUsed})");
+                LogInfo($"Submitting to {mod}...");
+                var sub = await J2534Service.Instance.SubmitIncodeAsync(mod, ic.Incode!);
+                if (!sub.Success) { LogError($"{mod} submit failed"); break; }
+                LogSuccess($"{mod} complete!");
+                ProActivityLogger.Instance.LogParameterResetModule(vin, v?.Year, v?.Model, mod, oc.Outcode!, ic.Incode!, true, -1, (int)modSw.ElapsedMilliseconds);
+                done.Add(mod); _paramResetProgress.Value++;
             }
-
-            _paramResetActive = true;
-            _paramResetCurrentStep = 0;
-            _btnStartParamReset.Enabled = false;
-            _paramResetProgress.Visible = true;
-            _paramResetProgress.Maximum = totalModules;
-            _paramResetProgress.Value = 0;
-
-            LogInfo($"Starting Parameter Reset - {totalModules} modules to reset");
-
-            var totalTokensUsed = 0;
-            var modulesReset = new List<string>();
-            var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-            foreach (var module in _paramResetModules)
-            {
-                var moduleStopwatch = System.Diagnostics.Stopwatch.StartNew();
-                _lblParamResetStatus.Text = $"Processing {module.Name}...";
-                LogInfo($"Reading {module.Name} outcode...");
-
-                // Deduct 1 token for this module
-                var deductResult = await TokenBalanceService.Instance.DeductForParamResetAsync(module.Name, _currentVin);
-                if (!deductResult.Success)
-                {
-                    LogError($"Failed to deduct for {module.Name}: {deductResult.Error}");
-                    break;
-                }
-                totalTokensUsed++;
-
-                // Simulate reading outcode from module
-                await Task.Delay(800);
-                module.Outcode = $"{module.Name}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
-                LogSuccess($"{module.Name} Outcode: {module.Outcode}");
-
-                // Calculate incode (would normally call API)
-                await Task.Delay(500);
-                module.Incode = $"IN{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
-                LogInfo($"{module.Name} Incode: {module.Incode}");
-
-                // Submit incode to module
-                LogInfo($"Submitting incode to {module.Name}...");
-                await Task.Delay(1000);
-                module.Status = "complete";
-                LogSuccess($"{module.Name} reset complete!");
-
-                ProActivityLogger.Instance.LogParameterResetModule(
-                    _currentVin, _currentVehicleYear, _currentVehicleModel, module.Name,
-                    module.Outcode, module.Incode, true, -1, (int)moduleStopwatch.ElapsedMilliseconds);
-
-                modulesReset.Add(module.Name);
-                _paramResetProgress.Value++;
-                _paramResetCurrentStep++;
-            }
-
-            // Complete
-            _paramResetActive = false;
-            _btnStartParamReset.Enabled = true;
-            _paramResetProgress.Visible = false;
-            _lblParamResetStatus.Text = "Complete!";
-            _lblParamResetStatus.ForeColor = AppColors.Success;
-
-            LogSuccess($"✅ Parameter Reset COMPLETE - {modulesReset.Count} modules, {totalTokensUsed} tokens");
-
-            ProActivityLogger.Instance.LogParameterResetComplete(
-                _currentVin, _currentVehicleYear, _currentVehicleModel,
-                modulesReset.Count, totalTokensUsed, (int)totalStopwatch.ElapsedMilliseconds, modulesReset.ToArray());
-
+            _btnStartParamReset.Enabled = true; _paramResetProgress.Visible = false;
+            _lblParamResetStatus.Text = done.Count == modules.Length ? "✓ Complete!" : "⚠ Partial"; _lblParamResetStatus.ForeColor = done.Count == modules.Length ? AppColors.Success : AppColors.Warning;
+            LogSuccess($"Reset: {done.Count}/{modules.Length} modules, {tokens} tokens");
+            ProActivityLogger.Instance.LogParameterResetComplete(vin, v?.Year, v?.Model, done.Count, tokens, (int)totalSw.ElapsedMilliseconds, done.ToArray());
             TokenBalanceService.Instance.RefreshAfterOperation();
         }
 
-        // ============ GATEWAY UNLOCK (1 token) ============
         private async void BtnGatewayUnlock_Click(object? sender, EventArgs e)
         {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-            // Deduct 1 token
-            var result = await TokenBalanceService.Instance.DeductTokensAsync(1, "gateway_unlock", _currentVin);
-            if (!result.Success)
+            var sw = System.Diagnostics.Stopwatch.StartNew(); var vin = J2534Service.Instance.CurrentVin ?? ""; var v = J2534Service.Instance.CurrentVehicle;
+            var d = await TokenBalanceService.Instance.DeductTokensAsync(1, "gateway_unlock", vin);
+            if (!d.Success) { LogError(d.Error ?? "Token error"); MessageBox.Show(d.Error, "Insufficient", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            LogInfo("Unlocking Gateway..."); _btnGatewayUnlock.Enabled = false;
+            var r = await J2534Service.Instance.UnlockGatewayAsync(_currentIncode);
+            if (r.Success)
             {
-                LogError($"Gateway unlock failed: {result.Error}");
-                MessageBox.Show(result.Error, "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                _gatewaySessionActive = true; _gatewaySessionSecondsRemaining = r.SessionDurationSeconds;
+                LogSuccess("Gateway unlocked!"); LogSuccess("🎉 FREE key ops for 10 min!");
+                _sessionBanner.Visible = true; _lblSessionTimer.Text = $"{_gatewaySessionSecondsRemaining / 60}:{_gatewaySessionSecondsRemaining % 60:D2}"; _gatewayTimer.Start();
+                _btnEraseKeys.Text = "🗑️ Erase (FREE)"; _btnProgramKeys.Text = "🔑 Program (FREE)";
+                ProActivityLogger.Instance.LogUtilityOperation("Gateway Unlock", vin, v?.Year, v?.Model, true, -1, (int)sw.ElapsedMilliseconds);
             }
-
-            LogInfo("Unlocking Security Gateway Module...");
-            _btnGatewayUnlock.Enabled = false;
-
-            // TODO: Actual gateway unlock
-            await Task.Delay(2000);
-
-            _gatewaySessionActive = true;
-            _gatewaySessionSecondsRemaining = 600; // 10 minutes
-
-            LogSuccess("Security Gateway Module unlocked!");
-            LogSuccess("🎉 Key programming is FREE for 10 minutes!");
-
-            // Show session banner
-            _sessionBanner.Visible = true;
-            _lblSessionTimer.Text = FormatTime(_gatewaySessionSecondsRemaining);
-            _gatewayTimer.Start();
-
-            // Enable key operations (now FREE)
-            EnableKeyOperations();
-            UpdateKeyOperationLabels(true);
-
-            ProActivityLogger.Instance.LogUtilityOperation("Gateway Unlock", _currentVin, _currentVehicleYear, _currentVehicleModel, true, -1, (int)stopwatch.ElapsedMilliseconds);
+            else { LogError($"Gateway failed: {r.Error}"); _btnGatewayUnlock.Enabled = true; }
             TokenBalanceService.Instance.RefreshAfterOperation();
         }
 
         private void GatewayTimer_Tick(object? sender, EventArgs e)
         {
             _gatewaySessionSecondsRemaining--;
-            _lblSessionTimer.Text = FormatTime(_gatewaySessionSecondsRemaining);
-
-            if (_gatewaySessionSecondsRemaining <= 0)
-            {
-                _gatewayTimer.Stop();
-                _gatewaySessionActive = false;
-                _sessionBanner.Visible = false;
-                _btnGatewayUnlock.Enabled = true;
-
-                LogWarning("Gateway session expired - key operations now cost tokens");
-                UpdateKeyOperationLabels(false);
-            }
+            _lblSessionTimer.Text = $"{_gatewaySessionSecondsRemaining / 60}:{_gatewaySessionSecondsRemaining % 60:D2}";
+            if (_gatewaySessionSecondsRemaining <= 0) { _gatewayTimer.Stop(); _gatewaySessionActive = false; _sessionBanner.Visible = false; _btnGatewayUnlock.Enabled = true; LogWarning("Gateway expired"); _btnEraseKeys.Text = "🗑️ Erase All Keys"; _btnProgramKeys.Text = "🔑 Program Keys"; }
         }
 
-        private void UpdateKeyOperationLabels(bool isFree)
+        private async void BtnUtility_Click(object? sender, EventArgs e)
         {
-            if (isFree)
-            {
-                _btnEraseKeys.Text = "🗑️ Erase All Keys (FREE)";
-                _btnProgramKeys.Text = "🔑 Program Keys (FREE)";
-            }
-            else
-            {
-                _btnEraseKeys.Text = "🗑️ Erase All Keys";
-                _btnProgramKeys.Text = "🔑 Program Keys";
-            }
-        }
-
-        // ============ UTILITY OPERATIONS (1 token each) ============
-        private async Task ExecuteUtilityOperationAsync(string operation)
-        {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-            // Deduct 1 token
-            var result = await TokenBalanceService.Instance.DeductForUtilityAsync(operation, _currentVin);
-            if (!result.Success)
-            {
-                LogError($"{operation} failed: {result.Error}");
-                MessageBox.Show(result.Error, "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            LogInfo($"Executing {operation}...");
-
-            // TODO: Actual operation
-            await Task.Delay(1500);
-
-            LogSuccess($"{operation} complete!");
-
-            ProActivityLogger.Instance.LogUtilityOperation(operation, _currentVin, _currentVehicleYear, _currentVehicleModel, true, -1, (int)stopwatch.ElapsedMilliseconds);
+            var op = (sender as Button)?.Tag?.ToString() ?? ""; var sw = System.Diagnostics.Stopwatch.StartNew(); var vin = J2534Service.Instance.CurrentVin ?? ""; var v = J2534Service.Instance.CurrentVehicle;
+            var d = await TokenBalanceService.Instance.DeductForUtilityAsync(op, vin);
+            if (!d.Success) { LogError(d.Error ?? "Token error"); MessageBox.Show(d.Error, "Insufficient", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            LogInfo($"Executing {op}...");
+            J2534Result r = op switch { "clear_theft" => await J2534Service.Instance.ClearTheftFlagAsync(), "clear_crash" or "clear_crash_input" => await J2534Service.Instance.ClearCrashFlagAsync(), "bcm_defaults" => await J2534Service.Instance.RestoreBcmDefaultsAsync(), _ => new J2534Result { Success = false, Error = "Unknown" } };
+            if (r.Success) { LogSuccess($"{op} complete!"); ProActivityLogger.Instance.LogUtilityOperation(op, vin, v?.Year, v?.Model, true, -1, (int)sw.ElapsedMilliseconds); } else LogError($"{op} failed: {r.Error}");
             TokenBalanceService.Instance.RefreshAfterOperation();
         }
 
-        // ============ ACCOUNT MENU ============
+        private async void BtnFreeOperation_Click(object? sender, EventArgs e)
+        {
+            var op = (sender as Button)?.Tag?.ToString() ?? "";
+            LogInfo($"Executing {op}...");
+            switch (op)
+            {
+                case "read_vin": LogSuccess($"VIN: {J2534Service.Instance.CurrentVin}"); LogInfo($"Vehicle: {J2534Service.Instance.CurrentVehicle}"); break;
+                case "read_keys": var kc = await J2534Service.Instance.ReadKeyCountAsync(); if (kc.Success) { LogSuccess($"Keys: {kc.KeyCount}/{kc.MaxKeys}"); _lblKeyCount.Text = $"Keys: {kc.KeyCount}/{kc.MaxKeys}"; } break;
+                case "read_dtc": var dtc = await J2534Service.Instance.ReadDtcsAsync(); if (dtc.Success) { LogSuccess($"Found {dtc.DtcCount} DTCs"); foreach (var c in dtc.Dtcs) LogInfo($"  {c}"); } break;
+                case "clear_dtc": var clr = await J2534Service.Instance.ClearDtcsAsync(); if (clr.Success) LogSuccess("DTCs cleared"); else LogError($"Clear failed: {clr.Error}"); break;
+                case "read_battery": var volt = await J2534Service.Instance.ReadBatteryVoltageAsync(); LogSuccess($"Battery: {volt:F1}V"); _lblBattery.Text = $"🔋 {volt:F1}V"; break;
+            }
+        }
+
         private void BtnAccount_Click(object? sender, EventArgs e)
         {
             var menu = new ContextMenuStrip();
             menu.Items.Add("Buy Tokens", null, (s, ev) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = "https://patskiller.com/buy", UseShellExecute = true }));
             menu.Items.Add("-");
-            menu.Items.Add("Logout", null, (s, ev) => Logout());
+            menu.Items.Add("Logout", null, (s, ev) => { ProActivityLogger.Instance.LogLogout(TokenBalanceService.Instance.UserEmail ?? ""); TokenBalanceService.Instance.ClearAuthContext(); ProActivityLogger.Instance.ClearAuthContext(); IncodeService.Instance.ClearAuthContext(); LogInfo("Logged out"); this.Hide(); var lf = new GoogleLoginForm(); lf.ShowDialog(); if (lf.IsLoggedIn) { UpdateTokenDisplay(); this.Show(); } else Application.Exit(); });
             menu.Show(_btnAccount, new Point(0, _btnAccount.Height));
         }
 
-        private void Logout()
-        {
-            ProActivityLogger.Instance.LogLogout(TokenBalanceService.Instance.UserEmail ?? "");
-            TokenBalanceService.Instance.ClearAuthContext();
-            ProActivityLogger.Instance.ClearAuthContext();
-            LogInfo("Logged out");
-            // TODO: Show login form
-        }
+        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e) { TokenBalanceService.Instance.BalanceChanged -= OnTokenBalanceChanged; TokenBalanceService.Instance.EndKeySession(); ProActivityLogger.Instance.LogAppClose(); }
 
-        // ============ FORM CLOSING ============
-        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
-        {
-            TokenBalanceService.Instance.BalanceChanged -= OnTokenBalanceChanged;
-            TokenBalanceService.Instance.EndKeySession();
-            ProActivityLogger.Instance.LogAppClose();
-        }
+        private T? FindControl<T>(string name) where T : Control { var c = this.Controls.Find(name, true); return c.Length > 0 ? c[0] as T : null; }
 
-        // ============ HELPERS ============
-        private string FormatTime(int seconds)
-        {
-            var mins = seconds / 60;
-            var secs = seconds % 60;
-            return $"{mins}:{secs:D2}";
-        }
-
-        private T? FindControl<T>(string name) where T : Control
-        {
-            var controls = this.Controls.Find(name, true);
-            return controls.Length > 0 ? controls[0] as T : null;
-        }
-
-        private void UpdateStatus(string text)
-        {
-            _lblStatus.Text = text;
-        }
-
-        // ============ LOGGING ============
-        private void LogInfo(string message) => AppendLog(message, AppColors.LogInfo);
-        private void LogSuccess(string message) => AppendLog(message, AppColors.LogSuccess);
-        private void LogWarning(string message) => AppendLog(message, AppColors.LogWarning);
-        private void LogError(string message) => AppendLog(message, AppColors.LogError);
-
-        private void AppendLog(string message, Color color)
-        {
-            if (_rtbLog.InvokeRequired)
-            {
-                _rtbLog.Invoke(() => AppendLog(message, color));
-                return;
-            }
-
-            var time = DateTime.Now.ToString("HH:mm:ss");
-            _rtbLog.SelectionStart = _rtbLog.TextLength;
-            _rtbLog.SelectionColor = color;
-            _rtbLog.AppendText($"[{time}] {message}\n");
-            _rtbLog.ScrollToCaret();
-        }
-    }
-
-    // ============ HELPER CLASSES ============
-    internal class ParamResetModule
-    {
-        public string Name { get; set; }
-        public string Address { get; set; }
-        public string Status { get; set; } = "pending";
-        public string Outcode { get; set; } = "";
-        public string Incode { get; set; } = "";
-
-        public ParamResetModule(string name, string address)
-        {
-            Name = name;
-            Address = address;
-        }
+        private void LogInfo(string msg) => AppendLog(msg, AppColors.LogInfo);
+        private void LogSuccess(string msg) => AppendLog(msg, AppColors.LogSuccess);
+        private void LogWarning(string msg) => AppendLog(msg, AppColors.LogWarning);
+        private void LogError(string msg) => AppendLog(msg, AppColors.LogError);
+        private void AppendLog(string msg, Color c) { if (_rtbLog.InvokeRequired) { _rtbLog.Invoke(() => AppendLog(msg, c)); return; } _rtbLog.SelectionStart = _rtbLog.TextLength; _rtbLog.SelectionColor = c; _rtbLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {msg}\n"); _rtbLog.ScrollToCaret(); }
     }
 }
