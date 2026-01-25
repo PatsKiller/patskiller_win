@@ -57,6 +57,7 @@ namespace PatsKillerPro.J2534
             try
             {
                 Log($"Connecting to vehicle at {baudRate} baud...");
+                await Task.Delay(10); // Small delay for initialization
 
                 var result = _uds.Connect(baudRate);
                 if (result != J2534Error.STATUS_NOERROR)
@@ -141,6 +142,7 @@ namespace PatsKillerPro.J2534
             try
             {
                 Log("Reading VIN from BCM...");
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 var response = _uds.ReadDataByIdentifier(FordDids.VIN);
                 if (!response.Success)
@@ -182,6 +184,7 @@ namespace PatsKillerPro.J2534
             {
                 Log("Reading PATS outcode from BCM...");
                 ReportProgress("Reading outcode...", 10);
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 // Method 1: Read PrePATS outcode (0x22 C1A1)
                 var response = _uds.ReadDataByIdentifier(FordDids.PATS_OUTCODE);
@@ -292,6 +295,7 @@ namespace PatsKillerPro.J2534
             {
                 Log($"Submitting incode: {incode}");
                 ReportProgress("Submitting incode...", 20);
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 // Convert incode string to bytes
                 var incodeBytes = HexStringToBytes(incode);
@@ -351,6 +355,7 @@ namespace PatsKillerPro.J2534
             try
             {
                 Log("Reading key count...");
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 var response = _uds.ReadDataByIdentifier(FordDids.KEY_COUNT);
                 if (response.Success && response.Data.Length >= 1)
@@ -482,6 +487,7 @@ namespace PatsKillerPro.J2534
 
                 Log("Initializing PATS system...");
                 ReportProgress("Initializing PATS...", 10);
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 // Write PATS reset command
                 var response = _uds.WriteDataByIdentifier(FordDids.PARAM_RESET, new byte[] { 0x01 });
@@ -561,6 +567,7 @@ namespace PatsKillerPro.J2534
             try
             {
                 Log("Reading DTCs from BCM...");
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 var response = _uds.ReadDtcInformation(DtcReportType.ReportDtcByStatusMask, 0xFF);
                 if (!response.Success)
@@ -621,6 +628,7 @@ namespace PatsKillerPro.J2534
                     return PatsResult.Fail("Security access required");
 
                 Log("Clearing crash event flag...");
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 var response = _uds.WriteDataByIdentifier(FordDids.CRASH_EVENT, new byte[] { 0x00 });
                 if (!response.Success)
@@ -714,6 +722,7 @@ namespace PatsKillerPro.J2534
             try
             {
                 Log("Unlocking security gateway (SGWM)...");
+                await Task.Delay(10); // Small delay for diagnostic communication
 
                 _uds.SetTargetModule(FordModules.SGWM_TX, FordModules.SGWM_RX);
 
@@ -736,6 +745,11 @@ namespace PatsKillerPro.J2534
 
                 // Send key (incode)
                 var incodeBytes = HexStringToBytes(incode);
+                if (incodeBytes == null || incodeBytes.Length == 0)
+                {
+                    _uds.SetTargetModule(FordModules.BCM_TX, FordModules.BCM_RX);
+                    return PatsResult.Fail("Invalid incode format for gateway unlock");
+                }
                 response = _uds.SecurityAccessSendKey(incodeBytes, 0x02);
                 if (!response.Success)
                 {
@@ -768,6 +782,7 @@ namespace PatsKillerPro.J2534
         {
             try
             {
+                await Task.Delay(10); // Small delay for diagnostic communication
                 var response = _uds.ReadDataByIdentifier(FordDids.PATS_STATUS);
                 if (response.Success && response.Data.Length >= 1)
                 {

@@ -32,7 +32,7 @@ namespace PatsKillerPro.J2534
         private PassThruStopPeriodicMsgDelegate? _passThruStopPeriodicMsg;
         private PassThruSetProgrammingVoltageDelegate? _passThruSetProgrammingVoltage;
 
-        public string DllPath { get; private set; }
+        public string DllPath { get; private set; } = "";
         public bool IsLoaded => _dllHandle != IntPtr.Zero;
 
         #region Delegates
