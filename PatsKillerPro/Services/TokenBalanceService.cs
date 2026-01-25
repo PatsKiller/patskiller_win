@@ -10,20 +10,36 @@ namespace PatsKillerPro.Services
     /// <summary>
     /// Service to manage token balance with promo token support
     /// Refreshes balance after each operation and displays combined totals
+    /// Promo tokens are used FIRST before regular tokens
     /// </summary>
     public class TokenBalanceService
     {
         private static TokenBalanceService? _instance;
-        public static TokenBalanceService Instance => _instance ??= new TokenBalanceService();
+        private static readonly object _lock = new object();
+        
+        public static TokenBalanceService Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    lock (_lock)
+                    {
+                        _instance ??= new TokenBalanceService();
+                    }
+                }
+                return _instance;
+            }
+        }
 
         private readonly HttpClient _httpClient;
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
         private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0.iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
 
         // Auth context
-        public string? AuthToken { get; set; }
-        public string? UserEmail { get; set; }
-        public string? UserId { get; set; }
+        public string? AuthToken { get; private set; }
+        public string? UserEmail { get; private set; }
+        public string? UserId { get; private set; }
 
         // Current balance state
         public int RegularTokens { get; private set; } = 0;
@@ -37,6 +53,29 @@ namespace PatsKillerPro.Services
         private TokenBalanceService()
         {
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        }
+
+        /// <summary>
+        /// Set auth context after login
+        /// </summary>
+        public void SetAuthContext(string authToken, string userEmail, string? userId = null)
+        {
+            AuthToken = authToken;
+            UserEmail = userEmail;
+            UserId = userId;
+        }
+
+        /// <summary>
+        /// Clear auth context on logout
+        /// </summary>
+        public void ClearAuthContext()
+        {
+            AuthToken = null;
+            UserEmail = null;
+            UserId = null;
+            RegularTokens = 0;
+            PromoTokens = 0;
+            LastUpdated = DateTime.MinValue;
         }
 
         /// <summary>
@@ -54,6 +93,7 @@ namespace PatsKillerPro.Services
             {
                 Logger.Info("[TokenBalanceService] Refreshing token balance...");
 
+                // Try the new endpoint first
                 var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/get-user-token-balance");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {AuthToken}");
@@ -65,8 +105,8 @@ namespace PatsKillerPro.Services
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    // Fallback to token-balance-webhook endpoint
-                    return await RefreshBalanceFromWebhookAsync();
+                    // Fallback to older endpoint
+                    return await RefreshBalanceFromFallbackAsync();
                 }
 
                 var doc = JsonDocument.Parse(json);
@@ -87,8 +127,6 @@ namespace PatsKillerPro.Services
                     promoTokens = pt.GetInt32();
                 else if (root.TryGetProperty("promo_tokens", out var pt2))
                     promoTokens = pt2.GetInt32();
-                else if (root.TryGetProperty("promoBalance", out var pb))
-                    promoTokens = pb.GetInt32();
 
                 // Update state
                 var oldTotal = TotalTokens;
@@ -121,78 +159,75 @@ namespace PatsKillerPro.Services
             catch (Exception ex)
             {
                 Logger.Error($"[TokenBalanceService] RefreshBalanceAsync error: {ex.Message}");
-                
-                // Try fallback
-                return await RefreshBalanceFromWebhookAsync();
+                return await RefreshBalanceFromFallbackAsync();
             }
         }
 
         /// <summary>
-        /// Fallback to token-balance-webhook endpoint
+        /// Fallback to older endpoints
         /// </summary>
-        private async Task<TokenBalanceResult> RefreshBalanceFromWebhookAsync()
+        private async Task<TokenBalanceResult> RefreshBalanceFromFallbackAsync()
         {
             try
             {
-                Logger.Info("[TokenBalanceService] Trying fallback webhook endpoint...");
+                Logger.Info("[TokenBalanceService] Trying fallback endpoints...");
 
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/token-balance-webhook");
+                // Try get-user-tokens
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/get-user-tokens");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {AuthToken}");
 
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
-                if (!response.IsSuccessStatusCode)
+                if (response.IsSuccessStatusCode)
                 {
-                    Logger.Warning($"[TokenBalanceService] Webhook failed: {response.StatusCode}");
-                    return new TokenBalanceResult { Success = false, Error = $"HTTP {response.StatusCode}" };
-                }
+                    var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
 
-                var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
+                    var totalTokens = 0;
+                    if (root.TryGetProperty("tokenBalance", out var tb))
+                        totalTokens = tb.GetInt32();
+                    else if (root.TryGetProperty("tokens", out var t))
+                        totalTokens = t.GetInt32();
 
-                // This endpoint returns combined balance
-                var totalTokens = 0;
-                if (root.TryGetProperty("tokenBalance", out var tb))
-                    totalTokens = tb.GetInt32();
-                else if (root.TryGetProperty("tokens", out var t))
-                    totalTokens = t.GetInt32();
+                    var oldTotal = TotalTokens;
+                    RegularTokens = totalTokens;
+                    PromoTokens = 0;
+                    LastUpdated = DateTime.Now;
 
-                // For now, put all in regular (webhook doesn't separate promo)
-                var oldTotal = TotalTokens;
-                RegularTokens = totalTokens;
-                PromoTokens = 0; // Will be updated when proper endpoint is called
-                LastUpdated = DateTime.Now;
-
-                if (oldTotal != TotalTokens)
-                {
-                    OnBalanceChanged(new TokenBalanceChangedEventArgs
+                    if (oldTotal != TotalTokens)
                     {
+                        OnBalanceChanged(new TokenBalanceChangedEventArgs
+                        {
+                            RegularTokens = RegularTokens,
+                            PromoTokens = PromoTokens,
+                            TotalTokens = TotalTokens,
+                            PreviousTotal = oldTotal
+                        });
+                    }
+
+                    return new TokenBalanceResult
+                    {
+                        Success = true,
                         RegularTokens = RegularTokens,
                         PromoTokens = PromoTokens,
-                        TotalTokens = TotalTokens,
-                        PreviousTotal = oldTotal
-                    });
+                        TotalTokens = TotalTokens
+                    };
                 }
 
-                return new TokenBalanceResult
-                {
-                    Success = true,
-                    RegularTokens = RegularTokens,
-                    PromoTokens = PromoTokens,
-                    TotalTokens = TotalTokens
-                };
+                Logger.Warning($"[TokenBalanceService] Fallback failed: {response.StatusCode}");
+                return new TokenBalanceResult { Success = false, Error = $"HTTP {response.StatusCode}" };
             }
             catch (Exception ex)
             {
-                Logger.Error($"[TokenBalanceService] Webhook fallback error: {ex.Message}");
+                Logger.Error($"[TokenBalanceService] Fallback error: {ex.Message}");
                 return new TokenBalanceResult { Success = false, Error = ex.Message };
             }
         }
 
         /// <summary>
-        /// Deduct tokens for an operation using proper provider routing
+        /// Deduct tokens for an operation
         /// Promo tokens are used FIRST before regular tokens
         /// </summary>
         public async Task<TokenDeductResult> DeductTokensAsync(int amount, string operationType, 
@@ -257,8 +292,12 @@ namespace PatsKillerPro.Services
                 var newBalance = root.TryGetProperty("new_balance", out var nb) ? nb.GetInt32() : TotalTokens - amount;
 
                 // Update local state
-                RegularTokens = root.TryGetProperty("regular_balance", out var rb) ? rb.GetInt32() : RegularTokens - regularUsed;
-                PromoTokens = root.TryGetProperty("promo_balance", out var pb) ? pb.GetInt32() : PromoTokens - promoUsed;
+                var newRegular = root.TryGetProperty("regular_balance", out var rb) ? rb.GetInt32() : RegularTokens - regularUsed;
+                var newPromo = root.TryGetProperty("promo_balance", out var pb) ? pb.GetInt32() : PromoTokens - promoUsed;
+                
+                var oldTotal = TotalTokens;
+                RegularTokens = newRegular;
+                PromoTokens = newPromo;
                 LastUpdated = DateTime.Now;
 
                 Logger.Info($"[TokenBalanceService] Deducted: Promo={promoUsed}, Regular={regularUsed}. New balance: {TotalTokens}");
@@ -268,7 +307,7 @@ namespace PatsKillerPro.Services
                     RegularTokens = RegularTokens,
                     PromoTokens = PromoTokens,
                     TotalTokens = TotalTokens,
-                    PreviousTotal = TotalTokens + amount
+                    PreviousTotal = oldTotal
                 });
 
                 return new TokenDeductResult
@@ -338,9 +377,21 @@ namespace PatsKillerPro.Services
         {
             if (PromoTokens > 0)
             {
-                return $"Tokens: {TotalTokens} (+{PromoTokens} promo)";
+                return $"Tokens: {TotalTokens}";
             }
             return $"Tokens: {TotalTokens}";
+        }
+
+        /// <summary>
+        /// Get promo indicator text (for secondary label)
+        /// </summary>
+        public string GetPromoIndicator()
+        {
+            if (PromoTokens > 0)
+            {
+                return $"+{PromoTokens} promo";
+            }
+            return "";
         }
     }
 

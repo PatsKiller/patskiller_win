@@ -14,7 +14,22 @@ namespace PatsKillerPro.Services
     public class ProActivityLogger
     {
         private static ProActivityLogger? _instance;
-        public static ProActivityLogger Instance => _instance ??= new ProActivityLogger();
+        private static readonly object _lock = new object();
+        
+        public static ProActivityLogger Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    lock (_lock)
+                    {
+                        _instance ??= new ProActivityLogger();
+                    }
+                }
+                return _instance;
+            }
+        }
 
         private readonly HttpClient _httpClient;
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
@@ -31,7 +46,7 @@ namespace PatsKillerPro.Services
         {
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             MachineId = GenerateMachineId();
-            AppVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
+            AppVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "2.0.0";
         }
 
         private static string GenerateMachineId()
@@ -50,7 +65,27 @@ namespace PatsKillerPro.Services
         }
 
         /// <summary>
-        /// Log an activity to the backend
+        /// Set auth context after login
+        /// </summary>
+        public void SetAuthContext(string authToken, string userEmail, string? userId = null)
+        {
+            AuthToken = authToken;
+            UserEmail = userEmail;
+            UserId = userId;
+        }
+
+        /// <summary>
+        /// Clear auth context on logout
+        /// </summary>
+        public void ClearAuthContext()
+        {
+            AuthToken = null;
+            UserEmail = null;
+            UserId = null;
+        }
+
+        /// <summary>
+        /// Log an activity to the backend (async)
         /// </summary>
         public async Task LogActivityAsync(ActivityLogEntry entry)
         {
@@ -77,7 +112,6 @@ namespace PatsKillerPro.Services
                     success = entry.Success,
                     error_message = entry.ErrorMessage,
                     response_time_ms = entry.ResponseTimeMs,
-                    ip_address = entry.IpAddress,
                     app_version = AppVersion,
                     metadata = entry.Metadata
                 };
@@ -171,7 +205,7 @@ namespace PatsKillerPro.Services
                 TokenChange = tokenChange,
                 ResponseTimeMs = responseTimeMs,
                 ErrorMessage = errorMessage,
-                Details = success ? $"Calculated outcode" : $"Outcode calculation failed: {errorMessage}"
+                Details = success ? "Calculated outcode" : $"Outcode calculation failed: {errorMessage}"
             });
         }
 
@@ -326,13 +360,18 @@ namespace PatsKillerPro.Services
 
         public void LogAppClose()
         {
-            LogActivity(new ActivityLogEntry
+            // Use sync call for app close to ensure it completes
+            try
             {
-                Action = "app_close",
-                ActionCategory = "app",
-                Success = true,
-                Details = "PatsKiller Pro closed"
-            });
+                LogActivityAsync(new ActivityLogEntry
+                {
+                    Action = "app_close",
+                    ActionCategory = "app",
+                    Success = true,
+                    Details = "PatsKiller Pro closed"
+                }).Wait(TimeSpan.FromSeconds(2));
+            }
+            catch { /* Ignore errors on close */ }
         }
 
         public void LogError(string action, string errorMessage, string? details = null)
@@ -364,7 +403,6 @@ namespace PatsKillerPro.Services
         public int ResponseTimeMs { get; set; } = 0;
         public string? ErrorMessage { get; set; }
         public string? Details { get; set; }
-        public string? IpAddress { get; set; }
         public object? Metadata { get; set; }
     }
 }
