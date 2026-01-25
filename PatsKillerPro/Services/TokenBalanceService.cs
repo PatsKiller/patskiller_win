@@ -8,9 +8,15 @@ using PatsKillerPro.Utils;
 namespace PatsKillerPro.Services
 {
     /// <summary>
-    /// Service to manage token balance with promo token support
-    /// Refreshes balance after each operation and displays combined totals
-    /// Promo tokens are used FIRST before regular tokens
+    /// Manages token balance with promo support and key session tracking.
+    /// Promo tokens used FIRST before regular tokens.
+    /// 
+    /// TOKEN COSTS:
+    /// - Key Session: 1 token (unlimited keys while same outcode)
+    /// - Parameter Reset: 1 token per module (PCM, BCM, IPC, TCM = 3-4 total)
+    /// - Utility Operations: 1 token each
+    /// - Gateway Unlock: 1 token
+    /// - Diagnostics: FREE
     /// </summary>
     public class TokenBalanceService
     {
@@ -36,18 +42,20 @@ namespace PatsKillerPro.Services
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
         private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0.iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
 
-        // Auth context
         public string? AuthToken { get; private set; }
         public string? UserEmail { get; private set; }
         public string? UserId { get; private set; }
 
-        // Current balance state
         public int RegularTokens { get; private set; } = 0;
         public int PromoTokens { get; private set; } = 0;
         public int TotalTokens => RegularTokens + PromoTokens;
         public DateTime LastUpdated { get; private set; } = DateTime.MinValue;
 
-        // Events for UI updates
+        // Key programming session tracking
+        private string? _keySessionOutcode;
+        private string? _keySessionVin;
+        private bool _keySessionActive;
+
         public event EventHandler<TokenBalanceChangedEventArgs>? BalanceChanged;
 
         private TokenBalanceService()
@@ -55,9 +63,6 @@ namespace PatsKillerPro.Services
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         }
 
-        /// <summary>
-        /// Set auth context after login
-        /// </summary>
         public void SetAuthContext(string authToken, string userEmail, string? userId = null)
         {
             AuthToken = authToken;
@@ -65,9 +70,6 @@ namespace PatsKillerPro.Services
             UserId = userId;
         }
 
-        /// <summary>
-        /// Clear auth context on logout
-        /// </summary>
         public void ClearAuthContext()
         {
             AuthToken = null;
@@ -76,24 +78,87 @@ namespace PatsKillerPro.Services
             RegularTokens = 0;
             PromoTokens = 0;
             LastUpdated = DateTime.MinValue;
+            EndKeySession();
+        }
+
+        // ============ KEY SESSION MANAGEMENT ============
+
+        /// <summary>
+        /// Check if key session is active for this VIN/outcode (no charge needed)
+        /// </summary>
+        public bool IsKeySessionActive(string vin, string outcode)
+        {
+            return _keySessionActive && _keySessionVin == vin && _keySessionOutcode == outcode;
         }
 
         /// <summary>
-        /// Fetch current token balance from backend (including promo tokens)
+        /// Start key programming session (1 token). Returns success=true with no charge if already active.
         /// </summary>
+        public async Task<TokenDeductResult> StartKeySessionAsync(string vin, string outcode)
+        {
+            // Already active for same VIN/outcode - no charge
+            if (IsKeySessionActive(vin, outcode))
+            {
+                Logger.Info("[TokenBalanceService] Key session already active, no charge");
+                return new TokenDeductResult
+                {
+                    Success = true,
+                    TotalDeducted = 0,
+                    NewBalance = TotalTokens,
+                    SessionAlreadyActive = true
+                };
+            }
+
+            // End any existing session
+            EndKeySession();
+
+            // Charge 1 token
+            var result = await DeductTokensAsync(1, "key_programming_session", vin);
+            
+            if (result.Success)
+            {
+                _keySessionActive = true;
+                _keySessionVin = vin;
+                _keySessionOutcode = outcode;
+                Logger.Info($"[TokenBalanceService] Key session started for {vin}");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// End key programming session (call when outcode changes or disconnect)
+        /// </summary>
+        public void EndKeySession()
+        {
+            if (_keySessionActive)
+            {
+                Logger.Info($"[TokenBalanceService] Key session ended for {_keySessionVin}");
+            }
+            _keySessionActive = false;
+            _keySessionVin = null;
+            _keySessionOutcode = null;
+        }
+
+        /// <summary>
+        /// Check if key operation is free (within active session)
+        /// </summary>
+        public bool IsKeyOperationFree(string vin, string outcode)
+        {
+            return IsKeySessionActive(vin, outcode);
+        }
+
+        // ============ BALANCE METHODS ============
+
         public async Task<TokenBalanceResult> RefreshBalanceAsync()
         {
             if (string.IsNullOrEmpty(AuthToken))
             {
-                Logger.Warning("[TokenBalanceService] No auth token, cannot refresh balance");
                 return new TokenBalanceResult { Success = false, Error = "Not authenticated" };
             }
 
             try
             {
-                Logger.Info("[TokenBalanceService] Refreshing token balance...");
-
-                // Try the new endpoint first
                 var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/get-user-token-balance");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {AuthToken}");
@@ -101,42 +166,30 @@ namespace PatsKillerPro.Services
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
-                Logger.Debug($"[TokenBalanceService] Response: {response.StatusCode} - {json}");
-
                 if (!response.IsSuccessStatusCode)
                 {
-                    // Fallback to older endpoint
-                    return await RefreshBalanceFromFallbackAsync();
+                    return await RefreshFromFallbackAsync();
                 }
 
                 var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                // Parse regular tokens
                 var regularTokens = 0;
-                if (root.TryGetProperty("regularTokens", out var rt))
-                    regularTokens = rt.GetInt32();
-                else if (root.TryGetProperty("tokens", out var t))
-                    regularTokens = t.GetInt32();
-                else if (root.TryGetProperty("tokenBalance", out var tb))
-                    regularTokens = tb.GetInt32();
+                if (root.TryGetProperty("regularTokens", out var rt)) regularTokens = rt.GetInt32();
+                else if (root.TryGetProperty("tokenBalance", out var tb)) regularTokens = tb.GetInt32();
+                else if (root.TryGetProperty("tokens", out var t)) regularTokens = t.GetInt32();
 
-                // Parse promo tokens
                 var promoTokens = 0;
-                if (root.TryGetProperty("promoTokens", out var pt))
-                    promoTokens = pt.GetInt32();
-                else if (root.TryGetProperty("promo_tokens", out var pt2))
-                    promoTokens = pt2.GetInt32();
+                if (root.TryGetProperty("promoTokens", out var pt)) promoTokens = pt.GetInt32();
+                else if (root.TryGetProperty("promo_tokens", out var pt2)) promoTokens = pt2.GetInt32();
 
-                // Update state
                 var oldTotal = TotalTokens;
                 RegularTokens = regularTokens;
                 PromoTokens = promoTokens;
                 LastUpdated = DateTime.Now;
 
-                Logger.Info($"[TokenBalanceService] Balance updated: Regular={RegularTokens}, Promo={PromoTokens}, Total={TotalTokens}");
+                Logger.Info($"[TokenBalanceService] Balance: Regular={RegularTokens}, Promo={PromoTokens}, Total={TotalTokens}");
 
-                // Fire event if balance changed
                 if (oldTotal != TotalTokens)
                 {
                     OnBalanceChanged(new TokenBalanceChangedEventArgs
@@ -159,20 +212,14 @@ namespace PatsKillerPro.Services
             catch (Exception ex)
             {
                 Logger.Error($"[TokenBalanceService] RefreshBalanceAsync error: {ex.Message}");
-                return await RefreshBalanceFromFallbackAsync();
+                return await RefreshFromFallbackAsync();
             }
         }
 
-        /// <summary>
-        /// Fallback to older endpoints
-        /// </summary>
-        private async Task<TokenBalanceResult> RefreshBalanceFromFallbackAsync()
+        private async Task<TokenBalanceResult> RefreshFromFallbackAsync()
         {
             try
             {
-                Logger.Info("[TokenBalanceService] Trying fallback endpoints...");
-
-                // Try get-user-tokens
                 var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/get-user-tokens");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {AuthToken}");
@@ -186,10 +233,8 @@ namespace PatsKillerPro.Services
                     var root = doc.RootElement;
 
                     var totalTokens = 0;
-                    if (root.TryGetProperty("tokenBalance", out var tb))
-                        totalTokens = tb.GetInt32();
-                    else if (root.TryGetProperty("tokens", out var t))
-                        totalTokens = t.GetInt32();
+                    if (root.TryGetProperty("tokenBalance", out var tb)) totalTokens = tb.GetInt32();
+                    else if (root.TryGetProperty("tokens", out var t)) totalTokens = t.GetInt32();
 
                     var oldTotal = TotalTokens;
                     RegularTokens = totalTokens;
@@ -211,27 +256,22 @@ namespace PatsKillerPro.Services
                     {
                         Success = true,
                         RegularTokens = RegularTokens,
-                        PromoTokens = PromoTokens,
                         TotalTokens = TotalTokens
                     };
                 }
 
-                Logger.Warning($"[TokenBalanceService] Fallback failed: {response.StatusCode}");
                 return new TokenBalanceResult { Success = false, Error = $"HTTP {response.StatusCode}" };
             }
             catch (Exception ex)
             {
-                Logger.Error($"[TokenBalanceService] Fallback error: {ex.Message}");
                 return new TokenBalanceResult { Success = false, Error = ex.Message };
             }
         }
 
         /// <summary>
-        /// Deduct tokens for an operation
-        /// Promo tokens are used FIRST before regular tokens
+        /// Deduct tokens (promo used first)
         /// </summary>
-        public async Task<TokenDeductResult> DeductTokensAsync(int amount, string operationType, 
-            string? vin = null, string? vehicleModel = null)
+        public async Task<TokenDeductResult> DeductTokensAsync(int amount, string operationType, string? vin = null)
         {
             if (string.IsNullOrEmpty(AuthToken))
             {
@@ -251,16 +291,13 @@ namespace PatsKillerPro.Services
 
             try
             {
-                Logger.Info($"[TokenBalanceService] Deducting {amount} tokens for {operationType}...");
-
                 var requestBody = new
                 {
                     amount = amount,
                     operation_type = operationType,
                     vin = vin,
-                    vehicle_model = vehicleModel,
                     machine_id = ProActivityLogger.Instance.MachineId,
-                    use_promo_first = true // Always use promo tokens first
+                    use_promo_first = true
                 };
 
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/deduct-user-tokens");
@@ -271,27 +308,19 @@ namespace PatsKillerPro.Services
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
-                Logger.Debug($"[TokenBalanceService] Deduct response: {response.StatusCode} - {json}");
-
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorDoc = JsonDocument.Parse(json);
                     var errorMsg = errorDoc.RootElement.TryGetProperty("error", out var err) 
-                        ? err.GetString() 
-                        : $"HTTP {response.StatusCode}";
-                    
+                        ? err.GetString() : $"HTTP {response.StatusCode}";
                     return new TokenDeductResult { Success = false, Error = errorMsg };
                 }
 
                 var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                // Parse deduction breakdown
                 var promoUsed = root.TryGetProperty("promo_used", out var pu) ? pu.GetInt32() : 0;
                 var regularUsed = root.TryGetProperty("regular_used", out var ru) ? ru.GetInt32() : 0;
-                var newBalance = root.TryGetProperty("new_balance", out var nb) ? nb.GetInt32() : TotalTokens - amount;
-
-                // Update local state
                 var newRegular = root.TryGetProperty("regular_balance", out var rb) ? rb.GetInt32() : RegularTokens - regularUsed;
                 var newPromo = root.TryGetProperty("promo_balance", out var pb) ? pb.GetInt32() : PromoTokens - promoUsed;
                 
@@ -300,7 +329,7 @@ namespace PatsKillerPro.Services
                 PromoTokens = newPromo;
                 LastUpdated = DateTime.Now;
 
-                Logger.Info($"[TokenBalanceService] Deducted: Promo={promoUsed}, Regular={regularUsed}. New balance: {TotalTokens}");
+                Logger.Info($"[TokenBalanceService] Deducted: Promo={promoUsed}, Regular={regularUsed}. Balance: {TotalTokens}");
 
                 OnBalanceChanged(new TokenBalanceChangedEventArgs
                 {
@@ -327,27 +356,29 @@ namespace PatsKillerPro.Services
         }
 
         /// <summary>
-        /// Quick check if user has enough tokens
+        /// Deduct for parameter reset module (1 token)
         /// </summary>
-        public bool HasEnoughTokens(int required)
+        public async Task<TokenDeductResult> DeductForParamResetAsync(string moduleName, string vin)
         {
-            return TotalTokens >= required;
+            return await DeductTokensAsync(1, $"param_reset_{moduleName.ToLowerInvariant()}", vin);
         }
 
         /// <summary>
-        /// Refresh balance after an operation completes
-        /// Call this after every token-consuming operation
+        /// Deduct for utility operation (1 token)
         /// </summary>
+        public async Task<TokenDeductResult> DeductForUtilityAsync(string operation, string vin)
+        {
+            return await DeductTokensAsync(1, $"utility_{operation.ToLowerInvariant()}", vin);
+        }
+
+        public bool HasEnoughTokens(int required) => TotalTokens >= required;
+
         public async Task RefreshAfterOperationAsync(int delayMs = 500)
         {
-            // Brief delay to let backend process
             await Task.Delay(delayMs);
             await RefreshBalanceAsync();
         }
 
-        /// <summary>
-        /// Fire and forget refresh (doesn't block UI)
-        /// </summary>
         public void RefreshAfterOperation(int delayMs = 500)
         {
             _ = Task.Run(() => RefreshAfterOperationAsync(delayMs));
@@ -358,44 +389,16 @@ namespace PatsKillerPro.Services
             BalanceChanged?.Invoke(this, e);
         }
 
-        /// <summary>
-        /// Format balance for display (e.g., "5 (3 + 2 promo)")
-        /// </summary>
         public string GetDisplayString()
         {
-            if (PromoTokens > 0)
-            {
-                return $"{TotalTokens} ({RegularTokens} + {PromoTokens} promo)";
-            }
-            return TotalTokens.ToString();
+            return PromoTokens > 0 ? $"{TotalTokens} ({RegularTokens} + {PromoTokens} promo)" : TotalTokens.ToString();
         }
 
-        /// <summary>
-        /// Get formatted balance for header display
-        /// </summary>
-        public string GetHeaderDisplayString()
-        {
-            if (PromoTokens > 0)
-            {
-                return $"Tokens: {TotalTokens}";
-            }
-            return $"Tokens: {TotalTokens}";
-        }
-
-        /// <summary>
-        /// Get promo indicator text (for secondary label)
-        /// </summary>
         public string GetPromoIndicator()
         {
-            if (PromoTokens > 0)
-            {
-                return $"+{PromoTokens} promo";
-            }
-            return "";
+            return PromoTokens > 0 ? $"+{PromoTokens} promo" : "";
         }
     }
-
-    // ============ RESULT CLASSES ============
 
     public class TokenBalanceResult
     {
@@ -416,6 +419,7 @@ namespace PatsKillerPro.Services
         public int NewBalance { get; set; }
         public int RequiredTokens { get; set; }
         public int AvailableTokens { get; set; }
+        public bool SessionAlreadyActive { get; set; }
     }
 
     public class TokenBalanceChangedEventArgs : EventArgs

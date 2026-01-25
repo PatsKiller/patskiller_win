@@ -9,13 +9,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.Utils;
+using PatsKillerPro.Services;
 
 namespace PatsKillerPro
 {
     /// <summary>
     /// Professional OAuth login form matching PatsKiller Pro mockup v2
     /// Features: Google OAuth primary, Email/password secondary, Token fetching after login
-    /// VERSION: 2.1 - Added detailed API logging for debugging
+    /// FIXES: HTTP timeout, token count fetching, retry limits, better error handling
     /// </summary>
     public class GoogleLoginForm : Form
     {
@@ -51,6 +52,8 @@ namespace PatsKillerPro
         public string? RefreshToken { get; private set; }
         public string? UserEmail { get; private set; }
         public int TokenCount { get; private set; }
+        public int RegularTokenCount { get; private set; }
+        public int PromoTokenCount { get; private set; }
 
         // ============ API CONFIGURATION ============
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
@@ -71,6 +74,7 @@ namespace PatsKillerPro
         {
             _machineId = GetMachineId();
             
+            // FIX: Add timeout to prevent hanging
             _httpClient = new HttpClient
             {
                 Timeout = TimeSpan.FromSeconds(HTTP_TIMEOUT_SECONDS)
@@ -78,8 +82,6 @@ namespace PatsKillerPro
             
             InitializeComponent();
             ShowLoginState();
-            
-            Logger.Info($"[GoogleLoginForm] Initialized. MachineId: {_machineId}");
         }
 
         private static string GetMachineId()
@@ -337,7 +339,7 @@ namespace PatsKillerPro
             _loginPanel.Controls.Add(btnGoogle);
             y += btnGoogle.Height + 16;
 
-            var lblDivider = new Label { Text = "───────────  or sign in with email  ───────────", Font = new Font("Segoe UI", 8F), ForeColor = _colorTextDim, AutoSize = true, BackColor = Color.Transparent };
+            var lblDivider = new Label { Text = "â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€  or sign in with email  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€", Font = new Font("Segoe UI", 8F), ForeColor = _colorTextDim, AutoSize = true, BackColor = Color.Transparent };
             lblDivider.Location = new Point((_loginPanel.Width - lblDivider.PreferredWidth) / 2, y);
             _loginPanel.Controls.Add(lblDivider);
             y += lblDivider.Height + 18;
@@ -443,12 +445,13 @@ namespace PatsKillerPro
             animTimer.Start();
             y += dotsPanel.Height + 18;
 
+            // FIX: Add status label to show connection state
             _lblWaitingStatus = new Label { Name = "lblWaitingStatus", Text = "Waiting for authentication...", Font = new Font("Segoe UI", 9F), ForeColor = _colorTextDim, AutoSize = true, BackColor = Color.Transparent };
             _lblWaitingStatus.Location = new Point((_waitingPanel.Width - _lblWaitingStatus.PreferredWidth) / 2, y);
             _waitingPanel.Controls.Add(_lblWaitingStatus);
             y += _lblWaitingStatus.Height + 18;
 
-            var btnReopen = new Button { Text = "🌐  Reopen Browser", Size = new Size(280, 45), Location = new Point((_waitingPanel.Width - 280) / 2, y), FlatStyle = FlatStyle.Flat, BackColor = _colorInput, ForeColor = _colorText, Font = new Font("Segoe UI", 10F, FontStyle.Bold), Cursor = Cursors.Hand };
+            var btnReopen = new Button { Text = "ðŸŒ  Reopen Browser", Size = new Size(280, 45), Location = new Point((_waitingPanel.Width - 280) / 2, y), FlatStyle = FlatStyle.Flat, BackColor = _colorInput, ForeColor = _colorText, Font = new Font("Segoe UI", 10F, FontStyle.Bold), Cursor = Cursors.Hand };
             btnReopen.FlatAppearance.BorderColor = _colorBorder;
             btnReopen.FlatAppearance.BorderSize = 1;
             btnReopen.Click += BtnReopenBrowser_Click;
@@ -457,7 +460,7 @@ namespace PatsKillerPro
 
             var lblCancel = new Label { Text = "Cancel", Font = new Font("Segoe UI", 10F), ForeColor = _colorTextDim, AutoSize = true, Cursor = Cursors.Hand, BackColor = Color.Transparent };
             lblCancel.Location = new Point((_waitingPanel.Width - lblCancel.PreferredWidth) / 2, y);
-            lblCancel.Click += (s, e) => { _cts?.Cancel(); Logger.Info("[GoogleLoginForm] Login cancelled by user"); ShowLoginState(); };
+            lblCancel.Click += (s, e) => { _cts?.Cancel(); Logger.Info("Login cancelled"); ShowLoginState(); };
             lblCancel.MouseEnter += (s, e) => lblCancel.ForeColor = _colorText;
             lblCancel.MouseLeave += (s, e) => lblCancel.ForeColor = _colorTextDim;
             _waitingPanel.Controls.Add(lblCancel);
@@ -585,7 +588,6 @@ namespace PatsKillerPro
                 {
                     _lblWaitingStatus.Text = text;
                     _lblWaitingStatus.Location = new Point((_waitingPanel.Width - _lblWaitingStatus.PreferredWidth) / 2, _lblWaitingStatus.Location.Y);
-                    Logger.Debug($"[GoogleLoginForm] Status: {text}");
                 }
             }
         }
@@ -625,8 +627,37 @@ namespace PatsKillerPro
             _lblStatus.Text = email;
             PositionHeaderLabels();
             
-            Logger.Info($"[GoogleLoginForm] Success state shown. Email: {email}, Tokens: {tokens}");
+            // Initialize services after successful login
+            InitializeServicesAfterLogin();
+            
             AutoCloseAfterSuccess();
+        }
+
+        /// <summary>
+        /// Initialize ProActivityLogger and TokenBalanceService with auth context
+        /// </summary>
+        private void InitializeServicesAfterLogin()
+        {
+            try
+            {
+                // Set up ProActivityLogger
+                ProActivityLogger.Instance.SetAuthContext(AuthToken!, UserEmail!, null);
+                
+                // Set up TokenBalanceService with token values
+                TokenBalanceService.Instance.SetAuthContext(AuthToken!, UserEmail!, null);
+                
+                // Log the successful login
+                ProActivityLogger.Instance.LogLogin(UserEmail!, success: true);
+                
+                // Log app start
+                ProActivityLogger.Instance.LogAppStart();
+                
+                Logger.Info("[GoogleLoginForm] Services initialized after login");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"[GoogleLoginForm] Failed to initialize services: {ex.Message}");
+            }
         }
 
         private async void AutoCloseAfterSuccess()
@@ -656,7 +687,6 @@ namespace PatsKillerPro
             _successPanel.Visible = false;
             _errorPanel.Visible = true;
             CenterPanel(_errorPanel);
-            Logger.Warning($"[GoogleLoginForm] Error state shown: {message}");
         }
 
         private void CenterPanel(Panel panel)
@@ -684,10 +714,7 @@ namespace PatsKillerPro
         private void BtnReopenBrowser_Click(object? sender, EventArgs e)
         {
             if (!string.IsNullOrEmpty(_currentSessionCode))
-            {
-                Logger.Info($"[GoogleLoginForm] Reopening browser for session: {_currentSessionCode}");
                 OpenUrl(AUTH_PAGE_URL + _currentSessionCode);
-            }
         }
 
         // ============ AUTH FLOW ============
@@ -699,7 +726,7 @@ namespace PatsKillerPro
                 _cts = new CancellationTokenSource();
                 _pollFailureCount = 0;
 
-                Logger.Info("[GoogleLoginForm] Starting Google auth flow...");
+                Logger.Info("Opening Google login...");
 
                 var session = await CreateSessionAsync();
                 if (session == null)
@@ -709,15 +736,13 @@ namespace PatsKillerPro
                 }
 
                 _currentSessionCode = session.SessionCode;
-                Logger.Info($"[GoogleLoginForm] Session created: {session.SessionCode}");
-                
                 OpenUrl(AUTH_PAGE_URL + session.SessionCode);
                 ShowWaitingState();
                 await PollForCompletionAsync(session.SessionCode, _cts.Token);
             }
             catch (Exception ex)
             {
-                Logger.Error("[GoogleLoginForm] StartGoogleAuthAsync error", ex);
+                Logger.Error("StartGoogleAuthAsync error", ex);
                 ShowErrorState("Failed to start authentication.\nPlease try again.");
             }
         }
@@ -732,7 +757,7 @@ namespace PatsKillerPro
 
             try
             {
-                Logger.Info($"[GoogleLoginForm] Attempting email login for: {email}");
+                Logger.Info($"Attempting email login for {email}");
                 
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/auth/v1/token?grant_type=password");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
@@ -742,13 +767,10 @@ namespace PatsKillerPro
 
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
-                
-                Logger.Debug($"[GoogleLoginForm] Email login response: {response.StatusCode}");
-                Logger.Debug($"[GoogleLoginForm] Email login body: {json.Substring(0, Math.Min(200, json.Length))}...");
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Logger.Warning($"[GoogleLoginForm] Email login failed: {response.StatusCode}");
+                    Logger.Warning($"Email login failed: {response.StatusCode} - {json}");
                     MessageBox.Show("Invalid email or password.\nPlease try again or use Google sign-in.", "Login Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
@@ -764,15 +786,15 @@ namespace PatsKillerPro
                 else
                     UserEmail = email;
 
-                Logger.Info($"[GoogleLoginForm] Email login successful. Fetching token count...");
+                // FIX: Fetch actual token balance
                 TokenCount = await FetchTokenCountAsync(AuthToken!);
                 
-                Logger.Info($"[GoogleLoginForm] Email login complete: {UserEmail}, Tokens: {TokenCount}");
+                Logger.Info($"Email login successful: {UserEmail}, Tokens: {TokenCount}");
                 this.BeginInvoke(new Action(() => ShowSuccessState(UserEmail ?? "User", TokenCount)));
             }
             catch (Exception ex)
             {
-                Logger.Error("[GoogleLoginForm] DoEmailLoginAsync error", ex);
+                Logger.Error("DoEmailLoginAsync error", ex);
                 MessageBox.Show($"Login failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -782,8 +804,6 @@ namespace PatsKillerPro
         {
             try
             {
-                Logger.Debug("[GoogleLoginForm] Creating desktop auth session...");
-                
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/create-desktop-auth-session");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 
@@ -793,11 +813,11 @@ namespace PatsKillerPro
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
-                Logger.Debug($"[GoogleLoginForm] CreateSession response: {response.StatusCode} - {json}");
+                Logger.Info($"CreateSession response: {response.StatusCode} - {json}");
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Logger.Error($"[GoogleLoginForm] CreateSession failed: {response.StatusCode} - {json}");
+                    Logger.Error($"CreateSession failed: {response.StatusCode} - {json}");
                     return null;
                 }
 
@@ -807,7 +827,7 @@ namespace PatsKillerPro
                 var sessionCode = root.TryGetProperty("sessionCode", out var sc) ? sc.GetString() ?? "" : "";
                 if (string.IsNullOrEmpty(sessionCode))
                 {
-                    Logger.Error($"[GoogleLoginForm] CreateSession: No sessionCode in response");
+                    Logger.Error($"CreateSession: No sessionCode in response: {json}");
                     return null;
                 }
                 
@@ -815,12 +835,12 @@ namespace PatsKillerPro
             }
             catch (TaskCanceledException)
             {
-                Logger.Warning("[GoogleLoginForm] CreateSessionAsync timed out");
+                Logger.Warning("CreateSessionAsync timed out");
                 return null;
             }
             catch (Exception ex)
             {
-                Logger.Error("[GoogleLoginForm] CreateSessionAsync error", ex);
+                Logger.Error("CreateSessionAsync error", ex);
                 return null;
             }
         }
@@ -830,86 +850,61 @@ namespace PatsKillerPro
             try
             {
                 var timeout = DateTime.UtcNow.AddMinutes(5);
-                var pollCount = 0;
-                
-                Logger.Info($"[GoogleLoginForm] Starting polling for session: {sessionCode}");
                 
                 while (!ct.IsCancellationRequested && DateTime.UtcNow < timeout)
                 {
                     await Task.Delay(POLL_INTERVAL_MS, ct);
-                    pollCount++;
 
                     var result = await CheckSessionAsync(sessionCode);
                     
                     if (result == null)
                     {
                         _pollFailureCount++;
-                        Logger.Warning($"[GoogleLoginForm] Poll failure {_pollFailureCount}/{MAX_POLL_FAILURES} (poll #{pollCount})");
+                        Logger.Warning($"Poll failure {_pollFailureCount}/{MAX_POLL_FAILURES}");
                         
+                        // FIX: Show user what's happening
                         UpdateWaitingStatus($"Retrying... ({_pollFailureCount}/{MAX_POLL_FAILURES})");
                         
                         if (_pollFailureCount >= MAX_POLL_FAILURES)
                         {
-                            Logger.Error("[GoogleLoginForm] Max poll failures reached");
                             this.BeginInvoke(new Action(() => ShowErrorState("Connection issues detected.\nPlease check your internet and try again.")));
                             return;
                         }
                         continue;
                     }
                     
+                    // Reset failure count on success
                     _pollFailureCount = 0;
-                    
-                    Logger.Debug($"[GoogleLoginForm] Poll #{pollCount} - Status: {result.Status}");
+                    UpdateWaitingStatus("Waiting for authentication...");
 
                     if (result.Status == "complete" && !string.IsNullOrEmpty(result.Token))
                     {
-                        Logger.Info($"[GoogleLoginForm] Session complete! Email: {result.Email}");
-                        
                         AuthToken = result.Token;
                         RefreshToken = result.RefreshToken;
                         UserEmail = result.Email;
                         
-                        // Check if tokenBalance was included in response
-                        if (result.TokenCount > 0)
-                        {
-                            Logger.Info($"[GoogleLoginForm] Token count from session response: {result.TokenCount}");
-                            TokenCount = result.TokenCount;
-                        }
-                        else
-                        {
-                            // Fetch token count from API
-                            UpdateWaitingStatus("Fetching account info...");
-                            Logger.Info("[GoogleLoginForm] Fetching token count from API...");
-                            TokenCount = await FetchTokenCountAsync(result.Token);
-                        }
+                        // FIX: Fetch actual token count from API
+                        UpdateWaitingStatus("Fetching account info...");
+                        TokenCount = await FetchTokenCountAsync(result.Token);
                         
-                        Logger.Info($"[GoogleLoginForm] Login complete: {result.Email}, Tokens: {TokenCount}");
+                        Logger.Info($"Login successful: {result.Email}, Tokens: {TokenCount}");
                         this.BeginInvoke(new Action(() => ShowSuccessState(result.Email ?? "User", TokenCount)));
                         return;
                     }
                     else if (result.Status == "expired" || result.Status == "invalid")
                     {
-                        Logger.Warning($"[GoogleLoginForm] Session {result.Status}");
                         this.BeginInvoke(new Action(() => ShowErrorState("Session expired.\nPlease try again.")));
                         return;
                     }
-                    
-                    UpdateWaitingStatus("Waiting for authentication...");
                 }
                 
                 if (!ct.IsCancellationRequested)
-                {
-                    Logger.Warning("[GoogleLoginForm] Polling timed out after 5 minutes");
                     this.BeginInvoke(new Action(() => ShowErrorState("Authentication timed out.\nPlease try again.")));
-                }
             }
-            catch (OperationCanceledException) 
-            {
-                Logger.Info("[GoogleLoginForm] Polling cancelled");
-            }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                Logger.Error("[GoogleLoginForm] PollForCompletionAsync error", ex);
+                Logger.Error("PollForCompletionAsync error", ex);
                 this.BeginInvoke(new Action(() => ShowErrorState("An error occurred.\nPlease try again.")));
             }
         }
@@ -927,11 +922,11 @@ namespace PatsKillerPro
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
-                Logger.Debug($"[GoogleLoginForm] CheckSession: {response.StatusCode} - {json.Substring(0, Math.Min(500, json.Length))}");
+                Logger.Debug($"CheckSession response: {response.StatusCode} - {json}");
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Logger.Warning($"[GoogleLoginForm] CheckSession failed: {response.StatusCode}");
+                    Logger.Warning($"CheckSession failed: {response.StatusCode} - {json}");
                     return null;
                 }
 
@@ -947,174 +942,115 @@ namespace PatsKillerPro
                     result.RefreshToken = root.TryGetProperty("refreshToken", out var r) ? r.GetString() : null;
                     result.Email = root.TryGetProperty("email", out var e) ? e.GetString() : null;
                     
-                    // Try to get token count from response
+                    // Try to get token count from response if available
                     if (root.TryGetProperty("tokenBalance", out var tb))
-                    {
                         result.TokenCount = tb.GetInt32();
-                        Logger.Info($"[GoogleLoginForm] Got tokenBalance from response: {result.TokenCount}");
-                    }
                     else if (root.TryGetProperty("token_balance", out var tb2))
-                    {
                         result.TokenCount = tb2.GetInt32();
-                        Logger.Info($"[GoogleLoginForm] Got token_balance from response: {result.TokenCount}");
-                    }
-                    else
-                    {
-                        Logger.Debug("[GoogleLoginForm] No token balance in session response - will fetch separately");
-                    }
                 }
 
                 return result;
             }
             catch (TaskCanceledException)
             {
-                Logger.Warning("[GoogleLoginForm] CheckSessionAsync timed out");
+                Logger.Warning("CheckSessionAsync timed out");
                 return null;
             }
             catch (Exception ex)
             {
-                Logger.Error("[GoogleLoginForm] CheckSessionAsync error", ex);
+                Logger.Error("CheckSessionAsync error", ex);
                 return null;
             }
         }
 
         /// <summary>
-        /// Fetch actual token balance from API after authentication
-        /// Includes detailed logging for debugging
+        /// FIX: Fetch actual token balance from API after authentication (including promo tokens)
         /// </summary>
         private async Task<int> FetchTokenCountAsync(string accessToken)
         {
-            Logger.Info("[GoogleLoginForm] === FETCHING TOKEN COUNT ===");
-            Logger.Debug($"[GoogleLoginForm] Access token preview: {accessToken.Substring(0, Math.Min(50, accessToken.Length))}...");
-            
             try
             {
-                // METHOD 1: Try dedicated get-user-tokens endpoint
-                Logger.Info("[GoogleLoginForm] Method 1: Trying get-user-tokens endpoint...");
-                
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/get-user-tokens");
+                // Try the new endpoint that includes promo tokens
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/get-user-token-balance");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {accessToken}");
-
-                Logger.Debug($"[GoogleLoginForm] Request URL: {request.RequestUri}");
-                Logger.Debug($"[GoogleLoginForm] Request headers: apikey=*****, Authorization=Bearer ***");
 
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
-                Logger.Info($"[GoogleLoginForm] get-user-tokens response: Status={response.StatusCode}");
-                Logger.Debug($"[GoogleLoginForm] get-user-tokens body: {json}");
+                Logger.Debug($"FetchTokenCount response: {response.StatusCode} - {json}");
 
                 if (response.IsSuccessStatusCode)
                 {
                     var doc = JsonDocument.Parse(json);
                     var root = doc.RootElement;
                     
-                    // Check all possible property names
-                    if (root.TryGetProperty("tokens", out var tokens))
-                    {
-                        var count = tokens.GetInt32();
-                        Logger.Info($"[GoogleLoginForm] SUCCESS: Got 'tokens' = {count}");
-                        return count;
-                    }
-                    if (root.TryGetProperty("tokenBalance", out var balance))
-                    {
-                        var count = balance.GetInt32();
-                        Logger.Info($"[GoogleLoginForm] SUCCESS: Got 'tokenBalance' = {count}");
-                        return count;
-                    }
-                    if (root.TryGetProperty("token_balance", out var tb))
-                    {
-                        var count = tb.GetInt32();
-                        Logger.Info($"[GoogleLoginForm] SUCCESS: Got 'token_balance' = {count}");
-                        return count;
-                    }
+                    // Parse regular tokens
+                    if (root.TryGetProperty("regularTokens", out var rt))
+                        RegularTokenCount = rt.GetInt32();
+                    else if (root.TryGetProperty("tokenBalance", out var tb))
+                        RegularTokenCount = tb.GetInt32();
+                    else if (root.TryGetProperty("tokens", out var t))
+                        RegularTokenCount = t.GetInt32();
                     
-                    // Log all properties in response
-                    Logger.Warning("[GoogleLoginForm] Response OK but no token property found. Properties in response:");
-                    foreach (var prop in root.EnumerateObject())
-                    {
-                        Logger.Debug($"[GoogleLoginForm]   - {prop.Name}: {prop.Value}");
-                    }
-                }
-                else
-                {
-                    Logger.Warning($"[GoogleLoginForm] get-user-tokens failed: {response.StatusCode} - {json}");
+                    // Parse promo tokens
+                    if (root.TryGetProperty("promoTokens", out var pt))
+                        PromoTokenCount = pt.GetInt32();
+                    else if (root.TryGetProperty("promo_tokens", out var pt2))
+                        PromoTokenCount = pt2.GetInt32();
+                    else
+                        PromoTokenCount = 0;
+                    
+                    return RegularTokenCount + PromoTokenCount;
                 }
                 
-                // METHOD 2: Fallback to profiles table
-                Logger.Info("[GoogleLoginForm] Method 2: Falling back to profiles table...");
-                return await FetchTokenCountFromProfileAsync(accessToken);
+                // Fallback to older endpoint
+                return await FetchTokenCountFromFallbackAsync(accessToken);
             }
             catch (Exception ex)
             {
-                Logger.Error("[GoogleLoginForm] FetchTokenCountAsync error", ex);
-                Logger.Info("[GoogleLoginForm] Trying fallback method...");
-                return await FetchTokenCountFromProfileAsync(accessToken);
+                Logger.Error("FetchTokenCountAsync error", ex);
+                return await FetchTokenCountFromFallbackAsync(accessToken);
             }
         }
 
-        private async Task<int> FetchTokenCountFromProfileAsync(string accessToken)
+        private async Task<int> FetchTokenCountFromFallbackAsync(string accessToken)
         {
             try
             {
-                Logger.Info("[GoogleLoginForm] Querying profiles table directly...");
-                
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/rest/v1/profiles?select=token_balance");
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/get-user-tokens");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {accessToken}");
-
-                Logger.Debug($"[GoogleLoginForm] Request URL: {request.RequestUri}");
 
                 var response = await _httpClient.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
 
-                Logger.Info($"[GoogleLoginForm] Profiles response: Status={response.StatusCode}");
-                Logger.Debug($"[GoogleLoginForm] Profiles body: {json}");
+                Logger.Debug($"FetchTokenCount fallback response: {response.StatusCode} - {json}");
 
                 if (response.IsSuccessStatusCode)
                 {
                     var doc = JsonDocument.Parse(json);
-                    var array = doc.RootElement;
+                    var root = doc.RootElement;
                     
-                    Logger.Debug($"[GoogleLoginForm] Profiles array length: {array.GetArrayLength()}");
-                    
-                    if (array.GetArrayLength() > 0)
+                    if (root.TryGetProperty("tokens", out var tokens)) 
                     {
-                        var profile = array[0];
-                        Logger.Debug($"[GoogleLoginForm] First profile: {profile}");
-                        
-                        if (profile.TryGetProperty("token_balance", out var tb))
-                        {
-                            var count = tb.GetInt32();
-                            Logger.Info($"[GoogleLoginForm] SUCCESS from profiles: token_balance = {count}");
-                            return count;
-                        }
-                        else
-                        {
-                            Logger.Warning("[GoogleLoginForm] Profile found but no token_balance property");
-                            foreach (var prop in profile.EnumerateObject())
-                            {
-                                Logger.Debug($"[GoogleLoginForm]   - {prop.Name}: {prop.Value}");
-                            }
-                        }
+                        RegularTokenCount = tokens.GetInt32();
+                        PromoTokenCount = 0;
+                        return RegularTokenCount;
                     }
-                    else
+                    if (root.TryGetProperty("tokenBalance", out var balance))
                     {
-                        Logger.Warning("[GoogleLoginForm] Profiles query returned empty array");
+                        RegularTokenCount = balance.GetInt32();
+                        PromoTokenCount = 0;
+                        return RegularTokenCount;
                     }
                 }
-                else
-                {
-                    Logger.Warning($"[GoogleLoginForm] Profiles query failed: {response.StatusCode} - {json}");
-                }
-
-                Logger.Warning("[GoogleLoginForm] All token fetch methods failed, returning 0");
+                
                 return 0;
             }
             catch (Exception ex)
             {
-                Logger.Error("[GoogleLoginForm] FetchTokenCountFromProfileAsync error", ex);
+                Logger.Error("FetchTokenCountFromFallbackAsync error", ex);
                 return 0;
             }
         }
@@ -1127,7 +1063,7 @@ namespace PatsKillerPro
             }
             catch (Exception ex)
             {
-                Logger.Error($"[GoogleLoginForm] Failed to open URL: {url}", ex);
+                Logger.Error($"Failed to open URL: {url}", ex);
             }
         }
 

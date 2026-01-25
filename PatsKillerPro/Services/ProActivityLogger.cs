@@ -8,8 +8,14 @@ using PatsKillerPro.Utils;
 namespace PatsKillerPro.Services
 {
     /// <summary>
-    /// Service to log all PatsKiller Pro activities to the backend
-    /// Logs are stored in pro_activity_logs table for admin monitoring
+    /// Logs all PatsKiller Pro activities to pro_activity_logs table.
+    /// 
+    /// TOKEN COSTS:
+    /// - Key Session: 1 token (unlimited keys while same outcode)
+    /// - Parameter Reset: 1 token per module (PCM, BCM, IPC, TCM = 3-4 total)
+    /// - Utility Operations: 1 token each
+    /// - Gateway Unlock: 1 token
+    /// - Diagnostics/Detection: FREE
     /// </summary>
     public class ProActivityLogger
     {
@@ -35,7 +41,6 @@ namespace PatsKillerPro.Services
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
         private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0.iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
 
-        // User context (set after login)
         public string? AuthToken { get; set; }
         public string? UserEmail { get; set; }
         public string? UserId { get; set; }
@@ -64,9 +69,6 @@ namespace PatsKillerPro.Services
             }
         }
 
-        /// <summary>
-        /// Set auth context after login
-        /// </summary>
         public void SetAuthContext(string authToken, string userEmail, string? userId = null)
         {
             AuthToken = authToken;
@@ -74,9 +76,6 @@ namespace PatsKillerPro.Services
             UserId = userId;
         }
 
-        /// <summary>
-        /// Clear auth context on logout
-        /// </summary>
         public void ClearAuthContext()
         {
             AuthToken = null;
@@ -84,9 +83,6 @@ namespace PatsKillerPro.Services
             UserId = null;
         }
 
-        /// <summary>
-        /// Log an activity to the backend (async)
-        /// </summary>
         public async Task LogActivityAsync(ActivityLogEntry entry)
         {
             if (string.IsNullOrEmpty(AuthToken))
@@ -126,29 +122,21 @@ namespace PatsKillerPro.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     var error = await response.Content.ReadAsStringAsync();
-                    Logger.Warning($"[ProActivityLogger] Failed to log activity: {response.StatusCode} - {error}");
-                }
-                else
-                {
-                    Logger.Debug($"[ProActivityLogger] Logged: {entry.Action}");
+                    Logger.Warning($"[ProActivityLogger] Log failed: {response.StatusCode} - {error}");
                 }
             }
             catch (Exception ex)
             {
-                // Don't fail the main operation if logging fails
-                Logger.Warning($"[ProActivityLogger] Exception logging activity: {ex.Message}");
+                Logger.Warning($"[ProActivityLogger] Exception: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Fire and forget logging (doesn't block main operation)
-        /// </summary>
         public void LogActivity(ActivityLogEntry entry)
         {
             _ = Task.Run(() => LogActivityAsync(entry));
         }
 
-        // ============ CONVENIENCE METHODS ============
+        // ============ AUTH ============
 
         public void LogLogin(string email, bool success, string? errorMessage = null, int responseTimeMs = 0)
         {
@@ -160,7 +148,8 @@ namespace PatsKillerPro.Services
                 Success = success,
                 ErrorMessage = errorMessage,
                 ResponseTimeMs = responseTimeMs,
-                Details = success ? "User logged in via Google OAuth" : $"Login failed: {errorMessage}"
+                TokenChange = 0,
+                Details = success ? "User logged in" : $"Login failed: {errorMessage}"
             });
         }
 
@@ -172,160 +161,159 @@ namespace PatsKillerPro.Services
                 ActionCategory = "auth",
                 UserEmail = email,
                 Success = true,
+                TokenChange = 0,
                 Details = "User logged out"
             });
         }
 
-        public void LogIncodeCalculation(string vin, string? vehicleYear, string? vehicleModel, 
-            bool success, int tokenChange, int responseTimeMs, string? errorMessage = null)
-        {
-            LogActivity(new ActivityLogEntry
-            {
-                Action = "incode_calculation",
-                ActionCategory = "operation",
-                Vin = vin,
-                VehicleYear = vehicleYear,
-                VehicleModel = vehicleModel,
-                Success = success,
-                TokenChange = tokenChange,
-                ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Calculated incode for {vin}" : $"Incode calculation failed: {errorMessage}"
-            });
-        }
+        // ============ KEY PROGRAMMING (1 token per session) ============
 
-        public void LogOutcodeCalculation(string outcode, bool success, int tokenChange, 
-            int responseTimeMs, string? errorMessage = null)
+        public void LogKeySessionStart(string vin, string? year, string? model, string outcode,
+            bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
             LogActivity(new ActivityLogEntry
             {
-                Action = "outcode_calculation",
-                ActionCategory = "operation",
-                Success = success,
-                TokenChange = tokenChange,
-                ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? "Calculated outcode" : $"Outcode calculation failed: {errorMessage}"
-            });
-        }
-
-        public void LogKeyProgramming(string vin, string? vehicleYear, string? vehicleModel,
-            bool success, int tokenChange, int responseTimeMs, string? errorMessage = null)
-        {
-            LogActivity(new ActivityLogEntry
-            {
-                Action = "key_programming",
+                Action = "key_session_start",
                 ActionCategory = "key_programming",
                 Vin = vin,
-                VehicleYear = vehicleYear,
-                VehicleModel = vehicleModel,
+                VehicleYear = year,
+                VehicleModel = model,
                 Success = success,
                 TokenChange = tokenChange,
                 ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Programmed key for {vin}" : $"Key programming failed: {errorMessage}"
+                ErrorMessage = error,
+                Details = success ? $"Key session started for {vin}" : $"Session failed: {error}",
+                Metadata = new { outcode }
             });
         }
 
-        public void LogEraseAllKeys(string vin, string? vehicleYear, string? vehicleModel,
-            bool success, int tokenChange, int responseTimeMs, string? errorMessage = null)
+        public void LogKeyProgrammed(string vin, string? year, string? model, int keyNumber,
+            bool success, int responseTimeMs, string? error = null)
+        {
+            LogActivity(new ActivityLogEntry
+            {
+                Action = "key_programmed",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleYear = year,
+                VehicleModel = model,
+                Success = success,
+                TokenChange = 0, // FREE within session
+                ResponseTimeMs = responseTimeMs,
+                ErrorMessage = error,
+                Details = success ? $"Key #{keyNumber} programmed" : $"Key #{keyNumber} failed: {error}",
+                Metadata = new { key_number = keyNumber }
+            });
+        }
+
+        public void LogEraseAllKeys(string vin, string? year, string? model, int keysErased,
+            bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
             LogActivity(new ActivityLogEntry
             {
                 Action = "erase_all_keys",
                 ActionCategory = "key_programming",
                 Vin = vin,
-                VehicleYear = vehicleYear,
-                VehicleModel = vehicleModel,
+                VehicleYear = year,
+                VehicleModel = model,
                 Success = success,
-                TokenChange = tokenChange,
+                TokenChange = tokenChange, // 0 if in session
                 ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Erased all keys for {vin}" : $"Erase keys failed: {errorMessage}"
+                ErrorMessage = error,
+                Details = success ? $"Erased {keysErased} keys" : $"Erase failed: {error}",
+                Metadata = new { keys_erased = keysErased }
             });
         }
 
-        public void LogParameterReset(string vin, string? vehicleYear, string? vehicleModel,
-            bool success, int tokenChange, int responseTimeMs, string? errorMessage = null)
+        // ============ PARAMETER RESET (1 token per module) ============
+
+        public void LogParameterResetModule(string vin, string? year, string? model, string moduleName,
+            string outcode, string incode, bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
             LogActivity(new ActivityLogEntry
             {
-                Action = "parameter_reset",
-                ActionCategory = "operation",
+                Action = $"param_reset_{moduleName.ToLowerInvariant()}",
+                ActionCategory = "parameter_reset",
                 Vin = vin,
-                VehicleYear = vehicleYear,
-                VehicleModel = vehicleModel,
+                VehicleYear = year,
+                VehicleModel = model,
                 Success = success,
-                TokenChange = tokenChange,
+                TokenChange = tokenChange, // 1 token per module
                 ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Reset parameters for {vin}" : $"Parameter reset failed: {errorMessage}"
+                ErrorMessage = error,
+                Details = success ? $"{moduleName} reset complete" : $"{moduleName} reset failed: {error}",
+                Metadata = new { module = moduleName, outcode, incode }
             });
         }
 
-        public void LogInitializeESCL(string vin, string? vehicleYear, string? vehicleModel,
-            bool success, int tokenChange, int responseTimeMs, string? errorMessage = null)
+        public void LogParameterResetComplete(string vin, string? year, string? model,
+            int modulesReset, int totalTokens, int responseTimeMs, string[]? modules = null)
         {
             LogActivity(new ActivityLogEntry
             {
-                Action = "initialize_escl",
-                ActionCategory = "operation",
+                Action = "param_reset_complete",
+                ActionCategory = "parameter_reset",
                 Vin = vin,
-                VehicleYear = vehicleYear,
-                VehicleModel = vehicleModel,
-                Success = success,
-                TokenChange = tokenChange,
+                VehicleYear = year,
+                VehicleModel = model,
+                Success = true,
+                TokenChange = 0, // Already charged per module
                 ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Initialized ESCL for {vin}" : $"ESCL init failed: {errorMessage}"
+                Details = $"Parameter reset complete: {modulesReset} modules, {totalTokens} tokens",
+                Metadata = new { modules_reset = modulesReset, total_tokens = totalTokens, modules }
             });
         }
 
-        public void LogDisableBCM(string vin, string? vehicleYear, string? vehicleModel,
-            bool success, int tokenChange, int responseTimeMs, string? errorMessage = null)
+        // ============ UTILITY (1 token each) ============
+
+        public void LogUtilityOperation(string operation, string vin, string? year, string? model,
+            bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
             LogActivity(new ActivityLogEntry
             {
-                Action = "disable_bcm_security",
-                ActionCategory = "operation",
+                Action = $"utility_{operation.ToLowerInvariant().Replace(" ", "_")}",
+                ActionCategory = "utility",
                 Vin = vin,
-                VehicleYear = vehicleYear,
-                VehicleModel = vehicleModel,
+                VehicleYear = year,
+                VehicleModel = model,
                 Success = success,
                 TokenChange = tokenChange,
                 ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Disabled BCM security for {vin}" : $"BCM disable failed: {errorMessage}"
+                ErrorMessage = error,
+                Details = success ? $"{operation} complete" : $"{operation} failed: {error}"
             });
         }
 
-        public void LogVehicleDetection(string vin, string? vehicleYear, string? vehicleModel,
-            bool success, int responseTimeMs, string? errorMessage = null)
+        // ============ DIAGNOSTICS (FREE) ============
+
+        public void LogVehicleDetection(string vin, string? year, string? model,
+            bool success, int responseTimeMs, string? error = null)
         {
             LogActivity(new ActivityLogEntry
             {
                 Action = "vehicle_detection",
                 ActionCategory = "diagnostic",
                 Vin = vin,
-                VehicleYear = vehicleYear,
-                VehicleModel = vehicleModel,
+                VehicleYear = year,
+                VehicleModel = model,
                 Success = success,
-                TokenChange = 0, // No token cost for detection
+                TokenChange = 0,
                 ResponseTimeMs = responseTimeMs,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Detected vehicle: {vehicleYear} {vehicleModel}" : $"Detection failed: {errorMessage}"
+                ErrorMessage = error,
+                Details = success ? $"Detected: {year} {model}" : $"Detection failed: {error}"
             });
         }
 
-        public void LogJ2534Connection(string deviceName, bool success, string? errorMessage = null)
+        public void LogJ2534Connection(string deviceName, bool success, string? error = null)
         {
             LogActivity(new ActivityLogEntry
             {
                 Action = "j2534_connect",
                 ActionCategory = "diagnostic",
                 Success = success,
-                ErrorMessage = errorMessage,
-                Details = success ? $"Connected to J2534 device: {deviceName}" : $"J2534 connection failed: {errorMessage}",
+                TokenChange = 0,
+                ErrorMessage = error,
+                Details = success ? $"Connected to {deviceName}" : $"Connection failed: {error}",
                 Metadata = new { device_name = deviceName }
             });
         }
@@ -337,9 +325,12 @@ namespace PatsKillerPro.Services
                 Action = "j2534_disconnect",
                 ActionCategory = "diagnostic",
                 Success = true,
-                Details = $"Disconnected from J2534 device: {deviceName}"
+                TokenChange = 0,
+                Details = $"Disconnected from {deviceName}"
             });
         }
+
+        // ============ APP LIFECYCLE ============
 
         public void LogAppStart()
         {
@@ -348,19 +339,14 @@ namespace PatsKillerPro.Services
                 Action = "app_start",
                 ActionCategory = "app",
                 Success = true,
-                Details = $"PatsKiller Pro started - Version {AppVersion}",
-                Metadata = new 
-                { 
-                    app_version = AppVersion,
-                    os_version = Environment.OSVersion.ToString(),
-                    machine_name = Environment.MachineName
-                }
+                TokenChange = 0,
+                Details = $"PatsKiller Pro {AppVersion} started",
+                Metadata = new { app_version = AppVersion, os = Environment.OSVersion.ToString() }
             });
         }
 
         public void LogAppClose()
         {
-            // Use sync call for app close to ensure it completes
             try
             {
                 LogActivityAsync(new ActivityLogEntry
@@ -368,10 +354,11 @@ namespace PatsKillerPro.Services
                     Action = "app_close",
                     ActionCategory = "app",
                     Success = true,
+                    TokenChange = 0,
                     Details = "PatsKiller Pro closed"
                 }).Wait(TimeSpan.FromSeconds(2));
             }
-            catch { /* Ignore errors on close */ }
+            catch { }
         }
 
         public void LogError(string action, string errorMessage, string? details = null)
@@ -381,19 +368,17 @@ namespace PatsKillerPro.Services
                 Action = action,
                 ActionCategory = "error",
                 Success = false,
+                TokenChange = 0,
                 ErrorMessage = errorMessage,
                 Details = details ?? errorMessage
             });
         }
     }
 
-    /// <summary>
-    /// Activity log entry structure
-    /// </summary>
     public class ActivityLogEntry
     {
         public string Action { get; set; } = "";
-        public string ActionCategory { get; set; } = "operation"; // auth, operation, key_programming, diagnostic, app, error
+        public string ActionCategory { get; set; } = "operation";
         public string? UserEmail { get; set; }
         public string? Vin { get; set; }
         public string? VehicleYear { get; set; }
