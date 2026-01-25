@@ -54,6 +54,7 @@ namespace PatsKillerPro
         public int TokenCount { get; private set; }
         public int RegularTokenCount { get; private set; }
         public int PromoTokenCount { get; private set; }
+        public bool IsLoggedIn { get; private set; }
 
         // ============ API CONFIGURATION ============
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
@@ -640,6 +641,9 @@ namespace PatsKillerPro
         {
             try
             {
+                // Mark login as successful
+                IsLoggedIn = true;
+                
                 // Set up ProActivityLogger
                 ProActivityLogger.Instance.SetAuthContext(AuthToken!, UserEmail!, null);
                 

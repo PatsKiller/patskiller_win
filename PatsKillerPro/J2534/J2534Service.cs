@@ -31,6 +31,12 @@ namespace PatsKillerPro.Services
         public string? CurrentVin => _patsService?.CurrentVin;
         public VehicleInfo? CurrentVehicle => _patsService?.CurrentVehicle;
         public double BatteryVoltage => _patsService?.BatteryVoltage ?? 0;
+        
+        // Additional properties for MainForm compatibility
+        public string? ConnectedDeviceName => _connectedDevice?.Name;
+        public string? CurrentOutcode => _patsService?.CurrentOutcode;
+        public int KeyCount => _patsService?.KeyCount ?? 0;
+        public bool IsSecurityUnlocked => _patsService?.IsSecurityUnlocked ?? false;
 
         private J2534Service()
         {

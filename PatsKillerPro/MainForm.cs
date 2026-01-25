@@ -392,7 +392,7 @@ namespace PatsKillerPro
             _lblVin.Text = $"VIN: {result.Vin}"; _lblVehicleDesc.Text = result.VehicleInfo?.ToString() ?? ""; _lblOutcode.Text = $"Outcode: {result.Outcode}"; _lblBattery.Text = $"🔋 {result.BatteryVoltage:F1}V";
             _vehicleInfoPanel.Visible = true; FindControl<Panel>("incodePanel")!.Visible = true;
             if (result.VehicleInfo?.Is2020Plus == true) { _gatewayPanel.Visible = true; _btnGatewayUnlock.Enabled = true; }
-            ProActivityLogger.Instance.LogVehicleDetection(result.Vin!, result.VehicleInfo?.Year, result.VehicleInfo?.Model, true, (int)sw.ElapsedMilliseconds);
+            ProActivityLogger.Instance.LogVehicleDetection(result.Vin!, result.VehicleInfo?.Year?.ToString(), result.VehicleInfo?.Model, true, (int)sw.ElapsedMilliseconds);
             _lblStatus.Text = "Vehicle detected - Get incode";
         }
 
@@ -436,14 +436,14 @@ namespace PatsKillerPro
             var vin = J2534Service.Instance.CurrentVin ?? ""; var outcode = J2534Service.Instance.CurrentOutcode ?? ""; var v = J2534Service.Instance.CurrentVehicle;
             var sess = await TokenBalanceService.Instance.StartKeySessionAsync(vin, outcode);
             if (!sess.Success) { LogError(sess.Error ?? "Token error"); MessageBox.Show(sess.Error, "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (!sess.SessionAlreadyActive) { LogInfo("Key session started (1 token)"); ProActivityLogger.Instance.LogKeySessionStart(vin, v?.Year, v?.Model, outcode, true, -1, (int)sw.ElapsedMilliseconds); }
+            if (!sess.SessionAlreadyActive) { LogInfo("Key session started (1 token)"); ProActivityLogger.Instance.LogKeySessionStart(vin, v?.Year?.ToString(), v?.Model, outcode, true, -1, (int)sw.ElapsedMilliseconds); }
             else LogInfo("Continuing session (no charge)");
 
             if (operation == "erase")
             {
                 LogInfo("Erasing all keys...");
                 var r = await J2534Service.Instance.EraseAllKeysAsync(_currentIncode);
-                if (r.Success) { LogSuccess($"Erased {r.KeysAffected} keys"); _lblKeyCount.Text = $"Keys: {r.CurrentKeyCount}/8"; ProActivityLogger.Instance.LogEraseAllKeys(vin, v?.Year, v?.Model, r.KeysAffected, true, 0, (int)sw.ElapsedMilliseconds); }
+                if (r.Success) { LogSuccess($"Erased {r.KeysAffected} keys"); _lblKeyCount.Text = $"Keys: {r.CurrentKeyCount}/8"; ProActivityLogger.Instance.LogEraseAllKeys(vin, v?.Year?.ToString(), v?.Model, r.KeysAffected, true, 0, (int)sw.ElapsedMilliseconds); }
                 else LogError($"Erase failed: {r.Error}");
             }
             else if (operation == "program")
@@ -452,7 +452,7 @@ namespace PatsKillerPro
                 {
                     LogInfo($"Programming key #{slot}...");
                     var r = await J2534Service.Instance.ProgramKeyAsync(_currentIncode, slot);
-                    if (r.Success) { LogSuccess($"Key #{slot} done"); _lblKeyCount.Text = $"Keys: {r.CurrentKeyCount}/8"; ProActivityLogger.Instance.LogKeyProgrammed(vin, v?.Year, v?.Model, slot, true, (int)sw.ElapsedMilliseconds); }
+                    if (r.Success) { LogSuccess($"Key #{slot} done"); _lblKeyCount.Text = $"Keys: {r.CurrentKeyCount}/8"; ProActivityLogger.Instance.LogKeyProgrammed(vin, v?.Year?.ToString(), v?.Model, slot, true, (int)sw.ElapsedMilliseconds); }
                     else { LogError($"Key #{slot} failed: {r.Error}"); break; }
                 }
             }
@@ -486,13 +486,13 @@ namespace PatsKillerPro
                 var sub = await J2534Service.Instance.SubmitIncodeAsync(mod, ic.Incode!);
                 if (!sub.Success) { LogError($"{mod} submit failed"); break; }
                 LogSuccess($"{mod} complete!");
-                ProActivityLogger.Instance.LogParameterResetModule(vin, v?.Year, v?.Model, mod, oc.Outcode!, ic.Incode!, true, -1, (int)modSw.ElapsedMilliseconds);
+                ProActivityLogger.Instance.LogParameterResetModule(vin, v?.Year?.ToString(), v?.Model, mod, oc.Outcode!, ic.Incode!, true, -1, (int)modSw.ElapsedMilliseconds);
                 done.Add(mod); _paramResetProgress.Value++;
             }
             _btnStartParamReset.Enabled = true; _paramResetProgress.Visible = false;
             _lblParamResetStatus.Text = done.Count == modules.Length ? "✓ Complete!" : "⚠ Partial"; _lblParamResetStatus.ForeColor = done.Count == modules.Length ? AppColors.Success : AppColors.Warning;
             LogSuccess($"Reset: {done.Count}/{modules.Length} modules, {tokens} tokens");
-            ProActivityLogger.Instance.LogParameterResetComplete(vin, v?.Year, v?.Model, done.Count, tokens, (int)totalSw.ElapsedMilliseconds, done.ToArray());
+            ProActivityLogger.Instance.LogParameterResetComplete(vin, v?.Year?.ToString(), v?.Model, done.Count, tokens, (int)totalSw.ElapsedMilliseconds, done.ToArray());
             TokenBalanceService.Instance.RefreshAfterOperation();
         }
 
@@ -509,7 +509,7 @@ namespace PatsKillerPro
                 LogSuccess("Gateway unlocked!"); LogSuccess("🎉 FREE key ops for 10 min!");
                 _sessionBanner.Visible = true; _lblSessionTimer.Text = $"{_gatewaySessionSecondsRemaining / 60}:{_gatewaySessionSecondsRemaining % 60:D2}"; _gatewayTimer.Start();
                 _btnEraseKeys.Text = "🗑️ Erase (FREE)"; _btnProgramKeys.Text = "🔑 Program (FREE)";
-                ProActivityLogger.Instance.LogUtilityOperation("Gateway Unlock", vin, v?.Year, v?.Model, true, -1, (int)sw.ElapsedMilliseconds);
+                ProActivityLogger.Instance.LogUtilityOperation("Gateway Unlock", vin, v?.Year?.ToString(), v?.Model, true, -1, (int)sw.ElapsedMilliseconds);
             }
             else { LogError($"Gateway failed: {r.Error}"); _btnGatewayUnlock.Enabled = true; }
             TokenBalanceService.Instance.RefreshAfterOperation();
@@ -529,7 +529,7 @@ namespace PatsKillerPro
             if (!d.Success) { LogError(d.Error ?? "Token error"); MessageBox.Show(d.Error, "Insufficient", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             LogInfo($"Executing {op}...");
             J2534Result r = op switch { "clear_theft" => await J2534Service.Instance.ClearTheftFlagAsync(), "clear_crash" or "clear_crash_input" => await J2534Service.Instance.ClearCrashFlagAsync(), "bcm_defaults" => await J2534Service.Instance.RestoreBcmDefaultsAsync(), _ => new J2534Result { Success = false, Error = "Unknown" } };
-            if (r.Success) { LogSuccess($"{op} complete!"); ProActivityLogger.Instance.LogUtilityOperation(op, vin, v?.Year, v?.Model, true, -1, (int)sw.ElapsedMilliseconds); } else LogError($"{op} failed: {r.Error}");
+            if (r.Success) { LogSuccess($"{op} complete!"); ProActivityLogger.Instance.LogUtilityOperation(op, vin, v?.Year?.ToString(), v?.Model, true, -1, (int)sw.ElapsedMilliseconds); } else LogError($"{op} failed: {r.Error}");
             TokenBalanceService.Instance.RefreshAfterOperation();
         }
 

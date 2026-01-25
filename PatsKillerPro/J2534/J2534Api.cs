@@ -1,639 +1,571 @@
 using System;
-using System.Runtime.InteropServices;
-using System.Text;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using PatsKillerPro.J2534;
 
-namespace PatsKillerPro.J2534
+namespace PatsKillerPro.Services
 {
     /// <summary>
-    /// J2534 API v04.04 Native Interop
-    /// Supports: VCM II, VCM III, Mongoose, CarDAQ, Autel, Topdon, VXDIAG, etc.
+    /// J2534 Service for PatsKiller Pro Desktop Application
+    /// Wraps the J2534 library for use by MainForm
     /// 
-    /// Registry Path (64-bit): HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\PassThruSupport.04.04
-    /// Registry Path (32-bit): HKEY_LOCAL_MACHINE\SOFTWARE\PassThruSupport.04.04
+    /// This replaces the simulation code with real J2534 device communication
     /// </summary>
-    public class J2534Api : IDisposable
+    public class J2534Service : IDisposable
     {
-        private IntPtr _dllHandle = IntPtr.Zero;
-        private bool _disposed = false;
+        private static J2534Service? _instance;
+        public static J2534Service Instance => _instance ??= new J2534Service();
 
-        // Function pointers
-        private PassThruOpenDelegate? _passThruOpen;
-        private PassThruCloseDelegate? _passThruClose;
-        private PassThruConnectDelegate? _passThruConnect;
-        private PassThruDisconnectDelegate? _passThruDisconnect;
-        private PassThruReadMsgsDelegate? _passThruReadMsgs;
-        private PassThruWriteMsgsDelegate? _passThruWriteMsgs;
-        private PassThruStartMsgFilterDelegate? _passThruStartMsgFilter;
-        private PassThruStopMsgFilterDelegate? _passThruStopMsgFilter;
-        private PassThruIoctlDelegate? _passThruIoctl;
-        private PassThruReadVersionDelegate? _passThruReadVersion;
-        private PassThruGetLastErrorDelegate? _passThruGetLastError;
-        private PassThruStartPeriodicMsgDelegate? _passThruStartPeriodicMsg;
-        private PassThruStopPeriodicMsgDelegate? _passThruStopPeriodicMsg;
-        private PassThruSetProgrammingVoltageDelegate? _passThruSetProgrammingVoltage;
+        private J2534Api? _api;
+        private FordPatsService? _patsService;
+        private J2534DeviceInfo? _connectedDevice;
+        private bool _disposed;
 
-        public string DllPath { get; private set; } = "";
-        public bool IsLoaded => _dllHandle != IntPtr.Zero;
+        // Events for UI updates
+        public event EventHandler<string>? LogMessage;
+        public event EventHandler<double>? VoltageChanged;
+        public event EventHandler<J2534ProgressEventArgs>? ProgressChanged;
 
-        #region Delegates
+        public bool IsConnected => _patsService != null;
+        public J2534DeviceInfo? ConnectedDevice => _connectedDevice;
+        public string? CurrentVin => _patsService?.CurrentVin;
+        public VehicleInfo? CurrentVehicle => _patsService?.CurrentVehicle;
+        public double BatteryVoltage => _patsService?.BatteryVoltage ?? 0;
+        
+        // Additional properties for MainForm compatibility
+        public string? ConnectedDeviceName => _connectedDevice?.Name;
+        public string? CurrentOutcode => _patsService?.CurrentOutcode;
+        public int KeyCount => _patsService?.KeyCount ?? 0;
+        public bool IsSecurityUnlocked => _patsService?.IsSecurityUnlocked ?? false;
 
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruOpenDelegate(IntPtr pName, out uint deviceId);
+        private J2534Service()
+        {
+        }
 
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruCloseDelegate(uint deviceId);
+        #region Device Scanning
 
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruConnectDelegate(uint deviceId, ProtocolId protocolId, ConnectFlags flags, uint baudRate, out uint channelId);
+        /// <summary>
+        /// Scan for all installed J2534 devices
+        /// </summary>
+        public Task<List<J2534DeviceInfo>> ScanForDevicesAsync()
+        {
+            return Task.Run(() =>
+            {
+                Log("Scanning for J2534 devices...");
+                var devices = J2534DeviceScanner.ScanForDevices();
 
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruDisconnectDelegate(uint channelId);
+                foreach (var device in devices)
+                {
+                    var status = device.IsAvailable ? "Available" : "Not Found";
+                    Log($"  [{status}] {device.Name} ({device.Vendor})");
+                }
 
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruReadMsgsDelegate(uint channelId, IntPtr pMsg, ref uint numMsgs, uint timeout);
+                Log($"Found {devices.Count} device(s)");
+                return devices;
+            });
+        }
 
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruWriteMsgsDelegate(uint channelId, IntPtr pMsg, ref uint numMsgs, uint timeout);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruStartMsgFilterDelegate(uint channelId, FilterType filterType, IntPtr pMaskMsg, IntPtr pPatternMsg, IntPtr pFlowControlMsg, out uint filterId);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruStopMsgFilterDelegate(uint channelId, uint filterId);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruIoctlDelegate(uint channelId, IoctlId ioctlId, IntPtr pInput, IntPtr pOutput);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruReadVersionDelegate(uint deviceId, StringBuilder firmwareVersion, StringBuilder dllVersion, StringBuilder apiVersion);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruGetLastErrorDelegate(StringBuilder errorDescription);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruStartPeriodicMsgDelegate(uint channelId, IntPtr pMsg, out uint msgId, uint timeInterval);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruStopPeriodicMsgDelegate(uint channelId, uint msgId);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate J2534Error PassThruSetProgrammingVoltageDelegate(uint deviceId, uint pinNumber, uint voltage);
+        /// <summary>
+        /// Get first available device
+        /// </summary>
+        public J2534DeviceInfo? GetFirstAvailableDevice()
+        {
+            return J2534DeviceScanner.GetFirstAvailableDevice();
+        }
 
         #endregion
 
-        #region Win32 API
+        #region Connection
 
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr LoadLibrary(string lpFileName);
+        /// <summary>
+        /// Connect to a J2534 device and vehicle
+        /// </summary>
+        public async Task<J2534Result> ConnectDeviceAsync(J2534DeviceInfo device)
+        {
+            try
+            {
+                if (!device.IsAvailable)
+                    return J2534Result.Fail($"Device DLL not found: {device.FunctionLibrary}");
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool FreeLibrary(IntPtr hModule);
+                Log($"Loading J2534 DLL: {device.FunctionLibrary}");
 
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+                // Load the J2534 DLL
+                _api = new J2534Api(device.FunctionLibrary);
+
+                // Create PATS service
+                _patsService = new FordPatsService(_api);
+                _patsService.LogMessage += (s, msg) => Log(msg);
+                _patsService.VoltageChanged += (s, v) => VoltageChanged?.Invoke(this, v);
+                _patsService.ProgressChanged += (s, e) => ProgressChanged?.Invoke(this, 
+                    new J2534ProgressEventArgs(e.Message, e.Percent));
+
+                // Connect to vehicle
+                Log($"Connecting to vehicle via {device.Name}...");
+                var result = await _patsService.ConnectAsync();
+
+                if (!result.Success)
+                {
+                    _patsService.Dispose();
+                    _patsService = null;
+                    _api.Dispose();
+                    _api = null;
+                    return J2534Result.Fail(result.Error ?? "Connection failed");
+                }
+
+                _connectedDevice = device;
+                Log($"Connected to {device.Name}");
+
+                return J2534Result.Ok();
+            }
+            catch (Exception ex)
+            {
+                Log($"Connection error: {ex.Message}");
+                return J2534Result.Fail($"Connection error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Disconnect from device
+        /// </summary>
+        public Task<J2534Result> DisconnectDeviceAsync()
+        {
+            return Task.Run(() =>
+            {
+                try
+                {
+                    _patsService?.Disconnect();
+                    _patsService?.Dispose();
+                    _patsService = null;
+
+                    _api?.Dispose();
+                    _api = null;
+
+                    _connectedDevice = null;
+
+                    Log("Disconnected from device");
+                    return J2534Result.Ok();
+                }
+                catch (Exception ex)
+                {
+                    return J2534Result.Fail($"Disconnect error: {ex.Message}");
+                }
+            });
+        }
 
         #endregion
 
-        /// <summary>
-        /// Load a J2534 DLL
-        /// </summary>
-        public J2534Api(string dllPath)
-        {
-            DllPath = dllPath;
-            LoadDll(dllPath);
-        }
-
-        private void LoadDll(string dllPath)
-        {
-            _dllHandle = LoadLibrary(dllPath);
-            if (_dllHandle == IntPtr.Zero)
-            {
-                int error = Marshal.GetLastWin32Error();
-                throw new J2534Exception($"Failed to load J2534 DLL: {dllPath} (Error: {error})");
-            }
-
-            // Load all function pointers
-            _passThruOpen = GetFunction<PassThruOpenDelegate>("PassThruOpen");
-            _passThruClose = GetFunction<PassThruCloseDelegate>("PassThruClose");
-            _passThruConnect = GetFunction<PassThruConnectDelegate>("PassThruConnect");
-            _passThruDisconnect = GetFunction<PassThruDisconnectDelegate>("PassThruDisconnect");
-            _passThruReadMsgs = GetFunction<PassThruReadMsgsDelegate>("PassThruReadMsgs");
-            _passThruWriteMsgs = GetFunction<PassThruWriteMsgsDelegate>("PassThruWriteMsgs");
-            _passThruStartMsgFilter = GetFunction<PassThruStartMsgFilterDelegate>("PassThruStartMsgFilter");
-            _passThruStopMsgFilter = GetFunction<PassThruStopMsgFilterDelegate>("PassThruStopMsgFilter");
-            _passThruIoctl = GetFunction<PassThruIoctlDelegate>("PassThruIoctl");
-            _passThruReadVersion = GetFunction<PassThruReadVersionDelegate>("PassThruReadVersion");
-            _passThruGetLastError = GetFunction<PassThruGetLastErrorDelegate>("PassThruGetLastError");
-            _passThruStartPeriodicMsg = GetFunction<PassThruStartPeriodicMsgDelegate>("PassThruStartPeriodicMsg");
-            _passThruStopPeriodicMsg = GetFunction<PassThruStopPeriodicMsgDelegate>("PassThruStopPeriodicMsg");
-            _passThruSetProgrammingVoltage = GetFunction<PassThruSetProgrammingVoltageDelegate>("PassThruSetProgrammingVoltage");
-        }
-
-        private T? GetFunction<T>(string functionName) where T : Delegate
-        {
-            IntPtr procAddr = GetProcAddress(_dllHandle, functionName);
-            if (procAddr == IntPtr.Zero)
-                return null;
-            return Marshal.GetDelegateForFunctionPointer<T>(procAddr);
-        }
-
-        #region J2534 API Methods
+        #region Vehicle Operations
 
         /// <summary>
-        /// Open connection to J2534 device
+        /// Read vehicle information (VIN, outcode, battery voltage)
         /// </summary>
-        public J2534Error PassThruOpen(out uint deviceId)
+        public async Task<VehicleReadResult> ReadVehicleAsync()
         {
-            deviceId = 0;
-            if (_passThruOpen == null)
-                throw new J2534Exception("PassThruOpen not available");
-            return _passThruOpen(IntPtr.Zero, out deviceId);
-        }
-
-        /// <summary>
-        /// Close connection to J2534 device
-        /// </summary>
-        public J2534Error PassThruClose(uint deviceId)
-        {
-            if (_passThruClose == null)
-                throw new J2534Exception("PassThruClose not available");
-            return _passThruClose(deviceId);
-        }
-
-        /// <summary>
-        /// Connect to a protocol channel (CAN, ISO15765, etc.)
-        /// </summary>
-        public J2534Error PassThruConnect(uint deviceId, ProtocolId protocolId, ConnectFlags flags, uint baudRate, out uint channelId)
-        {
-            channelId = 0;
-            if (_passThruConnect == null)
-                throw new J2534Exception("PassThruConnect not available");
-            return _passThruConnect(deviceId, protocolId, flags, baudRate, out channelId);
-        }
-
-        /// <summary>
-        /// Disconnect from protocol channel
-        /// </summary>
-        public J2534Error PassThruDisconnect(uint channelId)
-        {
-            if (_passThruDisconnect == null)
-                throw new J2534Exception("PassThruDisconnect not available");
-            return _passThruDisconnect(channelId);
-        }
-
-        /// <summary>
-        /// Read messages from channel
-        /// </summary>
-        public J2534Error PassThruReadMsgs(uint channelId, PassThruMsg[] msgs, ref uint numMsgs, uint timeout)
-        {
-            if (_passThruReadMsgs == null)
-                throw new J2534Exception("PassThruReadMsgs not available");
-
-            int msgSize = Marshal.SizeOf<PassThruMsg>();
-            IntPtr pMsgs = Marshal.AllocHGlobal(msgSize * msgs.Length);
-            try
-            {
-                // Initialize the memory
-                for (int i = 0; i < msgs.Length; i++)
-                {
-                    msgs[i] = new PassThruMsg();
-                    Marshal.StructureToPtr(msgs[i], IntPtr.Add(pMsgs, i * msgSize), false);
-                }
-
-                var result = _passThruReadMsgs(channelId, pMsgs, ref numMsgs, timeout);
-
-                // Copy back the messages
-                for (int i = 0; i < numMsgs && i < msgs.Length; i++)
-                {
-                    msgs[i] = Marshal.PtrToStructure<PassThruMsg>(IntPtr.Add(pMsgs, i * msgSize));
-                }
-
-                return result;
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(pMsgs);
-            }
-        }
-
-        /// <summary>
-        /// Write messages to channel
-        /// </summary>
-        public J2534Error PassThruWriteMsgs(uint channelId, PassThruMsg[] msgs, ref uint numMsgs, uint timeout)
-        {
-            if (_passThruWriteMsgs == null)
-                throw new J2534Exception("PassThruWriteMsgs not available");
-
-            int msgSize = Marshal.SizeOf<PassThruMsg>();
-            IntPtr pMsgs = Marshal.AllocHGlobal(msgSize * msgs.Length);
-            try
-            {
-                for (int i = 0; i < msgs.Length; i++)
-                {
-                    Marshal.StructureToPtr(msgs[i], IntPtr.Add(pMsgs, i * msgSize), false);
-                }
-
-                return _passThruWriteMsgs(channelId, pMsgs, ref numMsgs, timeout);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(pMsgs);
-            }
-        }
-
-        /// <summary>
-        /// Start a message filter (required to receive messages)
-        /// </summary>
-        public J2534Error PassThruStartMsgFilter(uint channelId, FilterType filterType, PassThruMsg? maskMsg, PassThruMsg? patternMsg, PassThruMsg? flowControlMsg, out uint filterId)
-        {
-            filterId = 0;
-            if (_passThruStartMsgFilter == null)
-                throw new J2534Exception("PassThruStartMsgFilter not available");
-
-            int msgSize = Marshal.SizeOf<PassThruMsg>();
-            IntPtr pMask = IntPtr.Zero, pPattern = IntPtr.Zero, pFlowControl = IntPtr.Zero;
+            if (_patsService == null)
+                return new VehicleReadResult { Success = false, Error = "Not connected" };
 
             try
             {
-                if (maskMsg.HasValue)
-                {
-                    pMask = Marshal.AllocHGlobal(msgSize);
-                    Marshal.StructureToPtr(maskMsg.Value, pMask, false);
-                }
-                if (patternMsg.HasValue)
-                {
-                    pPattern = Marshal.AllocHGlobal(msgSize);
-                    Marshal.StructureToPtr(patternMsg.Value, pPattern, false);
-                }
-                if (flowControlMsg.HasValue)
-                {
-                    pFlowControl = Marshal.AllocHGlobal(msgSize);
-                    Marshal.StructureToPtr(flowControlMsg.Value, pFlowControl, false);
-                }
+                // Read VIN
+                var vinResult = await _patsService.ReadVinAsync();
+                if (!vinResult.Success)
+                    return new VehicleReadResult { Success = false, Error = vinResult.Error };
 
-                return _passThruStartMsgFilter(channelId, filterType, pMask, pPattern, pFlowControl, out filterId);
+                // Read outcode
+                var outcodeResult = await _patsService.ReadOutcodeAsync();
+                // Outcode read is optional - may fail on some vehicles
+
+                // Read key count
+                var keyCountResult = await _patsService.ReadKeyCountAsync();
+
+                return new VehicleReadResult
+                {
+                    Success = true,
+                    Vin = vinResult.Value ?? "",
+                    VehicleInfo = _patsService.CurrentVehicle,
+                    Outcode = outcodeResult.Value ?? "",
+                    KeyCount = keyCountResult.Value,
+                    BatteryVoltage = _patsService.BatteryVoltage
+                };
             }
-            finally
+            catch (Exception ex)
             {
-                if (pMask != IntPtr.Zero) Marshal.FreeHGlobal(pMask);
-                if (pPattern != IntPtr.Zero) Marshal.FreeHGlobal(pPattern);
-                if (pFlowControl != IntPtr.Zero) Marshal.FreeHGlobal(pFlowControl);
+                return new VehicleReadResult { Success = false, Error = ex.Message };
             }
         }
 
         /// <summary>
-        /// Stop a message filter
+        /// Read outcode from specific module
         /// </summary>
-        public J2534Error PassThruStopMsgFilter(uint channelId, uint filterId)
+        public async Task<OutcodeResult> ReadModuleOutcodeAsync(string module, bool useMsCan = false)
         {
-            if (_passThruStopMsgFilter == null)
-                throw new J2534Exception("PassThruStopMsgFilter not available");
-            return _passThruStopMsgFilter(channelId, filterId);
-        }
+            if (_patsService == null)
+                return new OutcodeResult { Success = false, Error = "Not connected" };
 
-        /// <summary>
-        /// IOCTL command (read voltage, clear buffers, etc.)
-        /// </summary>
-        public J2534Error PassThruIoctl(uint channelId, IoctlId ioctlId, IntPtr pInput, IntPtr pOutput)
-        {
-            if (_passThruIoctl == null)
-                throw new J2534Exception("PassThruIoctl not available");
-            return _passThruIoctl(channelId, ioctlId, pInput, pOutput);
-        }
-
-        /// <summary>
-        /// Read battery voltage via IOCTL
-        /// </summary>
-        public J2534Error ReadVoltage(uint deviceId, out double voltage)
-        {
-            voltage = 0;
-            IntPtr pOutput = Marshal.AllocHGlobal(4);
             try
             {
-                var result = PassThruIoctl(deviceId, IoctlId.READ_VBATT, IntPtr.Zero, pOutput);
-                if (result == J2534Error.STATUS_NOERROR)
+                var result = await _patsService.ReadOutcodeFromModuleAsync(module);
+                return new OutcodeResult
                 {
-                    uint millivolts = (uint)Marshal.ReadInt32(pOutput);
-                    voltage = millivolts / 1000.0;
+                    Success = result.Success,
+                    Outcode = result.Value ?? "",
+                    ModuleName = module,
+                    Error = result.Error
+                };
+            }
+            catch (Exception ex)
+            {
+                return new OutcodeResult { Success = false, Error = ex.Message };
+            }
+        }
+
+        /// <summary>
+        /// Submit incode to vehicle
+        /// </summary>
+        public async Task<J2534Result> SubmitIncodeAsync(string module, string incode)
+        {
+            if (_patsService == null)
+                return J2534Result.Fail("Not connected");
+
+            try
+            {
+                var result = await _patsService.SubmitIncodeAsync(incode);
+                return result.Success ? J2534Result.Ok() : J2534Result.Fail(result.Error ?? "Failed");
+            }
+            catch (Exception ex)
+            {
+                return J2534Result.Fail(ex.Message);
+            }
+        }
+
+        #endregion
+
+        #region Key Operations
+
+        /// <summary>
+        /// Erase all keys from vehicle
+        /// </summary>
+        public async Task<KeyOperationResult> EraseAllKeysAsync(string incode)
+        {
+            if (_patsService == null)
+                return new KeyOperationResult { Success = false, Error = "Not connected" };
+
+            try
+            {
+                // Submit incode first if not already unlocked
+                if (!_patsService.IsSecurityUnlocked)
+                {
+                    var incodeResult = await _patsService.SubmitIncodeAsync(incode);
+                    if (!incodeResult.Success)
+                        return new KeyOperationResult { Success = false, Error = incodeResult.Error };
                 }
-                return result;
+
+                var result = await _patsService.EraseAllKeysAsync();
+                var keyCount = await _patsService.ReadKeyCountAsync();
+
+                return new KeyOperationResult
+                {
+                    Success = result.Success,
+                    KeysAffected = 0,
+                    CurrentKeyCount = keyCount.Value,
+                    Error = result.Error
+                };
             }
-            finally
+            catch (Exception ex)
             {
-                Marshal.FreeHGlobal(pOutput);
+                return new KeyOperationResult { Success = false, Error = ex.Message };
             }
         }
 
         /// <summary>
-        /// Clear receive buffer
+        /// Program a new key
         /// </summary>
-        public J2534Error ClearRxBuffer(uint channelId)
+        public async Task<KeyOperationResult> ProgramKeyAsync(string incode, int slot = 0)
         {
-            return PassThruIoctl(channelId, IoctlId.CLEAR_RX_BUFFER, IntPtr.Zero, IntPtr.Zero);
-        }
+            if (_patsService == null)
+                return new KeyOperationResult { Success = false, Error = "Not connected" };
 
-        /// <summary>
-        /// Clear transmit buffer
-        /// </summary>
-        public J2534Error ClearTxBuffer(uint channelId)
-        {
-            return PassThruIoctl(channelId, IoctlId.CLEAR_TX_BUFFER, IntPtr.Zero, IntPtr.Zero);
-        }
-
-        /// <summary>
-        /// Read version information
-        /// </summary>
-        public J2534Error PassThruReadVersion(uint deviceId, out string firmware, out string dll, out string api)
-        {
-            firmware = dll = api = "";
-            if (_passThruReadVersion == null)
-                throw new J2534Exception("PassThruReadVersion not available");
-
-            var sbFirmware = new StringBuilder(256);
-            var sbDll = new StringBuilder(256);
-            var sbApi = new StringBuilder(256);
-
-            var result = _passThruReadVersion(deviceId, sbFirmware, sbDll, sbApi);
-            if (result == J2534Error.STATUS_NOERROR)
+            try
             {
-                firmware = sbFirmware.ToString();
-                dll = sbDll.ToString();
-                api = sbApi.ToString();
+                // Submit incode first if not already unlocked
+                if (!_patsService.IsSecurityUnlocked)
+                {
+                    var incodeResult = await _patsService.SubmitIncodeAsync(incode);
+                    if (!incodeResult.Success)
+                        return new KeyOperationResult { Success = false, Error = incodeResult.Error };
+                }
+
+                var result = await _patsService.ProgramKeyAsync(slot);
+                var keyCount = await _patsService.ReadKeyCountAsync();
+
+                return new KeyOperationResult
+                {
+                    Success = result.Success,
+                    KeysAffected = 1,
+                    CurrentKeyCount = keyCount.Value,
+                    KeySlot = slot,
+                    Error = result.Error
+                };
             }
-            return result;
+            catch (Exception ex)
+            {
+                return new KeyOperationResult { Success = false, Error = ex.Message };
+            }
         }
 
         /// <summary>
-        /// Get last error description
+        /// Read key count from vehicle
         /// </summary>
-        public string GetLastError()
+        public async Task<KeyCountResult> ReadKeyCountAsync()
         {
-            if (_passThruGetLastError == null)
-                return "PassThruGetLastError not available";
+            if (_patsService == null)
+                return new KeyCountResult { Success = false, Error = "Not connected" };
 
-            var sb = new StringBuilder(256);
-            _passThruGetLastError(sb);
-            return sb.ToString();
+            try
+            {
+                var result = await _patsService.ReadKeyCountAsync();
+                return new KeyCountResult
+                {
+                    Success = result.Success,
+                    KeyCount = result.Value,
+                    MaxKeys = 8,
+                    Error = result.Error
+                };
+            }
+            catch (Exception ex)
+            {
+                return new KeyCountResult { Success = false, Error = ex.Message };
+            }
+        }
+
+        #endregion
+
+        #region Gateway Operations
+
+        /// <summary>
+        /// Check if vehicle requires gateway unlock (2020+)
+        /// </summary>
+        public Task<bool> RequiresGatewayUnlockAsync()
+        {
+            return Task.FromResult(_patsService?.RequiresGatewayUnlock() ?? false);
+        }
+
+        /// <summary>
+        /// Unlock security gateway (2020+ vehicles)
+        /// </summary>
+        public async Task<GatewayResult> UnlockGatewayAsync(string incode)
+        {
+            if (_patsService == null)
+                return new GatewayResult { Success = false, Error = "Not connected" };
+
+            try
+            {
+                var result = await _patsService.UnlockGatewayAsync(incode);
+                return new GatewayResult
+                {
+                    Success = result.Success,
+                    SessionDurationSeconds = 600, // 10 minutes
+                    Error = result.Error
+                };
+            }
+            catch (Exception ex)
+            {
+                return new GatewayResult { Success = false, Error = ex.Message };
+            }
+        }
+
+        #endregion
+
+        #region Utility Operations
+
+        /// <summary>
+        /// Read battery voltage
+        /// </summary>
+        public Task<double> ReadBatteryVoltageAsync()
+        {
+            return Task.FromResult(_patsService?.BatteryVoltage ?? 0);
+        }
+
+        /// <summary>
+        /// Clear crash/theft flag
+        /// </summary>
+        public async Task<J2534Result> ClearCrashFlagAsync()
+        {
+            if (_patsService == null)
+                return J2534Result.Fail("Not connected");
+
+            var result = await _patsService.ClearCrashEventAsync();
+            return result.Success ? J2534Result.Ok() : J2534Result.Fail(result.Error ?? "Failed");
+        }
+
+        /// <summary>
+        /// Clear theft flag (alias for crash flag)
+        /// </summary>
+        public Task<J2534Result> ClearTheftFlagAsync()
+        {
+            return ClearCrashFlagAsync();
+        }
+
+        /// <summary>
+        /// Restore BCM to factory defaults
+        /// </summary>
+        public async Task<J2534Result> RestoreBcmDefaultsAsync()
+        {
+            if (_patsService == null)
+                return J2534Result.Fail("Not connected");
+
+            var result = await _patsService.RestoreBcmDefaultsAsync();
+            return result.Success ? J2534Result.Ok() : J2534Result.Fail(result.Error ?? "Failed");
+        }
+
+        /// <summary>
+        /// Read DTCs from vehicle
+        /// </summary>
+        public async Task<DtcResult> ReadDtcsAsync()
+        {
+            if (_patsService == null)
+                return new DtcResult { Success = false, Error = "Not connected" };
+
+            var result = await _patsService.ReadDtcsAsync();
+            return new DtcResult
+            {
+                Success = result.Success,
+                Dtcs = result.Value ?? Array.Empty<string>(),
+                DtcCount = result.Value?.Length ?? 0,
+                Error = result.Error
+            };
+        }
+
+        /// <summary>
+        /// Clear all DTCs
+        /// </summary>
+        public async Task<J2534Result> ClearDtcsAsync()
+        {
+            if (_patsService == null)
+                return J2534Result.Fail("Not connected");
+
+            var result = await _patsService.ClearAllDtcsAsync();
+            return result.Success ? J2534Result.Ok() : J2534Result.Fail(result.Error ?? "Failed");
+        }
+
+        /// <summary>
+        /// Initialize PATS system
+        /// </summary>
+        public async Task<J2534Result> InitializePatsAsync()
+        {
+            if (_patsService == null)
+                return J2534Result.Fail("Not connected");
+
+            var result = await _patsService.InitializePatsAsync();
+            return result.Success ? J2534Result.Ok() : J2534Result.Fail(result.Error ?? "Failed");
+        }
+
+        /// <summary>
+        /// Perform vehicle reset
+        /// </summary>
+        public async Task<J2534Result> VehicleResetAsync()
+        {
+            if (_patsService == null)
+                return J2534Result.Fail("Not connected");
+
+            var result = await _patsService.VehicleResetAsync();
+            return result.Success ? J2534Result.Ok() : J2534Result.Fail(result.Error ?? "Failed");
+        }
+
+        #endregion
+
+        #region Helpers
+
+        private void Log(string message)
+        {
+            LogMessage?.Invoke(this, message);
         }
 
         #endregion
 
         public void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
             if (!_disposed)
             {
-                if (_dllHandle != IntPtr.Zero)
-                {
-                    FreeLibrary(_dllHandle);
-                    _dllHandle = IntPtr.Zero;
-                }
+                _patsService?.Dispose();
+                _api?.Dispose();
                 _disposed = true;
             }
         }
+    }
 
-        ~J2534Api()
+    #region Result Classes
+
+    public class J2534Result
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+
+        public static J2534Result Ok() => new J2534Result { Success = true };
+        public static J2534Result Fail(string error) => new J2534Result { Success = false, Error = error };
+    }
+
+    public class VehicleReadResult
+    {
+        public bool Success { get; set; }
+        public string Vin { get; set; } = "";
+        public VehicleInfo? VehicleInfo { get; set; }
+        public string Outcode { get; set; } = "";
+        public int KeyCount { get; set; }
+        public double BatteryVoltage { get; set; }
+        public string? Error { get; set; }
+    }
+
+    public class OutcodeResult
+    {
+        public bool Success { get; set; }
+        public string Outcode { get; set; } = "";
+        public string ModuleName { get; set; } = "";
+        public string? Error { get; set; }
+    }
+
+    public class KeyOperationResult
+    {
+        public bool Success { get; set; }
+        public int KeysAffected { get; set; }
+        public int CurrentKeyCount { get; set; }
+        public int KeySlot { get; set; }
+        public string? Error { get; set; }
+    }
+
+    public class KeyCountResult
+    {
+        public bool Success { get; set; }
+        public int KeyCount { get; set; }
+        public int MaxKeys { get; set; } = 8;
+        public string? Error { get; set; }
+    }
+
+    public class GatewayResult
+    {
+        public bool Success { get; set; }
+        public int SessionDurationSeconds { get; set; }
+        public string? Error { get; set; }
+    }
+
+    public class DtcResult
+    {
+        public bool Success { get; set; }
+        public string[] Dtcs { get; set; } = Array.Empty<string>();
+        public int DtcCount { get; set; }
+        public string? Error { get; set; }
+    }
+
+    public class J2534ProgressEventArgs : EventArgs
+    {
+        public string Message { get; }
+        public int Percent { get; }
+
+        public J2534ProgressEventArgs(string message, int percent)
         {
-            Dispose(false);
+            Message = message;
+            Percent = percent;
         }
-    }
-
-    #region Enums
-
-    /// <summary>
-    /// J2534 Error codes
-    /// </summary>
-    public enum J2534Error : uint
-    {
-        STATUS_NOERROR = 0x00,
-        ERR_NOT_SUPPORTED = 0x01,
-        ERR_INVALID_CHANNEL_ID = 0x02,
-        ERR_INVALID_PROTOCOL_ID = 0x03,
-        ERR_NULL_PARAMETER = 0x04,
-        ERR_INVALID_IOCTL_VALUE = 0x05,
-        ERR_INVALID_FLAGS = 0x06,
-        ERR_FAILED = 0x07,
-        ERR_DEVICE_NOT_CONNECTED = 0x08,
-        ERR_TIMEOUT = 0x09,
-        ERR_INVALID_MSG = 0x0A,
-        ERR_INVALID_TIME_INTERVAL = 0x0B,
-        ERR_EXCEEDED_LIMIT = 0x0C,
-        ERR_INVALID_MSG_ID = 0x0D,
-        ERR_DEVICE_IN_USE = 0x0E,
-        ERR_INVALID_IOCTL_ID = 0x0F,
-        ERR_BUFFER_EMPTY = 0x10,
-        ERR_BUFFER_FULL = 0x11,
-        ERR_BUFFER_OVERFLOW = 0x12,
-        ERR_PIN_INVALID = 0x13,
-        ERR_CHANNEL_IN_USE = 0x14,
-        ERR_MSG_PROTOCOL_ID = 0x15,
-        ERR_INVALID_FILTER_ID = 0x16,
-        ERR_NO_FLOW_CONTROL = 0x17,
-        ERR_NOT_UNIQUE = 0x18,
-        ERR_INVALID_BAUDRATE = 0x19,
-        ERR_INVALID_DEVICE_ID = 0x1A
-    }
-
-    /// <summary>
-    /// J2534 Protocol IDs
-    /// </summary>
-    public enum ProtocolId : uint
-    {
-        J1850VPW = 0x01,
-        J1850PWM = 0x02,
-        ISO9141 = 0x03,
-        ISO14230 = 0x04,
-        CAN = 0x05,
-        ISO15765 = 0x06,  // CAN with ISO-TP (used for Ford PATS)
-        SCI_A_ENGINE = 0x07,
-        SCI_A_TRANS = 0x08,
-        SCI_B_ENGINE = 0x09,
-        SCI_B_TRANS = 0x0A
-    }
-
-    /// <summary>
-    /// Connection flags
-    /// </summary>
-    [Flags]
-    public enum ConnectFlags : uint
-    {
-        NONE = 0x00,
-        CAN_29BIT_ID = 0x100,
-        ISO9141_NO_CHECKSUM = 0x200,
-        CAN_ID_BOTH = 0x800,      // Listen to both 11-bit and 29-bit CAN IDs
-        ISO9141_K_LINE_ONLY = 0x1000
-    }
-
-    /// <summary>
-    /// Filter types
-    /// </summary>
-    public enum FilterType : uint
-    {
-        PASS_FILTER = 0x01,
-        BLOCK_FILTER = 0x02,
-        FLOW_CONTROL_FILTER = 0x03
-    }
-
-    /// <summary>
-    /// IOCTL command IDs
-    /// </summary>
-    public enum IoctlId : uint
-    {
-        GET_CONFIG = 0x01,
-        SET_CONFIG = 0x02,
-        READ_VBATT = 0x03,
-        FIVE_BAUD_INIT = 0x04,
-        FAST_INIT = 0x05,
-        CLEAR_TX_BUFFER = 0x07,
-        CLEAR_RX_BUFFER = 0x08,
-        CLEAR_PERIODIC_MSGS = 0x09,
-        CLEAR_MSG_FILTERS = 0x0A,
-        CLEAR_FUNCT_MSG_LOOKUP_TABLE = 0x0B,
-        ADD_TO_FUNCT_MSG_LOOKUP_TABLE = 0x0C,
-        DELETE_FROM_FUNCT_MSG_LOOKUP_TABLE = 0x0D,
-        READ_PROG_VOLTAGE = 0x0E
-    }
-
-    /// <summary>
-    /// Message transmit flags
-    /// </summary>
-    [Flags]
-    public enum TxFlags : uint
-    {
-        NONE = 0x00,
-        ISO15765_FRAME_PAD = 0x40,
-        ISO15765_ADDR_TYPE = 0x80,
-        CAN_29BIT_ID = 0x100,
-        WAIT_P3_MIN_ONLY = 0x200,
-        SW_CAN_HV_TX = 0x400,
-        SCI_MODE = 0x400000,
-        SCI_TX_VOLTAGE = 0x800000
-    }
-
-    /// <summary>
-    /// Message receive flags
-    /// </summary>
-    [Flags]
-    public enum RxStatus : uint
-    {
-        NONE = 0x00,
-        TX_MSG_TYPE = 0x01,
-        START_OF_MESSAGE = 0x02,
-        ISO15765_FIRST_FRAME = 0x02,
-        ISO15765_EXT_ADDR = 0x80,
-        RX_BREAK = 0x04,
-        TX_DONE = 0x08,
-        ISO15765_PADDING_ERROR = 0x10,
-        ISO15765_ADDR_TYPE = 0x80,
-        CAN_29BIT_ID = 0x100
-    }
-
-    #endregion
-
-    #region Structures
-
-    /// <summary>
-    /// J2534 Message structure (4128 bytes)
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    public struct PassThruMsg
-    {
-        public ProtocolId ProtocolID;
-        public RxStatus RxStatus;
-        public TxFlags TxFlags;
-        public uint Timestamp;
-        public uint DataSize;
-        public uint ExtraDataIndex;
-
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4128)]
-        public byte[] Data;
-
-        public PassThruMsg(ProtocolId protocolId)
-        {
-            ProtocolID = protocolId;
-            RxStatus = RxStatus.NONE;
-            TxFlags = TxFlags.NONE;
-            Timestamp = 0;
-            DataSize = 0;
-            ExtraDataIndex = 0;
-            Data = new byte[4128];
-        }
-
-        /// <summary>
-        /// Create message for ISO15765 (CAN with ISO-TP)
-        /// </summary>
-        public static PassThruMsg CreateISO15765Message(uint canId, byte[] data, TxFlags flags = TxFlags.ISO15765_FRAME_PAD)
-        {
-            var msg = new PassThruMsg(ProtocolId.ISO15765);
-            msg.TxFlags = flags;
-            msg.Data = new byte[4128];
-
-            // First 4 bytes are the CAN ID
-            msg.Data[0] = (byte)((canId >> 24) & 0xFF);
-            msg.Data[1] = (byte)((canId >> 16) & 0xFF);
-            msg.Data[2] = (byte)((canId >> 8) & 0xFF);
-            msg.Data[3] = (byte)(canId & 0xFF);
-
-            // Copy payload after CAN ID
-            Array.Copy(data, 0, msg.Data, 4, Math.Min(data.Length, 4124));
-            msg.DataSize = (uint)(4 + data.Length);
-
-            return msg;
-        }
-
-        /// <summary>
-        /// Get the CAN ID from a received message
-        /// </summary>
-        public uint GetCanId()
-        {
-            if (Data == null || Data.Length < 4)
-                return 0;
-            return (uint)((Data[0] << 24) | (Data[1] << 16) | (Data[2] << 8) | Data[3]);
-        }
-
-        /// <summary>
-        /// Get the payload (without CAN ID header)
-        /// </summary>
-        public byte[] GetPayload()
-        {
-            if (Data == null || DataSize <= 4)
-                return Array.Empty<byte>();
-
-            int payloadSize = (int)DataSize - 4;
-            byte[] payload = new byte[payloadSize];
-            Array.Copy(Data, 4, payload, 0, payloadSize);
-            return payload;
-        }
-
-        public string ToHexString()
-        {
-            if (Data == null || DataSize == 0)
-                return "";
-            return $"[{GetCanId():X3}] {BitConverter.ToString(GetPayload()).Replace("-", " ")}";
-        }
-    }
-
-    #endregion
-
-    #region Exceptions
-
-    public class J2534Exception : Exception
-    {
-        public J2534Error? ErrorCode { get; }
-
-        public J2534Exception(string message) : base(message) { }
-
-        public J2534Exception(string message, J2534Error errorCode) : base($"{message} (Error: {errorCode})")
-        {
-            ErrorCode = errorCode;
-        }
-
-        public J2534Exception(string message, Exception inner) : base(message, inner) { }
     }
 
     #endregion

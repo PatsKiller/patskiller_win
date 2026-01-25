@@ -5,14 +5,15 @@ using PatsKillerPro.J2534;
 namespace PatsKillerPro.Communication
 {
     /// <summary>
-    /// UDS Service - Complete backward compatibility wrapper
-    /// Provides all methods that PatsOperations.cs and other legacy code expects
+    /// UDS Service - Full backward compatibility wrapper
+    /// Provides ALL methods that PatsOperations.cs and legacy code expects
     /// </summary>
     public class UdsService : IDisposable
     {
         private FordUdsProtocol? _uds;
         private J2534Api? _api;
         private bool _disposed;
+        private uint _currentModuleAddress;
 
         public bool IsConnected => _uds?.IsConnected ?? false;
 
@@ -51,7 +52,29 @@ namespace PatsKillerPro.Communication
             _uds?.Disconnect();
         }
 
-        #region UDS Services - Multiple Overloads for Compatibility
+        #region Module Targeting
+
+        /// <summary>
+        /// Set target module for communication
+        /// </summary>
+        public void SetTargetModule(uint txId, uint rxId)
+        {
+            _currentModuleAddress = txId;
+            _uds?.SetTargetModule(txId, rxId);
+        }
+
+        /// <summary>
+        /// Set target module by address (calculates Tx/Rx)
+        /// </summary>
+        public void SetTargetModule(uint moduleAddress)
+        {
+            _currentModuleAddress = moduleAddress;
+            _uds?.SetTargetModule(moduleAddress, moduleAddress + 8);
+        }
+
+        #endregion
+
+        #region Raw Request
 
         /// <summary>
         /// Send raw UDS request and get response
@@ -64,12 +87,25 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Send raw request (alias for SendRequest)
+        /// Send raw request (alias)
         /// </summary>
         public byte[]? SendRawRequest(byte[] request, int timeout = 2000)
         {
             return SendRequest(request, timeout);
         }
+
+        /// <summary>
+        /// Send raw request with module address
+        /// </summary>
+        public byte[]? SendRawRequest(uint moduleAddress, byte[] request, int timeout = 2000)
+        {
+            SetTargetModule(moduleAddress);
+            return SendRequest(request, timeout);
+        }
+
+        #endregion
+
+        #region Read/Write Data By Identifier
 
         /// <summary>
         /// Read data by identifier (0x22) - single DID
@@ -82,15 +118,11 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Read data by identifier (0x22) - with module address (legacy compatibility)
+        /// Read data by identifier - with module address
         /// </summary>
         public byte[]? ReadDataByIdentifier(uint moduleAddress, ushort did)
         {
-            // Set target module if needed
-            if (_uds != null && moduleAddress != 0)
-            {
-                _uds.SetTargetModule(moduleAddress, moduleAddress + 8);
-            }
+            SetTargetModule(moduleAddress);
             return ReadDataByIdentifier(did);
         }
 
@@ -105,24 +137,20 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Write data by identifier (0x2E) - 3 args with module address (legacy compatibility)
+        /// Write data by identifier - 3 args with module address
         /// </summary>
         public bool WriteDataByIdentifier(uint moduleAddress, ushort did, byte[] data)
         {
-            // Set target module if needed
-            if (_uds != null && moduleAddress != 0)
-            {
-                _uds.SetTargetModule(moduleAddress, moduleAddress + 8);
-            }
+            SetTargetModule(moduleAddress);
             return WriteDataByIdentifier(did, data);
         }
 
         #endregion
 
-        #region Diagnostic Session Control
+        #region Diagnostic Session Control - ALL OVERLOADS
 
         /// <summary>
-        /// Start diagnostic session (0x10) - byte parameter
+        /// Start diagnostic session (0x10) - byte
         /// </summary>
         public bool StartDiagnosticSession(byte sessionType)
         {
@@ -132,7 +160,7 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Start diagnostic session (0x10) - uint parameter (legacy compatibility)
+        /// Start diagnostic session - uint
         /// </summary>
         public bool StartDiagnosticSession(uint sessionType)
         {
@@ -140,7 +168,7 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Start diagnostic session (0x10) - int parameter (legacy compatibility)
+        /// Start diagnostic session - int
         /// </summary>
         public bool StartDiagnosticSession(int sessionType)
         {
@@ -148,35 +176,71 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Start extended diagnostic session (0x10 03)
+        /// Start extended session - no args
         /// </summary>
         public bool StartExtendedSession()
         {
-            return StartDiagnosticSession(0x03);
+            return StartDiagnosticSession((byte)0x03);
         }
 
         /// <summary>
-        /// Start programming session (0x10 02)
+        /// Start extended session - with module address (uint)
+        /// </summary>
+        public bool StartExtendedSession(uint moduleAddress)
+        {
+            SetTargetModule(moduleAddress);
+            return StartDiagnosticSession((byte)0x03);
+        }
+
+        /// <summary>
+        /// Start extended session - with module address (int)
+        /// </summary>
+        public bool StartExtendedSession(int moduleAddress)
+        {
+            SetTargetModule((uint)moduleAddress);
+            return StartDiagnosticSession((byte)0x03);
+        }
+
+        /// <summary>
+        /// Start programming session
         /// </summary>
         public bool StartProgrammingSession()
         {
-            return StartDiagnosticSession(0x02);
+            return StartDiagnosticSession((byte)0x02);
         }
 
         /// <summary>
-        /// Start default session (0x10 01)
+        /// Start programming session - with module
+        /// </summary>
+        public bool StartProgrammingSession(uint moduleAddress)
+        {
+            SetTargetModule(moduleAddress);
+            return StartDiagnosticSession((byte)0x02);
+        }
+
+        /// <summary>
+        /// Start default session
         /// </summary>
         public bool StartDefaultSession()
         {
-            return StartDiagnosticSession(0x01);
+            return StartDiagnosticSession((byte)0x01);
+        }
+
+        /// <summary>
+        /// Start default session - with module
+        /// </summary>
+        public bool StartDefaultSession(uint moduleAddress)
+        {
+            SetTargetModule(moduleAddress);
+            return StartDiagnosticSession((byte)0x01);
         }
 
         #endregion
 
-        #region Security Access
+        #region Security Access - ALL OVERLOADS
 
         /// <summary>
-        /// Security access - request seed (0x27 01)
+        /// Request security seed - byte level
         /// </summary>
         public byte[]? RequestSecuritySeed(byte level = 0x01)
         {
@@ -186,7 +250,23 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Security access - request seed (alias for legacy code)
+        /// Request security seed - uint level
+        /// </summary>
+        public byte[]? RequestSecuritySeed(uint level)
+        {
+            return RequestSecuritySeed((byte)level);
+        }
+
+        /// <summary>
+        /// Request security seed - int level
+        /// </summary>
+        public byte[]? RequestSecuritySeed(int level)
+        {
+            return RequestSecuritySeed((byte)level);
+        }
+
+        /// <summary>
+        /// Request security access (alias) - byte
         /// </summary>
         public byte[]? RequestSecurityAccess(byte level = 0x01)
         {
@@ -194,7 +274,23 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Security access - send key (0x27 02)
+        /// Request security access - uint
+        /// </summary>
+        public byte[]? RequestSecurityAccess(uint level)
+        {
+            return RequestSecuritySeed((byte)level);
+        }
+
+        /// <summary>
+        /// Request security access - int
+        /// </summary>
+        public byte[]? RequestSecurityAccess(int level)
+        {
+            return RequestSecuritySeed((byte)level);
+        }
+
+        /// <summary>
+        /// Send security key - byte level
         /// </summary>
         public bool SendSecurityKey(byte[] key, byte level = 0x02)
         {
@@ -203,12 +299,28 @@ namespace PatsKillerPro.Communication
             return response.Success;
         }
 
-        #endregion
-
-        #region Routine Control
+        /// <summary>
+        /// Send security key - uint level
+        /// </summary>
+        public bool SendSecurityKey(byte[] key, uint level)
+        {
+            return SendSecurityKey(key, (byte)level);
+        }
 
         /// <summary>
-        /// Routine control (0x31)
+        /// Send security key - int level
+        /// </summary>
+        public bool SendSecurityKey(byte[] key, int level)
+        {
+            return SendSecurityKey(key, (byte)level);
+        }
+
+        #endregion
+
+        #region Routine Control - ALL OVERLOADS
+
+        /// <summary>
+        /// Routine control - byte controlType
         /// </summary>
         public bool RoutineControl(byte controlType, ushort routineId, byte[]? data = null)
         {
@@ -218,27 +330,93 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// Start routine (0x31 01)
+        /// Routine control - uint controlType
+        /// </summary>
+        public bool RoutineControl(uint controlType, ushort routineId, byte[]? data = null)
+        {
+            return RoutineControl((byte)controlType, routineId, data);
+        }
+
+        /// <summary>
+        /// Routine control - int controlType
+        /// </summary>
+        public bool RoutineControl(int controlType, ushort routineId, byte[]? data = null)
+        {
+            return RoutineControl((byte)controlType, routineId, data);
+        }
+
+        /// <summary>
+        /// Start routine
         /// </summary>
         public bool StartRoutine(ushort routineId, byte[]? data = null)
         {
-            return RoutineControl(0x01, routineId, data);
+            return RoutineControl((byte)0x01, routineId, data);
         }
 
         /// <summary>
-        /// Stop routine (0x31 02)
+        /// Stop routine
         /// </summary>
         public bool StopRoutine(ushort routineId)
         {
-            return RoutineControl(0x02, routineId, null);
+            return RoutineControl((byte)0x02, routineId, null);
         }
 
         /// <summary>
-        /// Request routine results (0x31 03)
+        /// Request routine results
         /// </summary>
         public bool RequestRoutineResults(ushort routineId)
         {
-            return RoutineControl(0x03, routineId, null);
+            return RoutineControl((byte)0x03, routineId, null);
+        }
+
+        #endregion
+
+        #region Input/Output Control (0x2F)
+
+        /// <summary>
+        /// Input/Output Control by Identifier (0x2F)
+        /// </summary>
+        public byte[]? InputOutputControl(ushort did, byte controlParam, byte[]? controlState = null)
+        {
+            if (_uds == null) return null;
+            
+            int dataLen = controlState?.Length ?? 0;
+            var request = new byte[4 + dataLen];
+            request[0] = 0x2F; // InputOutputControlByIdentifier
+            request[1] = (byte)(did >> 8);
+            request[2] = (byte)(did & 0xFF);
+            request[3] = controlParam;
+            if (controlState != null)
+                Array.Copy(controlState, 0, request, 4, controlState.Length);
+            
+            return SendRequest(request);
+        }
+
+        /// <summary>
+        /// Input/Output Control - with module address
+        /// </summary>
+        public byte[]? InputOutputControl(uint moduleAddress, ushort did, byte controlParam, byte[]? controlState = null)
+        {
+            SetTargetModule(moduleAddress);
+            return InputOutputControl(did, controlParam, controlState);
+        }
+
+        /// <summary>
+        /// Return control to ECU (0x2F xx xx 00)
+        /// </summary>
+        public bool ReturnControlToEcu(ushort did)
+        {
+            var result = InputOutputControl(did, 0x00);
+            return result != null;
+        }
+
+        /// <summary>
+        /// Short term adjustment (0x2F xx xx 03)
+        /// </summary>
+        public bool ShortTermAdjustment(ushort did, byte[] value)
+        {
+            var result = InputOutputControl(did, 0x03, value);
+            return result != null;
         }
 
         #endregion
@@ -266,13 +444,29 @@ namespace PatsKillerPro.Communication
         }
 
         /// <summary>
-        /// ECU Reset (0x11)
+        /// ECU Reset (0x11) - byte
         /// </summary>
         public bool EcuReset(byte resetType = 0x01)
         {
             if (_uds == null) return false;
             var response = _uds.EcuReset((ResetType)resetType);
             return response.Success;
+        }
+
+        /// <summary>
+        /// ECU Reset - uint
+        /// </summary>
+        public bool EcuReset(uint resetType)
+        {
+            return EcuReset((byte)resetType);
+        }
+
+        /// <summary>
+        /// ECU Reset - int
+        /// </summary>
+        public bool EcuReset(int resetType)
+        {
+            return EcuReset((byte)resetType);
         }
 
         /// <summary>
@@ -283,27 +477,6 @@ namespace PatsKillerPro.Communication
             if (_uds == null) return null;
             var response = _uds.ReadDtcInformation((DtcReportType)reportType, statusMask);
             return response.Success ? response.Data : null;
-        }
-
-        #endregion
-
-        #region Module Targeting
-
-        /// <summary>
-        /// Set target module for communication
-        /// </summary>
-        public void SetTargetModule(uint txId, uint rxId)
-        {
-            _uds?.SetTargetModule(txId, rxId);
-        }
-
-        /// <summary>
-        /// Set target module by address (calculates Tx/Rx)
-        /// </summary>
-        public void SetTargetModule(uint moduleAddress)
-        {
-            // Standard Ford addressing: Tx = address, Rx = address + 8
-            _uds?.SetTargetModule(moduleAddress, moduleAddress + 8);
         }
 
         #endregion
