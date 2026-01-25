@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.Services;
+using PatsKillerPro.J2534;
 
 namespace PatsKillerPro
 {
