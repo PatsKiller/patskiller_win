@@ -1,41 +1,48 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using Microsoft.Win32;
-using PatsKillerPro.Utils;
 
 namespace PatsKillerPro.J2534
 {
     /// <summary>
-    /// Manages J2534 device discovery and connection
+    /// Scans Windows Registry to find installed J2534 pass-thru devices
+    /// Supports: VCM II, VCM III, Mongoose, CarDAQ, Autel, Topdon, VXDIAG, etc.
+    /// 
+    /// Registry Paths:
+    /// - 64-bit: HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\PassThruSupport.04.04
+    /// - 32-bit: HKEY_LOCAL_MACHINE\SOFTWARE\PassThruSupport.04.04
     /// </summary>
-    public class J2534DeviceManager : IDisposable
+    public static class J2534DeviceScanner
     {
-        private readonly List<J2534DeviceInfo> _devices = new();
-        private bool _disposed = false;
+        // Registry paths for J2534 v04.04 devices
+        private const string REGISTRY_PATH_64 = @"SOFTWARE\WOW6432Node\PassThruSupport.04.04";
+        private const string REGISTRY_PATH_32 = @"SOFTWARE\PassThruSupport.04.04";
 
         /// <summary>
-        /// Scans Windows registry for installed J2534 devices
+        /// Scan for all installed J2534 devices
         /// </summary>
-        public void ScanForDevices()
+        public static List<J2534DeviceInfo> ScanForDevices()
         {
-            _devices.Clear();
-            Logger.Info("Scanning registry for J2534 devices...");
+            var devices = new List<J2534DeviceInfo>();
 
-            // J2534 v2 registry path (04.04)
-            ScanRegistryPath(@"SOFTWARE\PassThruSupport.04.04");
-            
-            // Also check WOW6432Node for 32-bit drivers on 64-bit Windows
-            ScanRegistryPath(@"SOFTWARE\WOW6432Node\PassThruSupport.04.04");
+            // Try 64-bit registry first (most common on modern systems)
+            ScanRegistryPath(REGISTRY_PATH_64, devices);
 
-            Logger.Info($"Found {_devices.Count} J2534 devices");
+            // Also check 32-bit registry
+            ScanRegistryPath(REGISTRY_PATH_32, devices);
+
+            // Remove duplicates (same DLL path)
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            devices.RemoveAll(d => !seen.Add(d.FunctionLibrary));
+
+            return devices;
         }
 
-        private void ScanRegistryPath(string basePath)
+        private static void ScanRegistryPath(string registryPath, List<J2534DeviceInfo> devices)
         {
             try
             {
-                using var baseKey = Registry.LocalMachine.OpenSubKey(basePath);
+                using var baseKey = Registry.LocalMachine.OpenSubKey(registryPath);
                 if (baseKey == null) return;
 
                 foreach (var subKeyName in baseKey.GetSubKeyNames())
@@ -45,113 +52,200 @@ namespace PatsKillerPro.J2534
                         using var deviceKey = baseKey.OpenSubKey(subKeyName);
                         if (deviceKey == null) continue;
 
-                        var name = deviceKey.GetValue("Name")?.ToString();
-                        var vendor = deviceKey.GetValue("Vendor")?.ToString();
-                        var functionLibrary = deviceKey.GetValue("FunctionLibrary")?.ToString();
-
-                        if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(functionLibrary))
-                            continue;
-
-                        // Check if DLL exists
-                        if (!System.IO.File.Exists(functionLibrary))
+                        var device = ReadDeviceInfo(deviceKey, subKeyName);
+                        if (device != null && !string.IsNullOrEmpty(device.FunctionLibrary))
                         {
-                            Logger.Warning($"J2534 DLL not found for {name}: {functionLibrary}");
-                            continue;
+                            // Check if DLL exists
+                            device.IsAvailable = System.IO.File.Exists(device.FunctionLibrary);
+                            devices.Add(device);
                         }
-
-                        // Check for duplicate
-                        if (_devices.Exists(d => d.Name == name))
-                            continue;
-
-                        var deviceInfo = new J2534DeviceInfo
-                        {
-                            Name = name,
-                            Vendor = vendor ?? "Unknown",
-                            FunctionLibrary = functionLibrary,
-                            RegistryPath = $"{basePath}\\{subKeyName}"
-                        };
-
-                        // Read optional fields
-                        deviceInfo.ConfigApplication = deviceKey.GetValue("ConfigApplication")?.ToString();
-                        
-                        var protocols = deviceKey.GetValue("ProtocolsSupported");
-                        if (protocols is string[] protoArray)
-                        {
-                            deviceInfo.SupportedProtocols = protoArray;
-                        }
-
-                        _devices.Add(deviceInfo);
-                        Logger.Info($"Found J2534 device: {name} ({vendor})");
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        Logger.Warning($"Error reading device key {subKeyName}: {ex.Message}");
+                        // Skip devices that can't be read
                     }
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                Logger.Warning($"Error scanning registry path {basePath}: {ex.Message}");
+                // Registry path doesn't exist or access denied
             }
+        }
+
+        private static J2534DeviceInfo? ReadDeviceInfo(RegistryKey deviceKey, string keyName)
+        {
+            var name = deviceKey.GetValue("Name") as string;
+            var vendor = deviceKey.GetValue("Vendor") as string;
+            var functionLibrary = deviceKey.GetValue("FunctionLibrary") as string;
+            var configApp = deviceKey.GetValue("ConfigApplication") as string;
+
+            if (string.IsNullOrEmpty(functionLibrary))
+                return null;
+
+            // Read supported protocols
+            var protocols = new List<string>();
+            if (IsProtocolSupported(deviceKey, "CAN")) protocols.Add("CAN");
+            if (IsProtocolSupported(deviceKey, "ISO15765")) protocols.Add("ISO15765");
+            if (IsProtocolSupported(deviceKey, "ISO9141")) protocols.Add("ISO9141");
+            if (IsProtocolSupported(deviceKey, "ISO14230")) protocols.Add("ISO14230");
+            if (IsProtocolSupported(deviceKey, "J1850VPW")) protocols.Add("J1850VPW");
+            if (IsProtocolSupported(deviceKey, "J1850PWM")) protocols.Add("J1850PWM");
+
+            return new J2534DeviceInfo
+            {
+                Name = name ?? keyName,
+                Vendor = vendor ?? "Unknown",
+                FunctionLibrary = functionLibrary,
+                ConfigApplication = configApp ?? "",
+                RegistryKey = keyName,
+                SupportedProtocols = protocols.ToArray(),
+                DeviceType = DetectDeviceType(name ?? keyName, vendor ?? "")
+            };
+        }
+
+        private static bool IsProtocolSupported(RegistryKey key, string protocol)
+        {
+            var value = key.GetValue(protocol);
+            if (value is int intVal) return intVal == 1;
+            if (value is uint uintVal) return uintVal == 1;
+            return false;
         }
 
         /// <summary>
-        /// Gets list of detected device names
+        /// Detect the device type from name/vendor for special handling
         /// </summary>
-        public List<string> GetDeviceNames()
+        private static J2534DeviceType DetectDeviceType(string name, string vendor)
         {
-            var names = new List<string>();
-            foreach (var device in _devices)
-            {
-                names.Add(device.Name);
-            }
-            return names;
+            var combined = $"{name} {vendor}".ToUpperInvariant();
+
+            // Ford VCM devices
+            if (combined.Contains("VCM II") || combined.Contains("VCMII"))
+                return J2534DeviceType.FordVcmII;
+            if (combined.Contains("VCM III") || combined.Contains("VCMIII") || combined.Contains("VCM 3"))
+                return J2534DeviceType.FordVcmIII;
+
+            // Drew Technologies
+            if (combined.Contains("MONGOOSE"))
+                return J2534DeviceType.DrewTechMongoose;
+            if (combined.Contains("CARDAQ"))
+                return J2534DeviceType.DrewTechCarDaq;
+
+            // Autel
+            if (combined.Contains("AUTEL"))
+                return J2534DeviceType.Autel;
+
+            // Topdon
+            if (combined.Contains("TOPDON"))
+                return J2534DeviceType.Topdon;
+
+            // VXDIAG
+            if (combined.Contains("VXDIAG") || combined.Contains("VCX"))
+                return J2534DeviceType.VxDiag;
+
+            // Bosch
+            if (combined.Contains("BOSCH"))
+                return J2534DeviceType.Bosch;
+
+            // Tactrix
+            if (combined.Contains("TACTRIX") || combined.Contains("OPENPORT"))
+                return J2534DeviceType.TactrixOpenPort;
+
+            // Generic
+            return J2534DeviceType.Generic;
         }
 
         /// <summary>
-        /// Gets device info by name
+        /// Check if any J2534 device is installed
         /// </summary>
-        public J2534DeviceInfo? GetDeviceInfo(string name)
+        public static bool HasAnyDevice()
         {
-            return _devices.Find(d => d.Name == name);
+            return ScanForDevices().Count > 0;
         }
 
         /// <summary>
-        /// Connects to a J2534 device by name
+        /// Get the first available (DLL exists) device
         /// </summary>
-        public J2534Device ConnectToDevice(string name)
+        public static J2534DeviceInfo? GetFirstAvailableDevice()
         {
-            var deviceInfo = GetDeviceInfo(name);
-            if (deviceInfo == null)
-            {
-                throw new J2534Exception($"Device not found: {name}");
-            }
-
-            var device = new J2534Device(deviceInfo);
-            device.Connect();
-            return device;
+            var devices = ScanForDevices();
+            return devices.Find(d => d.IsAvailable);
         }
 
-        public void Dispose()
+        /// <summary>
+        /// Find device by name (partial match)
+        /// </summary>
+        public static J2534DeviceInfo? FindDeviceByName(string namePart)
         {
-            if (!_disposed)
-            {
-                _devices.Clear();
-                _disposed = true;
-            }
+            var devices = ScanForDevices();
+            return devices.Find(d => d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Find devices by type
+        /// </summary>
+        public static List<J2534DeviceInfo> FindDevicesByType(J2534DeviceType type)
+        {
+            var devices = ScanForDevices();
+            return devices.FindAll(d => d.DeviceType == type);
         }
     }
 
     /// <summary>
-    /// Information about a J2534 device from registry
+    /// Information about an installed J2534 device
     /// </summary>
     public class J2534DeviceInfo
     {
+        /// <summary>Display name of the device</summary>
         public string Name { get; set; } = "";
+
+        /// <summary>Vendor/manufacturer name</summary>
         public string Vendor { get; set; } = "";
+
+        /// <summary>Full path to the J2534 DLL</summary>
         public string FunctionLibrary { get; set; } = "";
-        public string RegistryPath { get; set; } = "";
-        public string? ConfigApplication { get; set; }
-        public string[]? SupportedProtocols { get; set; }
+
+        /// <summary>Path to configuration application (optional)</summary>
+        public string ConfigApplication { get; set; } = "";
+
+        /// <summary>Registry key name where this device is registered</summary>
+        public string RegistryKey { get; set; } = "";
+
+        /// <summary>List of supported protocols (CAN, ISO15765, etc.)</summary>
+        public string[] SupportedProtocols { get; set; } = Array.Empty<string>();
+
+        /// <summary>Detected device type for special handling</summary>
+        public J2534DeviceType DeviceType { get; set; } = J2534DeviceType.Generic;
+
+        /// <summary>Whether the DLL file exists</summary>
+        public bool IsAvailable { get; set; }
+
+        /// <summary>Check if device supports ISO15765 (required for Ford PATS)</summary>
+        public bool SupportsISO15765 => Array.Exists(SupportedProtocols, p => p == "ISO15765");
+
+        /// <summary>Check if device supports CAN</summary>
+        public bool SupportsCAN => Array.Exists(SupportedProtocols, p => p == "CAN");
+
+        public override string ToString()
+        {
+            var status = IsAvailable ? "✓" : "✗";
+            return $"[{status}] {Name} ({Vendor}) - {DeviceType}";
+        }
+    }
+
+    /// <summary>
+    /// Known J2534 device types for special handling
+    /// </summary>
+    public enum J2534DeviceType
+    {
+        Generic,
+        FordVcmII,
+        FordVcmIII,
+        DrewTechMongoose,
+        DrewTechCarDaq,
+        Autel,
+        Topdon,
+        VxDiag,
+        Bosch,
+        TactrixOpenPort
     }
 }

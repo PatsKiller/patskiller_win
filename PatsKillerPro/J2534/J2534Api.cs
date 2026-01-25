@@ -197,7 +197,7 @@ namespace PatsKillerPro.J2534
                 for (int i = 0; i < msgs.Length; i++)
                 {
                     msgs[i] = new PassThruMsg();
-                    Marshal.StructureToPtr(msgs[i], pMsgs + (i * msgSize), false);
+                    Marshal.StructureToPtr(msgs[i], IntPtr.Add(pMsgs, i * msgSize), false);
                 }
 
                 var result = _passThruReadMsgs(channelId, pMsgs, ref numMsgs, timeout);
@@ -205,7 +205,7 @@ namespace PatsKillerPro.J2534
                 // Copy back the messages
                 for (int i = 0; i < numMsgs && i < msgs.Length; i++)
                 {
-                    msgs[i] = Marshal.PtrToStructure<PassThruMsg>(pMsgs + (i * msgSize));
+                    msgs[i] = Marshal.PtrToStructure<PassThruMsg>(IntPtr.Add(pMsgs, i * msgSize));
                 }
 
                 return result;
@@ -230,7 +230,7 @@ namespace PatsKillerPro.J2534
             {
                 for (int i = 0; i < msgs.Length; i++)
                 {
-                    Marshal.StructureToPtr(msgs[i], pMsgs + (i * msgSize), false);
+                    Marshal.StructureToPtr(msgs[i], IntPtr.Add(pMsgs, i * msgSize), false);
                 }
 
                 return _passThruWriteMsgs(channelId, pMsgs, ref numMsgs, timeout);
