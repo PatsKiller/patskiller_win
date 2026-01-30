@@ -42,7 +42,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<bool> ConnectAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 var result = _uds.Connect();
                 return result == J2534Error.STATUS_NOERROR;
@@ -61,7 +61,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<VehicleInfo?> ReadVehicleInfoAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
@@ -89,7 +89,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<string?> ReadOutcodeAsync(string module = "BCM")
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 uint address = module.ToUpper() switch
@@ -129,7 +129,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<bool> SubmitIncodeAsync(string module, string incode)
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 uint address = module.ToUpper() switch
@@ -162,7 +162,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<int> ReadKeyCountAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
@@ -180,7 +180,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<bool> InitializePatsAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
@@ -193,7 +193,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<bool> EraseAllKeysAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 if (!IsSecurityUnlocked) return false;
 
@@ -211,7 +211,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<bool> ProgramKeyAsync(int keySlot)
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 if (!IsSecurityUnlocked) return false;
 
@@ -233,7 +233,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<string[]> ReadDtcsAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
@@ -254,7 +254,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<bool> ClearCrashEventAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
@@ -269,7 +269,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<bool> UnlockGatewayAsync(string incode)
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.GWM, ModuleAddress.GWM + 8);
@@ -293,7 +293,7 @@ namespace PatsKillerPro.J2534
 
         public async Task<PatsStatus> ReadPatsStatusAsync()
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);

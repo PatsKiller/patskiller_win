@@ -117,6 +117,15 @@ namespace PatsKillerPro.Communication
         public byte[]? RequestSecurityAccess(byte level = 0x01) => RequestSecuritySeed(level);
         public byte[]? RequestSecurityAccess(uint level) => RequestSecuritySeed((byte)level);
         public byte[]? RequestSecurityAccess(int level) => RequestSecuritySeed((byte)level);
+        
+        // Two-argument overloads for PatsOperations.cs compatibility
+        public byte[]? RequestSecurityAccess(uint moduleAddress, byte level)
+        {
+            SetTargetModule(moduleAddress);
+            return RequestSecuritySeed(level);
+        }
+        public byte[]? RequestSecurityAccess(uint moduleAddress, uint level) => RequestSecurityAccess(moduleAddress, (byte)level);
+        public byte[]? RequestSecurityAccess(uint moduleAddress, int level) => RequestSecurityAccess(moduleAddress, (byte)level);
 
         public bool SendSecurityKey(byte[] key, byte level = 0x02)
         {
@@ -161,10 +170,20 @@ namespace PatsKillerPro.Communication
             return SendRequest(request);
         }
 
+        // Overloads with uint DID for PatsOperations.cs compatibility
+        public byte[]? InputOutputControl(uint did, byte controlParam, byte[]? controlState = null)
+            => InputOutputControl((ushort)did, controlParam, controlState);
+
         public byte[]? InputOutputControl(uint moduleAddress, ushort did, byte controlParam, byte[]? controlState = null)
         {
             SetTargetModule(moduleAddress);
             return InputOutputControl(did, controlParam, controlState);
+        }
+        
+        public byte[]? InputOutputControl(uint moduleAddress, uint did, byte controlParam, byte[]? controlState = null)
+        {
+            SetTargetModule(moduleAddress);
+            return InputOutputControl((ushort)did, controlParam, controlState);
         }
 
         #endregion
@@ -181,6 +200,15 @@ namespace PatsKillerPro.Communication
         {
             var response = _uds?.ClearDtc();
             return response?.Success ?? false;
+        }
+
+        // Alias for PatsOperations.cs compatibility
+        public bool ClearDTCs() => ClearDtcs();
+        
+        public bool ClearModuleDTCs(uint moduleAddress)
+        {
+            SetTargetModule(moduleAddress);
+            return ClearDtcs();
         }
 
         public bool EcuReset(byte resetType = 0x01)
