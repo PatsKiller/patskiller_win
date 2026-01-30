@@ -5,6 +5,7 @@ namespace PatsKillerPro.Communication
 {
     /// <summary>
     /// UDS Service - Backward compatibility wrapper for PatsOperations.cs
+    /// All RequestSecurityAccess methods return BOOL for PatsOperations compatibility
     /// </summary>
     public class UdsService : IDisposable
     {
@@ -45,6 +46,7 @@ namespace PatsKillerPro.Communication
         }
 
         public byte[]? SendRawRequest(byte[] request, int timeout = 2000) => SendRequest(request, timeout);
+        
         public byte[]? SendRawRequest(uint moduleAddress, byte[] request, int timeout = 2000)
         {
             SetTargetModule(moduleAddress);
@@ -66,6 +68,11 @@ namespace PatsKillerPro.Communication
             SetTargetModule(moduleAddress);
             return ReadDataByIdentifier(did);
         }
+        
+        public byte[]? ReadDataByIdentifier(uint moduleAddress, uint did)
+        {
+            return ReadDataByIdentifier(moduleAddress, (ushort)did);
+        }
 
         public bool WriteDataByIdentifier(ushort did, byte[] data)
         {
@@ -78,6 +85,11 @@ namespace PatsKillerPro.Communication
             SetTargetModule(moduleAddress);
             return WriteDataByIdentifier(did, data);
         }
+        
+        public bool WriteDataByIdentifier(uint moduleAddress, uint did, byte[] data)
+        {
+            return WriteDataByIdentifier(moduleAddress, (ushort)did, data);
+        }
 
         #endregion
 
@@ -89,43 +101,69 @@ namespace PatsKillerPro.Communication
             return response?.Success ?? false;
         }
 
-        public bool StartDiagnosticSession(uint sessionType) => StartDiagnosticSession((byte)sessionType);
-        public bool StartDiagnosticSession(int sessionType) => StartDiagnosticSession((byte)sessionType);
+        public bool StartExtendedSession() => StartDiagnosticSession(0x03);
+        
+        public bool StartExtendedSession(uint moduleAddress) 
+        { 
+            SetTargetModule(moduleAddress); 
+            return StartExtendedSession(); 
+        }
 
-        public bool StartExtendedSession() => StartDiagnosticSession((byte)0x03);
-        public bool StartExtendedSession(uint moduleAddress) { SetTargetModule(moduleAddress); return StartExtendedSession(); }
-        public bool StartExtendedSession(int moduleAddress) => StartExtendedSession((uint)moduleAddress);
+        public bool StartProgrammingSession() => StartDiagnosticSession(0x02);
+        
+        public bool StartProgrammingSession(uint moduleAddress) 
+        { 
+            SetTargetModule(moduleAddress); 
+            return StartProgrammingSession(); 
+        }
 
-        public bool StartProgrammingSession() => StartDiagnosticSession((byte)0x02);
-        public bool StartProgrammingSession(uint moduleAddress) { SetTargetModule(moduleAddress); return StartProgrammingSession(); }
-
-        public bool StartDefaultSession() => StartDiagnosticSession((byte)0x01);
-        public bool StartDefaultSession(uint moduleAddress) { SetTargetModule(moduleAddress); return StartDefaultSession(); }
+        public bool StartDefaultSession() => StartDiagnosticSession(0x01);
+        
+        public bool StartDefaultSession(uint moduleAddress) 
+        { 
+            SetTargetModule(moduleAddress); 
+            return StartDefaultSession(); 
+        }
 
         #endregion
 
-        #region Security Access
+        #region Security Access - ALL RETURN BOOL for PatsOperations.cs
 
-        public byte[]? RequestSecuritySeed(byte level = 0x01)
-        {
-            var response = _uds?.SecurityAccessRequestSeed(level);
-            return response?.Success == true ? response.Data : null;
-        }
-
-        public byte[]? RequestSecuritySeed(uint level) => RequestSecuritySeed((byte)level);
-        public byte[]? RequestSecuritySeed(int level) => RequestSecuritySeed((byte)level);
-        public byte[]? RequestSecurityAccess(byte level = 0x01) => RequestSecuritySeed(level);
-        public byte[]? RequestSecurityAccess(uint level) => RequestSecuritySeed((byte)level);
-        public byte[]? RequestSecurityAccess(int level) => RequestSecuritySeed((byte)level);
-        
-        // Two-argument overloads for PatsOperations.cs compatibility
-        public byte[]? RequestSecurityAccess(uint moduleAddress, byte level)
+        /// <summary>
+        /// Request security access with default level - returns BOOL
+        /// </summary>
+        public bool RequestSecurityAccess(uint moduleAddress)
         {
             SetTargetModule(moduleAddress);
-            return RequestSecuritySeed(level);
+            var response = _uds?.SecurityAccessRequestSeed(0x01);
+            return response?.Success ?? false;
         }
-        public byte[]? RequestSecurityAccess(uint moduleAddress, uint level) => RequestSecurityAccess(moduleAddress, (byte)level);
-        public byte[]? RequestSecurityAccess(uint moduleAddress, int level) => RequestSecurityAccess(moduleAddress, (byte)level);
+
+        /// <summary>
+        /// Request security access with specific level (byte) - returns BOOL
+        /// </summary>
+        public bool RequestSecurityAccess(uint moduleAddress, byte level)
+        {
+            SetTargetModule(moduleAddress);
+            var response = _uds?.SecurityAccessRequestSeed(level);
+            return response?.Success ?? false;
+        }
+
+        /// <summary>
+        /// Request security access with specific level (int) - returns BOOL
+        /// </summary>
+        public bool RequestSecurityAccess(uint moduleAddress, int level)
+        {
+            return RequestSecurityAccess(moduleAddress, (byte)level);
+        }
+
+        /// <summary>
+        /// Request security access with specific level (uint) - returns BOOL
+        /// </summary>
+        public bool RequestSecurityAccess(uint moduleAddress, uint level)
+        {
+            return RequestSecurityAccess(moduleAddress, (byte)level);
+        }
 
         public bool SendSecurityKey(byte[] key, byte level = 0x02)
         {
@@ -133,68 +171,68 @@ namespace PatsKillerPro.Communication
             return response?.Success ?? false;
         }
 
-        public bool SendSecurityKey(byte[] key, uint level) => SendSecurityKey(key, (byte)level);
-        public bool SendSecurityKey(byte[] key, int level) => SendSecurityKey(key, (byte)level);
-
         #endregion
 
-        #region Routine Control
+        #region Routine Control - Returns byte[]? for PatsOperations.cs
 
-        public bool RoutineControl(byte controlType, ushort routineId, byte[]? data = null)
+        /// <summary>
+        /// Routine control with module address - returns byte[]? response
+        /// </summary>
+        public byte[]? RoutineControl(uint moduleAddress, byte controlType, byte[] routineData)
         {
-            var response = _uds?.RoutineControl((RoutineControlType)controlType, routineId, data);
-            return response?.Success ?? false;
+            SetTargetModule(moduleAddress);
+            
+            // Build routine control request: 0x31 + controlType + routineData
+            var request = new byte[2 + routineData.Length];
+            request[0] = 0x31;
+            request[1] = controlType;
+            Array.Copy(routineData, 0, request, 2, routineData.Length);
+            
+            return SendRequest(request);
         }
 
-        public bool RoutineControl(uint controlType, ushort routineId, byte[]? data = null) => RoutineControl((byte)controlType, routineId, data);
-        public bool RoutineControl(int controlType, ushort routineId, byte[]? data = null) => RoutineControl((byte)controlType, routineId, data);
+        /// <summary>
+        /// Routine control with int controlType - returns byte[]?
+        /// </summary>
+        public byte[]? RoutineControl(uint moduleAddress, int controlType, byte[] routineData)
+        {
+            return RoutineControl(moduleAddress, (byte)controlType, routineData);
+        }
 
-        public bool StartRoutine(ushort routineId, byte[]? data = null) => RoutineControl((byte)0x01, routineId, data);
-        public bool StopRoutine(ushort routineId) => RoutineControl((byte)0x02, routineId, null);
-        public bool RequestRoutineResults(ushort routineId) => RoutineControl((byte)0x03, routineId, null);
+        /// <summary>
+        /// Routine control with uint controlType - returns byte[]?
+        /// </summary>
+        public byte[]? RoutineControl(uint moduleAddress, uint controlType, byte[] routineData)
+        {
+            return RoutineControl(moduleAddress, (byte)controlType, routineData);
+        }
 
         #endregion
 
         #region Input/Output Control
 
-        public byte[]? InputOutputControl(ushort did, byte controlParam, byte[]? controlState = null)
+        public byte[]? InputOutputControl(uint moduleAddress, int did, byte[] controlState)
         {
+            SetTargetModule(moduleAddress);
             int dataLen = controlState?.Length ?? 0;
             var request = new byte[4 + dataLen];
             request[0] = 0x2F;
-            request[1] = (byte)(did >> 8);
+            request[1] = (byte)((did >> 8) & 0xFF);
             request[2] = (byte)(did & 0xFF);
-            request[3] = controlParam;
+            request[3] = 0x03; // Short term adjustment
             if (controlState != null)
                 Array.Copy(controlState, 0, request, 4, controlState.Length);
             return SendRequest(request);
         }
 
-        // Overloads with uint DID for PatsOperations.cs compatibility
-        public byte[]? InputOutputControl(uint did, byte controlParam, byte[]? controlState = null)
-            => InputOutputControl((ushort)did, controlParam, controlState);
-
-        public byte[]? InputOutputControl(uint moduleAddress, ushort did, byte controlParam, byte[]? controlState = null)
+        public byte[]? InputOutputControl(uint moduleAddress, uint did, byte[] controlState)
         {
-            SetTargetModule(moduleAddress);
-            return InputOutputControl(did, controlParam, controlState);
-        }
-        
-        public byte[]? InputOutputControl(uint moduleAddress, uint did, byte controlParam, byte[]? controlState = null)
-        {
-            SetTargetModule(moduleAddress);
-            return InputOutputControl((ushort)did, controlParam, controlState);
+            return InputOutputControl(moduleAddress, (int)did, controlState);
         }
 
         #endregion
 
-        #region Other UDS Services
-
-        public bool SendTesterPresent()
-        {
-            var response = _uds?.TesterPresent();
-            return response?.Success ?? false;
-        }
+        #region DTC Operations
 
         public bool ClearDtcs()
         {
@@ -202,7 +240,6 @@ namespace PatsKillerPro.Communication
             return response?.Success ?? false;
         }
 
-        // Alias for PatsOperations.cs compatibility
         public bool ClearDTCs() => ClearDtcs();
         
         public bool ClearModuleDTCs(uint moduleAddress)
@@ -211,19 +248,20 @@ namespace PatsKillerPro.Communication
             return ClearDtcs();
         }
 
+        #endregion
+
+        #region ECU Reset
+
         public bool EcuReset(byte resetType = 0x01)
         {
             var response = _uds?.EcuReset((ResetType)resetType);
             return response?.Success ?? false;
         }
-
-        public bool EcuReset(uint resetType) => EcuReset((byte)resetType);
-        public bool EcuReset(int resetType) => EcuReset((byte)resetType);
-
-        public byte[]? ReadDtcs(byte reportType = 0x02, byte statusMask = 0xFF)
+        
+        public bool EcuReset(uint moduleAddress, byte resetType = 0x01)
         {
-            var response = _uds?.ReadDtcInformation((DtcReportType)reportType, statusMask);
-            return response?.Success == true ? response.Data : null;
+            SetTargetModule(moduleAddress);
+            return EcuReset(resetType);
         }
 
         #endregion
