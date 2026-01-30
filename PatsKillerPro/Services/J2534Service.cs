@@ -5,10 +5,6 @@ using PatsKillerPro.J2534;
 
 namespace PatsKillerPro.Services
 {
-    /// <summary>
-    /// J2534 Service for PatsKiller Pro Desktop Application
-    /// Wraps the J2534 library for use by MainForm
-    /// </summary>
     public class J2534Service : IDisposable
     {
         private static J2534Service? _instance;
@@ -19,7 +15,6 @@ namespace PatsKillerPro.Services
         private J2534DeviceInfo? _connectedDevice;
         private bool _disposed;
 
-        // Events for UI updates
         public event EventHandler<string>? LogMessage;
         public event EventHandler<double>? VoltageChanged;
         public event EventHandler<J2534ProgressEventArgs>? ProgressChanged;
@@ -36,8 +31,6 @@ namespace PatsKillerPro.Services
 
         private J2534Service() { }
 
-        #region Device Scanning
-
         public Task<List<J2534DeviceInfo>> ScanForDevicesAsync()
         {
             return Task.Run(() =>
@@ -51,24 +44,15 @@ namespace PatsKillerPro.Services
             });
         }
 
-        public J2534DeviceInfo? GetFirstAvailableDevice()
-        {
-            return J2534DeviceScanner.GetFirstAvailableDevice();
-        }
-
-        #endregion
-
-        #region Connection
+        public J2534DeviceInfo? GetFirstAvailableDevice() => J2534DeviceScanner.GetFirstAvailableDevice();
 
         public async Task<J2534Result> ConnectDeviceAsync(J2534DeviceInfo device)
         {
             try
             {
                 Log($"Connecting to {device.Name}...");
-                
                 _api = new J2534Api(device.FunctionLibrary);
                 _patsService = new FordPatsService(_api);
-                
                 var connected = await _patsService.ConnectAsync();
                 if (connected)
                 {
@@ -76,13 +60,10 @@ namespace PatsKillerPro.Services
                     Log($"Connected to {device.Name}");
                     return J2534Result.Ok();
                 }
-                else
-                {
-                    _api?.Dispose();
-                    _api = null;
-                    _patsService = null;
-                    return J2534Result.Fail("Connection failed");
-                }
+                _api?.Dispose();
+                _api = null;
+                _patsService = null;
+                return J2534Result.Fail("Connection failed");
             }
             catch (Exception ex)
             {
@@ -107,20 +88,14 @@ namespace PatsKillerPro.Services
             });
         }
 
-        #endregion
-
-        #region Vehicle Operations
-
         public async Task<VehicleReadResult> ReadVehicleAsync()
         {
             if (_patsService == null) return new VehicleReadResult { Success = false, Error = "Not connected" };
-
             try
             {
                 Log("Reading vehicle...");
                 var vehicle = await _patsService.ReadVehicleInfoAsync();
                 var outcode = await _patsService.ReadOutcodeAsync();
-
                 return new VehicleReadResult
                 {
                     Success = true,
@@ -139,7 +114,6 @@ namespace PatsKillerPro.Services
         public async Task<OutcodeResult> ReadModuleOutcodeAsync(string module)
         {
             if (_patsService == null) return new OutcodeResult { Success = false, Error = "Not connected" };
-
             try
             {
                 var outcode = await _patsService.ReadOutcodeAsync(module);
@@ -154,7 +128,6 @@ namespace PatsKillerPro.Services
         public async Task<J2534Result> SubmitIncodeAsync(string module, string incode)
         {
             if (_patsService == null) return J2534Result.Fail("Not connected");
-
             try
             {
                 var result = await _patsService.SubmitIncodeAsync(module, incode);
@@ -166,25 +139,15 @@ namespace PatsKillerPro.Services
             }
         }
 
-        #endregion
-
-        #region Key Operations
-
         public async Task<KeyOperationResult> EraseAllKeysAsync(string incode)
         {
             if (_patsService == null) return new KeyOperationResult { Success = false, Error = "Not connected" };
-
             try
             {
                 Log("Erasing all keys...");
                 var result = await _patsService.EraseAllKeysAsync();
                 var keyCount = await _patsService.ReadKeyCountAsync();
-                return new KeyOperationResult 
-                { 
-                    Success = result, 
-                    CurrentKeyCount = keyCount,
-                    KeysAffected = result ? 8 : 0 
-                };
+                return new KeyOperationResult { Success = result, CurrentKeyCount = keyCount, KeysAffected = result ? 8 : 0 };
             }
             catch (Exception ex)
             {
@@ -195,18 +158,12 @@ namespace PatsKillerPro.Services
         public async Task<KeyOperationResult> ProgramKeyAsync(string incode, int slot)
         {
             if (_patsService == null) return new KeyOperationResult { Success = false, Error = "Not connected" };
-
             try
             {
                 Log($"Programming key slot {slot}...");
                 var result = await _patsService.ProgramKeyAsync(slot);
                 var keyCount = await _patsService.ReadKeyCountAsync();
-                return new KeyOperationResult 
-                { 
-                    Success = result, 
-                    CurrentKeyCount = keyCount,
-                    KeysAffected = result ? 1 : 0
-                };
+                return new KeyOperationResult { Success = result, CurrentKeyCount = keyCount, KeysAffected = result ? 1 : 0 };
             }
             catch (Exception ex)
             {
@@ -217,7 +174,6 @@ namespace PatsKillerPro.Services
         public async Task<KeyCountResult> ReadKeyCountAsync()
         {
             if (_patsService == null) return new KeyCountResult { Success = false };
-
             try
             {
                 var count = await _patsService.ReadKeyCountAsync();
@@ -229,19 +185,11 @@ namespace PatsKillerPro.Services
             }
         }
 
-        #endregion
-
-        #region Gateway Operations
-
-        public Task<bool> RequiresGatewayUnlockAsync()
-        {
-            return Task.FromResult(_patsService?.CurrentVehicle?.Is2020Plus ?? false);
-        }
+        public Task<bool> RequiresGatewayUnlockAsync() => Task.FromResult(_patsService?.CurrentVehicle?.Is2020Plus ?? false);
 
         public async Task<GatewayResult> UnlockGatewayAsync(string incode)
         {
             if (_patsService == null) return new GatewayResult { Success = false, Error = "Not connected" };
-
             try
             {
                 Log("Unlocking gateway...");
@@ -254,14 +202,7 @@ namespace PatsKillerPro.Services
             }
         }
 
-        #endregion
-
-        #region Utility Operations
-
-        public async Task<double> ReadBatteryVoltageAsync()
-        {
-            return await Task.FromResult(_patsService?.BatteryVoltage ?? 0);
-        }
+        public Task<double> ReadBatteryVoltageAsync() => Task.FromResult(_patsService?.BatteryVoltage ?? 0);
 
         public async Task<J2534Result> ClearCrashFlagAsync()
         {
@@ -270,15 +211,11 @@ namespace PatsKillerPro.Services
             return result ? J2534Result.Ok() : J2534Result.Fail("Clear failed");
         }
 
-        public Task<J2534Result> ClearTheftFlagAsync()
-        {
-            return ClearCrashFlagAsync(); // Same operation
-        }
+        public Task<J2534Result> ClearTheftFlagAsync() => ClearCrashFlagAsync();
 
         public async Task<J2534Result> RestoreBcmDefaultsAsync()
         {
             if (_patsService == null) return J2534Result.Fail("Not connected");
-            // TODO: Implement BCM defaults restore
             await Task.Delay(100);
             return J2534Result.Ok();
         }
@@ -286,7 +223,6 @@ namespace PatsKillerPro.Services
         public async Task<DtcResult> ReadDtcsAsync()
         {
             if (_patsService == null) return new DtcResult { Success = false };
-
             try
             {
                 var dtcs = await _patsService.ReadDtcsAsync();
@@ -318,12 +254,7 @@ namespace PatsKillerPro.Services
             return J2534Result.Ok();
         }
 
-        #endregion
-
-        private void Log(string message)
-        {
-            LogMessage?.Invoke(this, message);
-        }
+        private void Log(string message) => LogMessage?.Invoke(this, message);
 
         public void Dispose()
         {
@@ -336,13 +267,10 @@ namespace PatsKillerPro.Services
         }
     }
 
-    #region Result Classes
-
     public class J2534Result
     {
         public bool Success { get; set; }
         public string? Error { get; set; }
-
         public static J2534Result Ok() => new() { Success = true };
         public static J2534Result Fail(string error) => new() { Success = false, Error = error };
     }
@@ -400,6 +328,4 @@ namespace PatsKillerPro.Services
         public int Total { get; set; }
         public string? Message { get; set; }
     }
-
-    #endregion
 }
