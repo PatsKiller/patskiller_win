@@ -406,6 +406,37 @@ namespace PatsKillerPro.Services
             }
         });
 
+        public Task<OperationResult> VehicleResetAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                var success = await _patsService.VehicleResetAsync();
+                return success ? OperationResult.Ok() : OperationResult.Fail("Vehicle reset failed.");
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        /// <summary>
+        /// Synchronous disconnect for use in form closing
+        /// </summary>
+        public void Disconnect()
+        {
+            try
+            {
+                _patsService?.Disconnect();
+                try { _api?.Dispose(); } catch { }
+                _patsService = null;
+                _api = null;
+            }
+            catch { /* ignore on shutdown */ }
+        }
+
         // ---------------- Result Types ----------------
 
         public record OperationResult(bool Success, string? Error = null)

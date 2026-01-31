@@ -330,6 +330,18 @@ namespace PatsKillerPro.J2534
             });
         }
 
+        public async Task<bool> VehicleResetAsync()
+        {
+            return await Task.Run(async () =>
+            {
+                await Task.Delay(10);
+                _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
+
+                // ECU Reset - hard reset (0x01)
+                return _uds.EcuReset(0x01);
+            });
+        }
+
         #endregion
 
         #region Helpers
