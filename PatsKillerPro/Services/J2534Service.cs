@@ -65,10 +65,10 @@ namespace PatsKillerPro.Services
             try
             {
                 Log($"Connecting to {device.Name}...");
-                
+
                 _api = new J2534Api(device.FunctionLibrary);
                 _patsService = new FordPatsService(_api);
-                
+
                 var connected = await _patsService.ConnectAsync();
                 if (connected)
                 {

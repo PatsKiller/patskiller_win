@@ -443,8 +443,6 @@ namespace PatsKillerPro
             };
             _btnTab1 = TabBtn("PATS Key Programming", true);
             _btnTab1.Click += (s, e) => SwitchTab(0);
-            
-            AutoStartOnce();
             tabFlow.Controls.Add(_btnTab1);
             _btnTab2 = TabBtn("Diagnostics", false);
             _btnTab2.Click += (s, e) => SwitchTab(1);
@@ -857,7 +855,7 @@ namespace PatsKillerPro
 
         #region Navigation
         private void ShowLogin() { _loginPanel.Visible = true; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = false; }
-        private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = true; SwitchTab(0); }
+        private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = true; SwitchTab(0); AutoStartOnce(); }
         private void SwitchTab(int i) { _activeTab = i; _btnTab1.BackColor = i == 0 ? ACCENT : BTN_BG; _btnTab2.BackColor = i == 1 ? ACCENT : BTN_BG; _btnTab3.BackColor = i == 2 ? ACCENT : BTN_BG; _patsTab.Visible = i == 0; _diagTab.Visible = i == 1; _freeTab.Visible = i == 2; }
         #endregion
 
@@ -936,36 +934,36 @@ namespace PatsKillerPro
         }
 
         private async void BtnReadVin_Click(object? s, EventArgs e)
+{
+    if (!_isConnected)
+    {
+        MessageBox.Show("Connect to a device first");
+        return;
+    }
+
+    try
+    {
+        var result = await J2534Service.Instance.ReadVehicleInfoAsync();
+        if (result.Success && !string.IsNullOrEmpty(result.Vin))
         {
-            if (!_isConnected)
-            {
-                MessageBox.Show("Connect to a device first");
-                return;
-            }
-
-            try
-            {
-                var result = await J2534Service.Instance.ReadVehicleInfoAsync();
-                if (result.Success && !string.IsNullOrEmpty(result.Vin))
-                {
-                    _lblVin.Text = $"VIN: {result.Vin}";
-                    _lblVin.ForeColor = SUCCESS;
-                    Log("success", $"VIN: {result.Vin}");
-                }
-                else
-                {
-                    _lblVin.Text = "VIN: Could not read";
-                    _lblVin.ForeColor = DANGER;
-                    Log("error", result.Error ?? "Failed to read VIN");
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowError("Read Failed", "Could not read VIN", ex);
-            }
+            _lblVin.Text = $"VIN: {result.Vin}";
+            _lblVin.ForeColor = SUCCESS;
+            Log("success", $"VIN: {result.Vin}");
         }
+        else
+        {
+            _lblVin.Text = "VIN: Could not read";
+            _lblVin.ForeColor = DANGER;
+            Log("error", result.Error ?? "Failed to read VIN");
+        }
+    }
+    catch (Exception ex)
+    {
+        ShowError("Read Failed", "Could not read VIN", ex);
+    }
+}
 
-        private async void BtnGetIncode_Click(object? s, EventArgs e)
+private async void BtnGetIncode_Click(object? s, EventArgs e)
         {
             if (!_isConnected)
             {
@@ -1326,12 +1324,15 @@ namespace PatsKillerPro
             try
             {
                 var result = await J2534Service.Instance.ReadVehicleInfoAsync();
-                if (result.Success)
+                if (result.Success && result.VehicleInfo != null)
                 {
-                    var info = $"VIN: {result.Vin ?? "N/A"}\n" +
-                              $"Year: {result.VehicleInfo?.Year.ToString() ?? "N/A"}\n" +
-                              $"Model: {result.VehicleInfo?.Model ?? "N/A"}\n" +
-                              $"Battery: {result.BatteryVoltage:F1}V";
+                    var info = $"VIN: {result.Vin ?? "N/A"}
+" +
+           $"Year: {result.VehicleInfo?.Year.ToString() ?? "N/A"}
+" +
+           $"Model: {result.VehicleInfo?.Model ?? "N/A"}
+" +
+           $"Battery: {result.BatteryVoltage:F1}V";
                     MessageBox.Show(info, "Module Info");
                     Log("success", "Module info read");
                 }
