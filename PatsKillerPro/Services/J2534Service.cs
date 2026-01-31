@@ -370,11 +370,11 @@ namespace PatsKillerPro.Services
             public static DeviceListResult Fail(string error) => new(false, new List<J2534DeviceInfo>(), error);
         }
 
-        public record VehicleInfoResult(bool Success, VehicleInfo? VehicleInfo, string? Vin, double BatteryVoltage, string? Error = null)
-        {
-            public static VehicleInfoResult Ok(VehicleInfo info, string vin, double battery) => new(true, info, vin, battery);
-            public static VehicleInfoResult Fail(string error) => new(false, null, null, 0, error);
-        }
+       public record VehicleInfoResult(bool Success, J2534.VehicleInfo? VehicleInfo, string? Vin, double BatteryVoltage, string? Error = null)
+{
+    public static VehicleInfoResult Ok(J2534.VehicleInfo info, string vin, double battery) => new(true, info, vin, battery);
+    public static VehicleInfoResult Fail(string error) => new(false, null, null, 0, error);
+}
 
         public record OutcodeResult(bool Success, string? Outcode, string? Error = null)
         {
