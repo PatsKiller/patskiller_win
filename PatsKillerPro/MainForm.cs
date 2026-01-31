@@ -995,81 +995,134 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
         #endregion
 
         #region PATS - Using J2534Service Singleton
-        private async void BtnProgram_Click(object? s, EventArgs e)
+private async void BtnProgram_Click(object? s, EventArgs e)
+{
+    if (!_isConnected)
+    {
+        MessageBox.Show("Connect to a device first");
+        return;
+    }
+
+    var ic = _txtIncode.Text.Trim();
+    if (string.IsNullOrEmpty(ic))
+    {
+        MessageBox.Show("Enter incode first");
+        return;
+    }
+
+    try
+    {
+        Log("info", "Programming key...");
+
+        // 1) Unlock PATS security using the provided incode
+        var unlock = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
+        if (!unlock.Success)
         {
-            if (!_isConnected)
-            {
-                MessageBox.Show("Connect to a device first");
-                return;
-            }
-
-            var ic = _txtIncode.Text.Trim();
-            if (string.IsNullOrEmpty(ic))
-            {
-                MessageBox.Show("Enter incode first");
-                return;
-            }
-
-            try
-            {
-                Log("info", "Programming key...");
-                var result = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
-                if (result.Success)
-                {
-                    MessageBox.Show("Key programmed successfully!\n\nRemove key, insert next key, and click Program again.");
-                    Log("success", "Key programmed");
-                }
-                else
-                {
-                    Log("error", result.Error ?? "Programming failed");
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowError("Program Failed", "Could not program key", ex);
-            }
+            var msg = unlock.Error ?? "Incode rejected";
+            Log("error", msg);
+            MessageBox.Show($"Incode rejected: {msg}");
+            return;
         }
 
-        private async void BtnErase_Click(object? s, EventArgs e)
+        // 2) Determine next slot based on current key count
+        var kc = await J2534Service.Instance.ReadKeyCountAsync();
+        int current = kc.Success ? kc.KeyCount : 0;
+        int max = kc.Success ? kc.MaxKeys : 8;
+
+        if (current >= max)
         {
-            if (!_isConnected)
-            {
-                MessageBox.Show("Connect to a device first");
-                return;
-            }
-
-            if (!Confirm(1, "Erase All Keys"))
-                return;
-
-            if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!\n\nAre you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-                return;
-
-            var ic = _txtIncode.Text.Trim();
-            if (string.IsNullOrEmpty(ic))
-            {
-                MessageBox.Show("Enter incode first");
-                return;
-            }
-
-            try
-            {
-                Log("info", "Erasing all keys...");
-                var result = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
-                if (result.Success)
-                {
-                    MessageBox.Show("All keys erased!");
-                    Log("success", "Keys erased");
-                }
-                else
-                {
-                    Log("error", result.Error ?? "Erase failed");
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowError("Erase Failed", "Could not erase keys", ex);
-            }
+            var msg = $"Max keys already programmed ({current}/{max}). Erase keys first if you need to add a new one.";
+            Log("warning", msg);
+            MessageBox.Show(msg);
+            _lblKeys.Text = current.ToString();
+            return;
         }
+
+        int nextSlot = current + 1;
+
+        // 3) Perform the actual key programming operation
+        var prog = await J2534Service.Instance.ProgramKeyAsync(ic, nextSlot);
+        if (prog.Success)
+        {
+            _lblKeys.Text = prog.CurrentKeyCount.ToString();
+            MessageBox.Show($"Key programmed successfully!
+
+Keys now: {prog.CurrentKeyCount}
+
+Remove key, insert next key, and click Program again.");
+            Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
+        }
+        else
+        {
+            var msg = prog.Error ?? "Programming failed";
+            Log("error", msg);
+            MessageBox.Show($"Programming failed: {msg}");
+        }
+    }
+    catch (Exception ex)
+    {
+        ShowError("Program Failed", "Could not program key", ex);
+    }
+}
+private async void BtnErase_Click(object? s, EventArgs e)
+{
+    if (!_isConnected)
+    {
+        MessageBox.Show("Connect to a device first");
+        return;
+    }
+
+    if (!Confirm(1, "Erase All Keys"))
+        return;
+
+    if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!
+
+Are you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        return;
+
+    var ic = _txtIncode.Text.Trim();
+    if (string.IsNullOrEmpty(ic))
+    {
+        MessageBox.Show("Enter incode first");
+        return;
+    }
+
+    try
+    {
+        Log("info", "Erasing all keys...");
+
+        // 1) Unlock PATS security using the provided incode
+        var unlock = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
+        if (!unlock.Success)
+        {
+            var msg = unlock.Error ?? "Incode rejected";
+            Log("error", msg);
+            MessageBox.Show($"Incode rejected: {msg}");
+            return;
+        }
+
+        // 2) Perform the actual erase operation
+        var erase = await J2534Service.Instance.EraseAllKeysAsync(ic);
+        if (erase.Success)
+        {
+            _lblKeys.Text = erase.CurrentKeyCount.ToString();
+            MessageBox.Show($"All keys erased!
+
+Keys remaining: {erase.CurrentKeyCount}");
+            Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
+        }
+        else
+        {
+            var msg = erase.Error ?? "Erase failed";
+            Log("error", msg);
+            MessageBox.Show($"Erase failed: {msg}");
+        }
+    }
+    catch (Exception ex)
+    {
+        ShowError("Erase Failed", "Could not erase keys", ex);
+    }
+}
 
         private async void BtnParam_Click(object? s, EventArgs e)
         {
