@@ -15,7 +15,7 @@ namespace PatsKillerPro.Services.Workflow
         private readonly object _lock = new();
         private readonly Dictionary<uint, ModuleSessionInfo> _moduleSessions = new();
         private readonly Action<string>? _log;
-        private Timer? _expirationTimer;
+        private System.Threading.Timer? _expirationTimer;
         private bool _disposed;
 
         /// <summary>Event fired when security session is about to expire</summary>
