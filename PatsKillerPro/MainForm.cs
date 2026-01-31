@@ -34,6 +34,17 @@ namespace PatsKillerPro
         private int _tokenBalance = 0;
         private List<J2534DeviceInfo> _devices = new();
         private bool _isConnected = false;
+        private bool _uiBusy = false;
+
+        private void SetUiBusy(bool busy)
+        {
+            if (_uiBusy == busy) return;
+            _uiBusy = busy;
+            if (_content != null) _content.Enabled = !busy;
+            if (_tabBar != null) _tabBar.Enabled = !busy;
+            Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
+        }
+
         private int _activeTab = 0;
         private bool _didAutoStart = false;
 
@@ -59,6 +70,14 @@ namespace PatsKillerPro
             InitializeComponent();
             ApplyDarkTitleBar();
             BuildUI();
+
+            // Centralized UI busy gating (prevents double-click / out-of-order ops).
+            J2534Service.Instance.BusyChanged += busy =>
+            {
+                if (IsDisposed) return;
+                try { BeginInvoke(new Action(() => SetUiBusy(busy))); } catch { /* ignore */ }
+            };
+
             LoadSession();
 
             // Dispose cached images cleanly

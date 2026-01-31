@@ -1,430 +1,469 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using PatsKillerPro.J2534;
+using PatsKillerPro.Vehicle;
 
 namespace PatsKillerPro.Services
 {
-    /// <summary>
-    /// J2534 Service for PatsKiller Pro Desktop Application
-    /// Wraps the J2534 library for use by MainForm
-    /// </summary>
-    public class J2534Service : IDisposable
+    public sealed class J2534Service
     {
-        private static J2534Service? _instance;
-        public static J2534Service Instance => _instance ??= new J2534Service();
+        public static J2534Service Instance { get; } = new J2534Service();
+
+        private readonly SemaphoreSlim _opLock = new(1, 1);
+        private bool _isBusy;
 
         private J2534Api? _api;
+        private int _channelId = 0;
+        private J2534DeviceInfo? _currentDevice;
         private FordPatsService? _patsService;
-        private J2534DeviceInfo? _connectedDevice;
-        private bool _disposed;
 
-        // Events for UI updates
-        public event EventHandler<string>? LogMessage;
-        public event EventHandler<double>? VoltageChanged;
-        public event EventHandler<J2534ProgressEventArgs>? ProgressChanged;
+        public Action<string>? Log { get; set; }
 
-        public bool IsConnected => _patsService != null;
-        public J2534DeviceInfo? ConnectedDevice => _connectedDevice;
-        public string? CurrentVin => _patsService?.CurrentVin;
-        public string? CurrentOutcode => _patsService?.CurrentOutcode;
-        public VehicleInfo? CurrentVehicle => _patsService?.CurrentVehicle;
-        public double BatteryVoltage => _patsService?.BatteryVoltage ?? 0;
-        public string? ConnectedDeviceName => _connectedDevice?.Name;
-        public int KeyCount => _patsService?.KeyCount ?? 0;
-        public bool IsSecurityUnlocked => _patsService?.IsSecurityUnlocked ?? false;
+        public bool IsBusy => _isBusy;
+        public event Action<bool>? BusyChanged;
 
         private J2534Service() { }
 
-        #region Device Scanning
-
-        public Task<List<J2534DeviceInfo>> ScanForDevicesAsync()
+        private void SetBusy(bool busy)
         {
-            return Task.Run(() =>
-            {
-                Log("Scanning for J2534 devices...");
-                var devices = J2534DeviceScanner.ScanForDevices();
-                Log($"Found {devices.Count} device(s)");
-                foreach (var d in devices)
-                    Log($"  - {d.Name} ({d.Vendor})");
-                return devices;
-            });
+            if (_isBusy == busy) return;
+            _isBusy = busy;
+            try { BusyChanged?.Invoke(busy); } catch { /* UI listeners shouldn't take down ops */ }
         }
 
-        public J2534DeviceInfo? GetFirstAvailableDevice()
+        private static bool IsTransientError(string? error)
         {
-            return J2534DeviceScanner.GetFirstAvailableDevice();
+            if (string.IsNullOrWhiteSpace(error)) return false;
+            var e = error.Trim().ToLowerInvariant();
+
+            // Common "works 7/10 times" culprits: timeouts, no response, bus glitches.
+            return e.Contains("timeout") ||
+                   e.Contains("timed out") ||
+                   e.Contains("no response") ||
+                   e.Contains("buffer empty") ||
+                   e.Contains("readmsgs") ||
+                   e.Contains("writemsgs") ||
+                   e.Contains("lost") ||
+                   e.Contains("bus") ||
+                   e.Contains("err_timeout");
         }
 
-        #endregion
-
-        #region Connection
-
-        public async Task<J2534Result> ConnectDeviceAsync(J2534DeviceInfo device)
+        private async Task<T> RunExclusiveAsync<T>(Func<Task<T>> op)
         {
+            await _opLock.WaitAsync().ConfigureAwait(false);
+            SetBusy(true);
             try
             {
-                Log($"Connecting to {device.Name}...");
+                return await op().ConfigureAwait(false);
+            }
+            finally
+            {
+                SetBusy(false);
+                _opLock.Release();
+            }
+        }
 
-                _api = new J2534Api(device.FunctionLibrary);
-                _patsService = new FordPatsService(_api);
-
-                var connected = await _patsService.ConnectAsync();
-                if (connected)
+        private static async Task<T> WithRetriesAsync<T>(
+            Func<Task<T>> op,
+            Func<T, bool> shouldRetry,
+            int maxAttempts = 3,
+            int baseDelayMs = 250)
+        {
+            Exception? lastEx = null;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
                 {
-                    _connectedDevice = device;
-                    Log($"Connected to {device.Name}");
-                    return J2534Result.Ok();
+                    var result = await op().ConfigureAwait(false);
+                    if (!shouldRetry(result) || attempt == maxAttempts)
+                        return result;
                 }
-                else
+                catch (Exception ex)
                 {
-                    _api?.Dispose();
-                    _api = null;
-                    _patsService = null;
-                    return J2534Result.Fail("Connection failed");
+                    lastEx = ex;
+                    if (attempt == maxAttempts) throw;
                 }
+
+                var delay = Math.Min(1500, baseDelayMs * (1 << (attempt - 1)));
+                await Task.Delay(delay).ConfigureAwait(false);
+            }
+
+            // should never hit
+            if (lastEx != null) throw lastEx;
+            throw new InvalidOperationException("Retry loop exited unexpectedly.");
+        }
+
+        public Task<DeviceListResult> ListDevicesAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                Log?.Invoke("Scanning for J2534 devices...");
+
+                var scanner = new J2534DeviceScanner();
+                var devices = scanner.GetDevices().ToList();
+
+                Log?.Invoke($"Found {devices.Count} device(s).");
+                return DeviceListResult.Ok(devices);
             }
             catch (Exception ex)
             {
-                Log($"Connection error: {ex.Message}");
-                _api?.Dispose();
-                _api = null;
-                _patsService = null;
-                return J2534Result.Fail(ex.Message);
+                return DeviceListResult.Fail(ex.Message);
             }
-        }
+        });
 
-        public Task DisconnectDeviceAsync()
+        public Task<OperationResult> ConnectDeviceAsync(J2534DeviceInfo device) => RunExclusiveAsync(async () =>
         {
-            return Task.Run(() =>
-            {
-                _patsService?.Disconnect();
-                _api?.Dispose();
-                _api = null;
-                _patsService = null;
-                _connectedDevice = null;
-                Log("Disconnected");
-            });
-        }
-
-        public void Disconnect()
-        {
-            _patsService?.Disconnect();
-            _api?.Dispose();
-            _api = null;
-            _patsService = null;
-            _connectedDevice = null;
-        }
-
-        #endregion
-
-        #region Vehicle Operations
-
-        public Task<VehicleReadResult> ReadVehicleInfoAsync() => ReadVehicleAsync();
-
-        public async Task<VehicleReadResult> ReadVehicleAsync()
-        {
-            if (_patsService == null) return new VehicleReadResult { Success = false, Error = "Not connected" };
-
             try
             {
-                Log("Reading vehicle...");
-                var vehicle = await _patsService.ReadVehicleInfoAsync();
-                var outcode = await _patsService.ReadOutcodeAsync();
+                _currentDevice = device;
+                Log?.Invoke($"Opening device: {device.Name} ({device.DllPath})");
 
-                return new VehicleReadResult
+                _api = new J2534Api();
+                _api.LoadDllAndOpenDevice(device.DllPath);
+
+                // ISO15765, 500kbps (most HS CAN). Bus-specific variants are handled deeper.
+                _channelId = _api.PassThruConnect(Protocols.ISO15765, 500000);
+
+                _patsService = new FordPatsService(_api, device);
+                _patsService.SetChannel(_channelId);
+
+                // Retry the first handshake; the first attempt can fail if the adapter is "waking up".
+                var patsConnect = await WithRetriesAsync(
+                    () => _patsService.ConnectAsync(),
+                    r => !r.Success && IsTransientError(r.Error),
+                    maxAttempts: 3,
+                    baseDelayMs: 300
+                ).ConfigureAwait(false);
+
+                if (!patsConnect.Success)
+                    return OperationResult.Fail(patsConnect.Error ?? "PATS service connect failed.");
+
+                Log?.Invoke("Connected successfully.");
+                return OperationResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        public Task<OperationResult> DisconnectAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_api != null)
                 {
-                    Success = true,
-                    Vin = _patsService.CurrentVin,
-                    Outcode = outcode,
-                    VehicleInfo = vehicle,
-                    BatteryVoltage = _patsService.BatteryVoltage
-                };
+                    try
+                    {
+                        if (_channelId != 0)
+                            _api.PassThruDisconnect(_channelId);
+                    }
+                    catch { /* ignore */ }
+
+                    try { _api.PassThruCloseDevice(); } catch { /* ignore */ }
+                }
+
+                _channelId = 0;
+                _patsService = null;
+                _api = null;
+
+                await Task.Delay(50).ConfigureAwait(false);
+                Log?.Invoke("Disconnected.");
+                return OperationResult.Ok();
             }
             catch (Exception ex)
             {
-                return new VehicleReadResult { Success = false, Error = ex.Message };
+                return OperationResult.Fail(ex.Message);
             }
-        }
+        });
 
-        public async Task<OutcodeResult> ReadModuleOutcodeAsync(string module)
+        public Task<VehicleInfoResult> ReadVehicleInfoAsync() => RunExclusiveAsync(async () =>
         {
-            if (_patsService == null) return new OutcodeResult { Success = false, Error = "Not connected" };
-
             try
             {
-                var outcode = await _patsService.ReadOutcodeAsync(module);
-                return new OutcodeResult { Success = !string.IsNullOrEmpty(outcode), Outcode = outcode };
+                if (_patsService == null)
+                    return VehicleInfoResult.Fail("Not connected.");
+
+                var result = await WithRetriesAsync(
+                    () => _patsService.ReadVehicleInfoAsync(),
+                    r => !r.Success && IsTransientError(r.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 250
+                ).ConfigureAwait(false);
+
+                if (!result.Success || result.VehicleInfo == null)
+                    return VehicleInfoResult.Fail(result.Error ?? "Unable to read vehicle info.");
+
+                return VehicleInfoResult.Ok(result.VehicleInfo, _patsService.CurrentVin, _patsService.BatteryVoltage);
             }
             catch (Exception ex)
             {
-                return new OutcodeResult { Success = false, Error = ex.Message };
+                return VehicleInfoResult.Fail(ex.Message);
             }
-        }
+        });
 
-        public Task<OutcodeResult> ReadOutcodeAsync() => ReadModuleOutcodeAsync("PCM");
-
-        public async Task<J2534Result> SubmitIncodeAsync(string module, string incode)
+        public Task<OutcodeResult> ReadOutcodeAsync() => RunExclusiveAsync(async () =>
         {
-            if (_patsService == null) return J2534Result.Fail("Not connected");
-
             try
             {
-                var result = await _patsService.SubmitIncodeAsync(module, incode);
-                return result ? J2534Result.Ok() : J2534Result.Fail("Incode rejected");
+                if (_patsService == null)
+                    return OutcodeResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.ReadOutcodeAsync(),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 3,
+                    baseDelayMs: 300
+                ).ConfigureAwait(false);
+
+                if (!r.Success || string.IsNullOrWhiteSpace(r.Outcode))
+                    return OutcodeResult.Fail(r.Error ?? "Failed to read outcode.");
+
+                return OutcodeResult.Ok(r.Outcode);
             }
             catch (Exception ex)
             {
-                return J2534Result.Fail(ex.Message);
+                return OutcodeResult.Fail(ex.Message);
             }
-        }
+        });
 
-        #endregion
-
-        #region Key Operations
-
-        public async Task<KeyOperationResult> EraseAllKeysAsync(string incode)
+        public Task<OperationResult> SubmitIncodeAsync(string module, string incode) => RunExclusiveAsync(async () =>
         {
-            if (_patsService == null) return new KeyOperationResult { Success = false, Error = "Not connected" };
-
             try
             {
-                Log("Erasing all keys...");
-                var result = await _patsService.EraseAllKeysAsync();
-                var keyCount = await _patsService.ReadKeyCountAsync();
-                return new KeyOperationResult 
-                { 
-                    Success = result, 
-                    CurrentKeyCount = keyCount,
-                    KeysAffected = result ? 8 : 0 
-                };
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.SubmitIncodeAsync(module, incode),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 300
+                ).ConfigureAwait(false);
+
+                return r.Success ? OperationResult.Ok() : OperationResult.Fail(r.Error ?? "Incode rejected.");
             }
             catch (Exception ex)
             {
-                return new KeyOperationResult { Success = false, Error = ex.Message };
+                return OperationResult.Fail(ex.Message);
             }
-        }
+        });
 
-        public async Task<KeyOperationResult> ProgramKeyAsync(string incode, int slot)
+        public Task<KeyOperationResult> ProgramKeyAsync(string incode, int slot) => RunExclusiveAsync(async () =>
         {
-            if (_patsService == null) return new KeyOperationResult { Success = false, Error = "Not connected" };
-
             try
             {
-                Log($"Programming key slot {slot}...");
-                var result = await _patsService.ProgramKeyAsync(slot);
-                var keyCount = await _patsService.ReadKeyCountAsync();
-                return new KeyOperationResult 
-                { 
-                    Success = result, 
-                    CurrentKeyCount = keyCount,
-                    KeysAffected = result ? 1 : 0
-                };
+                if (_patsService == null)
+                    return KeyOperationResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.ProgramKeyAsync(incode, slot),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 400
+                ).ConfigureAwait(false);
+
+                return r.Success
+                    ? KeyOperationResult.Ok(r.CurrentKeyCount)
+                    : KeyOperationResult.Fail(r.Error ?? "Key programming failed.");
             }
             catch (Exception ex)
             {
-                return new KeyOperationResult { Success = false, Error = ex.Message };
+                return KeyOperationResult.Fail(ex.Message);
             }
-        }
+        });
 
-        public async Task<KeyCountResult> ReadKeyCountAsync()
+        public Task<KeyOperationResult> EraseAllKeysAsync(string incode) => RunExclusiveAsync(async () =>
         {
-            if (_patsService == null) return new KeyCountResult { Success = false, Error = "Not connected" };
-
             try
             {
-                var count = await _patsService.ReadKeyCountAsync();
-                return new KeyCountResult { Success = true, KeyCount = count, MaxKeys = 8 };
+                if (_patsService == null)
+                    return KeyOperationResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.EraseAllKeysAsync(incode),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 400
+                ).ConfigureAwait(false);
+
+                return r.Success
+                    ? KeyOperationResult.Ok(r.CurrentKeyCount)
+                    : KeyOperationResult.Fail(r.Error ?? "Erase failed.");
             }
             catch (Exception ex)
             {
-                return new KeyCountResult { Success = false, Error = ex.Message };
+                return KeyOperationResult.Fail(ex.Message);
             }
-        }
+        });
 
-        #endregion
-
-        #region Gateway Operations
-
-        public Task<bool> RequiresGatewayUnlockAsync()
+        public Task<KeyCountResult> ReadKeyCountAsync() => RunExclusiveAsync(async () =>
         {
-            return Task.FromResult(_patsService?.CurrentVehicle?.Is2020Plus ?? false);
-        }
-
-        public Task<GatewayResult> CheckGatewayAsync()
-        {
-            var hasGateway = _patsService?.CurrentVehicle?.Is2020Plus ?? false;
-            return Task.FromResult(new GatewayResult 
-            { 
-                Success = true, 
-                HasGateway = hasGateway 
-            });
-        }
-
-        public async Task<GatewayResult> UnlockGatewayAsync(string incode)
-        {
-            if (_patsService == null) return new GatewayResult { Success = false, Error = "Not connected" };
-
             try
             {
-                Log("Unlocking gateway...");
-                var result = await _patsService.UnlockGatewayAsync(incode);
-                return new GatewayResult { Success = result, SessionDurationSeconds = result ? 600 : 0 };
+                if (_patsService == null)
+                    return KeyCountResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.ReadKeyCountAsync(),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 250
+                ).ConfigureAwait(false);
+
+                return r.Success
+                    ? KeyCountResult.Ok(r.KeyCount)
+                    : KeyCountResult.Fail(r.Error ?? "Failed to read key count.");
             }
             catch (Exception ex)
             {
-                return new GatewayResult { Success = false, Error = ex.Message };
+                return KeyCountResult.Fail(ex.Message);
             }
-        }
+        });
 
-        #endregion
-
-        #region Utility Operations
-
-        public async Task<double> ReadBatteryVoltageAsync()
+        public Task<GatewayResult> UnlockGatewayAsync(string incode) => RunExclusiveAsync(async () =>
         {
-            return await Task.FromResult(_patsService?.BatteryVoltage ?? 0);
-        }
-
-        public async Task<J2534Result> ClearCrashFlagAsync()
-        {
-            if (_patsService == null) return J2534Result.Fail("Not connected");
-            var result = await _patsService.ClearCrashEventAsync();
-            return result ? J2534Result.Ok() : J2534Result.Fail("Clear failed");
-        }
-
-        public Task<J2534Result> ClearTheftFlagAsync()
-        {
-            return ClearCrashFlagAsync(); // Same operation
-        }
-
-        public async Task<J2534Result> RestoreBcmDefaultsAsync()
-        {
-            if (_patsService == null) return J2534Result.Fail("Not connected");
-            // TODO: Implement BCM defaults restore
-            await Task.Delay(100);
-            return J2534Result.Ok();
-        }
-
-        public async Task<DtcResult> ReadDtcsAsync()
-        {
-            if (_patsService == null) return new DtcResult { Success = false };
-
             try
             {
-                var dtcs = await _patsService.ReadDtcsAsync();
-                return new DtcResult { Success = true, Dtcs = dtcs, DtcCount = dtcs.Length };
+                if (_patsService == null)
+                    return GatewayResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.UnlockGatewayAsync(incode),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 400
+                ).ConfigureAwait(false);
+
+                return r.Success
+                    ? GatewayResult.Ok(r.HasGateway)
+                    : GatewayResult.Fail(r.Error ?? "Gateway op failed.");
             }
-            catch
+            catch (Exception ex)
             {
-                return new DtcResult { Success = false };
+                return GatewayResult.Fail(ex.Message);
             }
-        }
+        });
 
-        public async Task<J2534Result> ClearDtcsAsync()
+        public Task<OperationResult> ClearCrashEventAsync() => RunExclusiveAsync(async () =>
         {
-            if (_patsService == null) return J2534Result.Fail("Not connected");
-            var result = await _patsService.ClearCrashEventAsync();
-            return result ? J2534Result.Ok() : J2534Result.Fail("Clear DTCs failed");
-        }
-
-        public async Task<J2534Result> InitializePatsAsync()
-        {
-            if (_patsService == null) return J2534Result.Fail("Not connected");
-            var result = await _patsService.InitializePatsAsync();
-            return result ? J2534Result.Ok() : J2534Result.Fail("Init failed");
-        }
-
-        public async Task<J2534Result> VehicleResetAsync()
-        {
-            await Task.Delay(100);
-            return J2534Result.Ok();
-        }
-
-        #endregion
-
-        private void Log(string message)
-        {
-            LogMessage?.Invoke(this, message);
-        }
-
-        public void Dispose()
-        {
-            if (!_disposed)
+            try
             {
-                _patsService?.Disconnect();
-                _api?.Dispose();
-                _disposed = true;
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.ClearCrashEventAsync(),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 300
+                ).ConfigureAwait(false);
+
+                return r.Success ? OperationResult.Ok() : OperationResult.Fail(r.Error ?? "Crash clear failed.");
             }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        public Task<DtcResult> ReadDtcsAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return DtcResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.ReadDtcsAsync(),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 300
+                ).ConfigureAwait(false);
+
+                return r.Success
+                    ? DtcResult.Ok(r.Dtcs ?? new List<string>())
+                    : DtcResult.Fail(r.Error ?? "DTC read failed.");
+            }
+            catch (Exception ex)
+            {
+                return DtcResult.Fail(ex.Message);
+            }
+        });
+
+        public Task<OperationResult> InitializePatsAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                var r = await WithRetriesAsync(
+                    () => _patsService.InitializePatsAsync(),
+                    x => !x.Success && IsTransientError(x.Error),
+                    maxAttempts: 2,
+                    baseDelayMs: 400
+                ).ConfigureAwait(false);
+
+                return r.Success ? OperationResult.Ok() : OperationResult.Fail(r.Error ?? "Init failed.");
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        // ---------------- Results ----------------
+
+        public record OperationResult(bool Success, string? Error = null)
+        {
+            public static OperationResult Ok() => new(true);
+            public static OperationResult Fail(string error) => new(false, error);
+        }
+
+        public record DeviceListResult(bool Success, List<J2534DeviceInfo> Devices, string? Error = null)
+        {
+            public static DeviceListResult Ok(List<J2534DeviceInfo> devices) => new(true, devices);
+            public static DeviceListResult Fail(string error) => new(false, new List<J2534DeviceInfo>(), error);
+        }
+
+        public record VehicleInfoResult(bool Success, VehicleInfo? VehicleInfo, string? Vin, double BatteryVoltage, string? Error = null)
+        {
+            public static VehicleInfoResult Ok(VehicleInfo info, string vin, double battery) => new(true, info, vin, battery);
+            public static VehicleInfoResult Fail(string error) => new(false, null, null, 0, error);
+        }
+
+        public record OutcodeResult(bool Success, string? Outcode, string? Error = null)
+        {
+            public static OutcodeResult Ok(string outcode) => new(true, outcode);
+            public static OutcodeResult Fail(string error) => new(false, null, error);
+        }
+
+        public record KeyOperationResult(bool Success, int CurrentKeyCount = 0, string? Error = null)
+        {
+            public static KeyOperationResult Ok(int count) => new(true, count);
+            public static KeyOperationResult Fail(string error) => new(false, 0, error);
+        }
+
+        public record KeyCountResult(bool Success, int KeyCount = 0, string? Error = null)
+        {
+            public static KeyCountResult Ok(int count) => new(true, count);
+            public static KeyCountResult Fail(string error) => new(false, 0, error);
+        }
+
+        public record GatewayResult(bool Success, bool HasGateway, string? Error = null)
+        {
+            public static GatewayResult Ok(bool hasGw) => new(true, hasGw);
+            public static GatewayResult Fail(string error) => new(false, false, error);
+        }
+
+        public record DtcResult(bool Success, List<string> Dtcs, string? Error = null)
+        {
+            public static DtcResult Ok(List<string> dtcs) => new(true, dtcs);
+            public static DtcResult Fail(string error) => new(false, new List<string>(), error);
         }
     }
-
-    #region Result Classes
-
-    public class J2534Result
-    {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
-
-        public static J2534Result Ok() => new() { Success = true };
-        public static J2534Result Fail(string error) => new() { Success = false, Error = error };
-    }
-
-    public class VehicleReadResult
-    {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
-        public string? Vin { get; set; }
-        public string? Outcode { get; set; }
-        public VehicleInfo? VehicleInfo { get; set; }
-        public double BatteryVoltage { get; set; }
-    }
-
-    public class OutcodeResult
-    {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
-        public string? Outcode { get; set; }
-    }
-
-    public class KeyOperationResult
-    {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
-        public int CurrentKeyCount { get; set; }
-        public int KeysAffected { get; set; }
-    }
-
-    public class KeyCountResult
-    {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
-        public int KeyCount { get; set; }
-        public int MaxKeys { get; set; } = 8;
-    }
-
-    public class GatewayResult
-    {
-        public bool Success { get; set; }
-        public string? Error { get; set; }
-        public int SessionDurationSeconds { get; set; }
-        public bool HasGateway { get; set; }
-    }
-
-    public class DtcResult
-    {
-        public bool Success { get; set; }
-        public string[] Dtcs { get; set; } = Array.Empty<string>();
-        public int DtcCount { get; set; }
-    }
-
-    public class J2534ProgressEventArgs : EventArgs
-    {
-        public string Operation { get; set; } = "";
-        public int Progress { get; set; }
-        public int Total { get; set; }
-        public string? Message { get; set; }
-    }
-
-    #endregion
 }
