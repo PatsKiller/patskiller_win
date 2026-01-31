@@ -4,7 +4,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using PatsKillerPro.J2534;
-using PatsKillerPro.Vehicle;
 
 namespace PatsKillerPro.Services
 {
@@ -16,7 +15,6 @@ namespace PatsKillerPro.Services
         private bool _isBusy;
 
         private J2534Api? _api;
-        private int _channelId = 0;
         private J2534DeviceInfo? _currentDevice;
         private FordPatsService? _patsService;
 
@@ -39,7 +37,6 @@ namespace PatsKillerPro.Services
             if (string.IsNullOrWhiteSpace(error)) return false;
             var e = error.Trim().ToLowerInvariant();
 
-            // Common "works 7/10 times" culprits: timeouts, no response, bus glitches.
             return e.Contains("timeout") ||
                    e.Contains("timed out") ||
                    e.Contains("no response") ||
@@ -91,7 +88,6 @@ namespace PatsKillerPro.Services
                 await Task.Delay(delay).ConfigureAwait(false);
             }
 
-            // should never hit
             if (lastEx != null) throw lastEx;
             throw new InvalidOperationException("Retry loop exited unexpectedly.");
         }
@@ -102,8 +98,8 @@ namespace PatsKillerPro.Services
             {
                 Log?.Invoke("Scanning for J2534 devices...");
 
-                var scanner = new J2534DeviceScanner();
-                var devices = scanner.GetDevices().ToList();
+                // J2534DeviceScanner is static - use ScanForDevices()
+                var devices = J2534DeviceScanner.ScanForDevices();
 
                 Log?.Invoke($"Found {devices.Count} device(s).");
                 return DeviceListResult.Ok(devices);
@@ -119,27 +115,25 @@ namespace PatsKillerPro.Services
             try
             {
                 _currentDevice = device;
-                Log?.Invoke($"Opening device: {device.Name} ({device.DllPath})");
+                Log?.Invoke($"Opening device: {device.Name} ({device.FunctionLibrary})");
 
-                _api = new J2534Api();
-                _api.LoadDllAndOpenDevice(device.DllPath);
+                // J2534Api constructor just loads the DLL
+                _api = new J2534Api(device.FunctionLibrary);
 
-                // ISO15765, 500kbps (most HS CAN). Bus-specific variants are handled deeper.
-                _channelId = _api.PassThruConnect(Protocols.ISO15765, 500000);
+                // Create PATS service - it handles device/channel through FordUdsProtocol
+                _patsService = new FordPatsService(_api);
 
-                _patsService = new FordPatsService(_api, device);
-                _patsService.SetChannel(_channelId);
-
-                // Retry the first handshake; the first attempt can fail if the adapter is "waking up".
+                // FordPatsService.ConnectAsync() calls FordUdsProtocol.Connect()
+                // which internally does PassThruOpen + PassThruConnect
                 var patsConnect = await WithRetriesAsync(
                     () => _patsService.ConnectAsync(),
-                    r => !r.Success && IsTransientError(r.Error),
+                    r => !r, // ConnectAsync returns bool
                     maxAttempts: 3,
                     baseDelayMs: 300
                 ).ConfigureAwait(false);
 
-                if (!patsConnect.Success)
-                    return OperationResult.Fail(patsConnect.Error ?? "PATS service connect failed.");
+                if (!patsConnect)
+                    return OperationResult.Fail("PATS service connect failed.");
 
                 Log?.Invoke("Connected successfully.");
                 return OperationResult.Ok();
@@ -154,19 +148,13 @@ namespace PatsKillerPro.Services
         {
             try
             {
-                if (_api != null)
-                {
-                    try
-                    {
-                        if (_channelId != 0)
-                            _api.PassThruDisconnect(_channelId);
-                    }
-                    catch { /* ignore */ }
+                // FordPatsService.Disconnect() calls FordUdsProtocol.Disconnect()
+                // which handles PassThruDisconnect and PassThruClose
+                _patsService?.Disconnect();
 
-                    try { _api.PassThruCloseDevice(); } catch { /* ignore */ }
-                }
+                // Dispose the API
+                try { _api?.Dispose(); } catch { /* ignore */ }
 
-                _channelId = 0;
                 _patsService = null;
                 _api = null;
 
@@ -187,17 +175,11 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return VehicleInfoResult.Fail("Not connected.");
 
-                var result = await WithRetriesAsync(
-                    () => _patsService.ReadVehicleInfoAsync(),
-                    r => !r.Success && IsTransientError(r.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 250
-                ).ConfigureAwait(false);
+                var info = await _patsService.ReadVehicleInfoAsync();
+                if (info == null)
+                    return VehicleInfoResult.Fail("Unable to read vehicle info.");
 
-                if (!result.Success || result.VehicleInfo == null)
-                    return VehicleInfoResult.Fail(result.Error ?? "Unable to read vehicle info.");
-
-                return VehicleInfoResult.Ok(result.VehicleInfo, _patsService.CurrentVin, _patsService.BatteryVoltage);
+                return VehicleInfoResult.Ok(info, _patsService.CurrentVin ?? "", _patsService.BatteryVoltage);
             }
             catch (Exception ex)
             {
@@ -212,17 +194,11 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return OutcodeResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.ReadOutcodeAsync(),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 3,
-                    baseDelayMs: 300
-                ).ConfigureAwait(false);
+                var outcode = await _patsService.ReadOutcodeAsync();
+                if (string.IsNullOrEmpty(outcode))
+                    return OutcodeResult.Fail("Unable to read outcode.");
 
-                if (!r.Success || string.IsNullOrWhiteSpace(r.Outcode))
-                    return OutcodeResult.Fail(r.Error ?? "Failed to read outcode.");
-
-                return OutcodeResult.Ok(r.Outcode);
+                return OutcodeResult.Ok(outcode);
             }
             catch (Exception ex)
             {
@@ -237,14 +213,8 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return OperationResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.SubmitIncodeAsync(module, incode),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 300
-                ).ConfigureAwait(false);
-
-                return r.Success ? OperationResult.Ok() : OperationResult.Fail(r.Error ?? "Incode rejected.");
+                var success = await _patsService.SubmitIncodeAsync(module, incode);
+                return success ? OperationResult.Ok() : OperationResult.Fail("Incode rejected.");
             }
             catch (Exception ex)
             {
@@ -259,16 +229,19 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return KeyOperationResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.ProgramKeyAsync(incode, slot),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 400
-                ).ConfigureAwait(false);
+                // First submit incode
+                var unlocked = await _patsService.SubmitIncodeAsync("BCM", incode);
+                if (!unlocked)
+                    return KeyOperationResult.Fail("Incode rejected.");
 
-                return r.Success
-                    ? KeyOperationResult.Ok(r.CurrentKeyCount)
-                    : KeyOperationResult.Fail(r.Error ?? "Key programming failed.");
+                // Then program key
+                var success = await _patsService.ProgramKeyAsync(slot);
+                if (!success)
+                    return KeyOperationResult.Fail("Key programming failed.");
+
+                // Read updated key count
+                var keyCount = await _patsService.ReadKeyCountAsync();
+                return KeyOperationResult.Ok(keyCount);
             }
             catch (Exception ex)
             {
@@ -283,16 +256,19 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return KeyOperationResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.EraseAllKeysAsync(incode),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 400
-                ).ConfigureAwait(false);
+                // First submit incode
+                var unlocked = await _patsService.SubmitIncodeAsync("BCM", incode);
+                if (!unlocked)
+                    return KeyOperationResult.Fail("Incode rejected.");
 
-                return r.Success
-                    ? KeyOperationResult.Ok(r.CurrentKeyCount)
-                    : KeyOperationResult.Fail(r.Error ?? "Erase failed.");
+                // Then erase keys
+                var success = await _patsService.EraseAllKeysAsync();
+                if (!success)
+                    return KeyOperationResult.Fail("Erase failed.");
+
+                // Read updated key count
+                var keyCount = await _patsService.ReadKeyCountAsync();
+                return KeyOperationResult.Ok(keyCount);
             }
             catch (Exception ex)
             {
@@ -307,16 +283,8 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return KeyCountResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.ReadKeyCountAsync(),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 250
-                ).ConfigureAwait(false);
-
-                return r.Success
-                    ? KeyCountResult.Ok(r.KeyCount)
-                    : KeyCountResult.Fail(r.Error ?? "Failed to read key count.");
+                var count = await _patsService.ReadKeyCountAsync();
+                return KeyCountResult.Ok(count);
             }
             catch (Exception ex)
             {
@@ -331,16 +299,8 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return GatewayResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.UnlockGatewayAsync(incode),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 400
-                ).ConfigureAwait(false);
-
-                return r.Success
-                    ? GatewayResult.Ok(r.HasGateway)
-                    : GatewayResult.Fail(r.Error ?? "Gateway op failed.");
+                var success = await _patsService.UnlockGatewayAsync(incode);
+                return success ? GatewayResult.Ok(true) : GatewayResult.Fail("Gateway unlock failed.");
             }
             catch (Exception ex)
             {
@@ -355,14 +315,8 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return OperationResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.ClearCrashEventAsync(),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 300
-                ).ConfigureAwait(false);
-
-                return r.Success ? OperationResult.Ok() : OperationResult.Fail(r.Error ?? "Crash clear failed.");
+                var success = await _patsService.ClearCrashEventAsync();
+                return success ? OperationResult.Ok() : OperationResult.Fail("Clear crash event failed.");
             }
             catch (Exception ex)
             {
@@ -377,16 +331,8 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return DtcResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.ReadDtcsAsync(),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 300
-                ).ConfigureAwait(false);
-
-                return r.Success
-                    ? DtcResult.Ok(r.Dtcs ?? new List<string>())
-                    : DtcResult.Fail(r.Error ?? "DTC read failed.");
+                var dtcs = await _patsService.ReadDtcsAsync();
+                return DtcResult.Ok(dtcs?.ToList() ?? new List<string>());
             }
             catch (Exception ex)
             {
@@ -401,14 +347,8 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return OperationResult.Fail("Not connected.");
 
-                var r = await WithRetriesAsync(
-                    () => _patsService.InitializePatsAsync(),
-                    x => !x.Success && IsTransientError(x.Error),
-                    maxAttempts: 2,
-                    baseDelayMs: 400
-                ).ConfigureAwait(false);
-
-                return r.Success ? OperationResult.Ok() : OperationResult.Fail(r.Error ?? "Init failed.");
+                var success = await _patsService.InitializePatsAsync();
+                return success ? OperationResult.Ok() : OperationResult.Fail("PATS init failed.");
             }
             catch (Exception ex)
             {
@@ -448,10 +388,10 @@ namespace PatsKillerPro.Services
             public static KeyOperationResult Fail(string error) => new(false, 0, error);
         }
 
-        public record KeyCountResult(bool Success, int KeyCount = 0, string? Error = null)
+        public record KeyCountResult(bool Success, int KeyCount = 0, int MaxKeys = 8, string? Error = null)
         {
-            public static KeyCountResult Ok(int count) => new(true, count);
-            public static KeyCountResult Fail(string error) => new(false, 0, error);
+            public static KeyCountResult Ok(int count, int max = 8) => new(true, count, max);
+            public static KeyCountResult Fail(string error) => new(false, 0, 8, error);
         }
 
         public record GatewayResult(bool Success, bool HasGateway, string? Error = null)
