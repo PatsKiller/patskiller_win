@@ -107,9 +107,20 @@ namespace PatsKillerPro.Services
             });
         }
 
+        public void Disconnect()
+        {
+            _patsService?.Disconnect();
+            _api?.Dispose();
+            _api = null;
+            _patsService = null;
+            _connectedDevice = null;
+        }
+
         #endregion
 
         #region Vehicle Operations
+
+        public Task<VehicleReadResult> ReadVehicleInfoAsync() => ReadVehicleAsync();
 
         public async Task<VehicleReadResult> ReadVehicleAsync()
         {
@@ -150,6 +161,8 @@ namespace PatsKillerPro.Services
                 return new OutcodeResult { Success = false, Error = ex.Message };
             }
         }
+
+        public Task<OutcodeResult> ReadOutcodeAsync() => ReadModuleOutcodeAsync("PCM");
 
         public async Task<J2534Result> SubmitIncodeAsync(string module, string incode)
         {
@@ -216,16 +229,16 @@ namespace PatsKillerPro.Services
 
         public async Task<KeyCountResult> ReadKeyCountAsync()
         {
-            if (_patsService == null) return new KeyCountResult { Success = false };
+            if (_patsService == null) return new KeyCountResult { Success = false, Error = "Not connected" };
 
             try
             {
                 var count = await _patsService.ReadKeyCountAsync();
                 return new KeyCountResult { Success = true, KeyCount = count, MaxKeys = 8 };
             }
-            catch
+            catch (Exception ex)
             {
-                return new KeyCountResult { Success = false };
+                return new KeyCountResult { Success = false, Error = ex.Message };
             }
         }
 
@@ -385,6 +398,7 @@ namespace PatsKillerPro.Services
     public class KeyCountResult
     {
         public bool Success { get; set; }
+        public string? Error { get; set; }
         public int KeyCount { get; set; }
         public int MaxKeys { get; set; } = 8;
     }
