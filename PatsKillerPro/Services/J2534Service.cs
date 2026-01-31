@@ -172,9 +172,9 @@ namespace PatsKillerPro.Services
                 // Map from FordPatsService's VehicleInfo to our result
                 var info = new VehicleInfoData
                 {
-                    Year = patsInfo.Year,
+                    Year = patsInfo.ModelYear,
                     Model = patsInfo.Model ?? "",
-                    Is2020Plus = patsInfo.Is2020Plus
+                    Is2020Plus = patsInfo.ModelYear >= 2020
                 };
 
                 return VehicleInfoResult.Ok(info, _patsService.CurrentVin ?? "", _patsService.BatteryVoltage);
@@ -341,6 +341,22 @@ namespace PatsKillerPro.Services
 
                 var success = await _patsService.InitializePatsAsync();
                 return success ? OperationResult.Ok() : OperationResult.Fail("PATS init failed.");
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        public Task<OperationResult> RestoreBcmDefaultsAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                var success = await _patsService.RestoreBcmDefaultsAsync();
+                return success ? OperationResult.Ok() : OperationResult.Fail("Parameter reset failed.");
             }
             catch (Exception ex)
             {

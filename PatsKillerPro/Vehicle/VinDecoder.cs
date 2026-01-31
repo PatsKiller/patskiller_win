@@ -358,5 +358,25 @@ namespace PatsKillerPro.Vehicle
         public int ModelYear { get; set; }
         public string DisplayName { get; set; } = "";
         public bool SupportsKeyless { get; set; }
+        
+        // Additional properties for compatibility
+        public string Vin { get => VIN; set => VIN = value; }
+        public bool Keyless { get => SupportsKeyless; set => SupportsKeyless = value; }
+        public bool RequiresGatewayUnlock { get; set; }
+        public CanConfiguration CanConfig { get; set; } = CanConfiguration.SingleHsCan;
+        
+        // Computed properties
+        public int Year => ModelYear;
+        public bool Is2020Plus => ModelYear >= 2020;
+    }
+
+    /// <summary>
+    /// CAN bus configuration type
+    /// </summary>
+    public enum CanConfiguration
+    {
+        SingleHsCan,
+        DualCan,
+        HsCanMsCan
     }
 }

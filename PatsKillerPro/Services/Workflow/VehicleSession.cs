@@ -217,7 +217,7 @@ namespace PatsKillerPro.Services.Workflow
 
         private void StartExpirationTimer()
         {
-            _expirationTimer = new Timer(CheckExpiration, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+            _expirationTimer = new System.Threading.Timer(CheckExpiration, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
         }
 
         private void CheckExpiration(object? state)

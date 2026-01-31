@@ -41,7 +41,7 @@ namespace PatsKillerPro.Services.Workflow
     /// <summary>
     /// Result of an operation
     /// </summary>
-    public sealed class OperationResult
+    public sealed record OperationResult
     {
         public bool Success { get; init; }
         public string? ErrorMessage { get; init; }

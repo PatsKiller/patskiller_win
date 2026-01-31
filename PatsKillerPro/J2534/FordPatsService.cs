@@ -313,6 +313,23 @@ namespace PatsKillerPro.J2534
             });
         }
 
+        public async Task<bool> RestoreBcmDefaultsAsync()
+        {
+            return await Task.Run(async () =>
+            {
+                await Task.Delay(10);
+                _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
+
+                // Enter extended session
+                var sessResp = _uds.DiagnosticSessionControl(DiagnosticSession.Extended);
+                if (!sessResp.Success) return false;
+
+                // Write default minimum keys parameter (DID 0x5B13 = 2)
+                var writeResp = _uds.WriteDataByIdentifier(0x5B13, new byte[] { 0x02 });
+                return writeResp.Success;
+            });
+        }
+
         #endregion
 
         #region Helpers
