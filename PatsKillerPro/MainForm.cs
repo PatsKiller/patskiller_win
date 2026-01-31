@@ -1386,22 +1386,50 @@ private async void BtnErase_Click(object? s, EventArgs e)
         }
 
         private async void BtnModInfo_Click(object? s, EventArgs e)
+{
+    if (!_isConnected)
+    {
+        MessageBox.Show("Connect first");
+        return;
+    }
+
+    try
+    {
+        var result = await J2534Service.Instance.ReadVehicleInfoAsync();
+        if (result.Success == false)
         {
-            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
-            
-            try
-            {
-                var result = await J2534Service.Instance.ReadVehicleInfoAsync();
-                if (result.Success && result.VehicleInfo != null)
-                {
-                    const string NA = "N/A";
-                    var info = $"VIN: {result.Vin ?? NA}\n" +
-                               $"Year: {(result.VehicleInfo?.Year.ToString() ?? NA)}\n" +
-                               $"Model: {result.VehicleInfo?.Model ?? NA}\n" +
-                               $"Battery: {result.BatteryVoltage:F1}V";
-                    MessageBox.Show(info, "Module Info");
-                    Log("success", "Module info read");
-                }
+            _log?.Warn($"ReadVehicleInfo failed: {result.ErrorMessage}");
+            MessageBox.Show(result.ErrorMessage ?? "Failed to read module info.");
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            $"VIN: {result.Vin ?? "N/A"}",
+            $"Year: {(result.Year?.ToString() ?? "N/A")}",
+            $"Model: {result.Model ?? "N/A"}",
+            $"Platform: {result.PlatformCode ?? "N/A"}",
+            $"Security Target: {result.SecurityTargetModule ?? "N/A"}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(result.AdditionalInfo))
+        {
+            lines.Add(string.Empty);
+            lines.Add(result.AdditionalInfo.Trim());
+        }
+
+        var info = string.Join(Environment.NewLine, lines);
+
+        MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        _log?.Info("Module info shown to user.");
+    }
+    catch (Exception ex)
+    {
+        _log?.Error(ex, "Read module info failed");
+        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+}
+
                 else
                 {
                     Log("error", result.Error ?? "Failed");
