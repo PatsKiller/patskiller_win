@@ -946,11 +946,11 @@ namespace PatsKillerPro
             try
             {
                 var result = await J2534Service.Instance.ReadVehicleInfoAsync();
-                if (result.Success && result.VehicleInfo != null)
+                if (result.Success && !string.IsNullOrEmpty(result.Vin))
                 {
-                    _lblVin.Text = $"VIN: {result.VehicleInfo.VIN}";
+                    _lblVin.Text = $"VIN: {result.Vin}";
                     _lblVin.ForeColor = SUCCESS;
-                    Log("success", $"VIN: {result.VehicleInfo.VIN}");
+                    Log("success", $"VIN: {result.Vin}");
                 }
                 else
                 {
@@ -1326,12 +1326,12 @@ namespace PatsKillerPro
             try
             {
                 var result = await J2534Service.Instance.ReadVehicleInfoAsync();
-                if (result.Success && result.VehicleInfo != null)
+                if (result.Success)
                 {
-                    var info = $"VIN: {result.VehicleInfo.VIN}\n" +
-                              $"Year: {result.VehicleInfo.Year}\n" +
-                              $"Make: {result.VehicleInfo.Make}\n" +
-                              $"Model: {result.VehicleInfo.Model}";
+                    var info = $"VIN: {result.Vin ?? "N/A"}\n" +
+                              $"Year: {result.VehicleInfo?.Year.ToString() ?? "N/A"}\n" +
+                              $"Model: {result.VehicleInfo?.Model ?? "N/A"}\n" +
+                              $"Battery: {result.BatteryVoltage:F1}V";
                     MessageBox.Show(info, "Module Info");
                     Log("success", "Module info read");
                 }
