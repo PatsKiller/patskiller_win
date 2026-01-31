@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using PatsKillerPro.J2534;
 using PatsKillerPro.Vehicle;
+using PatsKillerPro.Services.Workflow;
 
 namespace PatsKillerPro.Services
 {
@@ -18,10 +19,18 @@ namespace PatsKillerPro.Services
         private J2534Api? _api;
         private J2534DeviceInfo? _currentDevice;
         private FordPatsService? _patsService;
+        
+        // Workflow integration
+        private WorkflowService? _workflowService;
+        private string? _currentVin;
+        private string? _currentPlatform;
+        private bool _workflowConfigured;
 
         public Action<string>? Log { get; set; }
 
         public bool IsBusy => _isBusy;
+        public bool IsWorkflowConfigured => _workflowConfigured;
+        public WorkflowService? Workflow => _workflowService;
         public event Action<bool>? BusyChanged;
 
         private J2534Service() { }
@@ -433,9 +442,376 @@ namespace PatsKillerPro.Services
                 try { _api?.Dispose(); } catch { }
                 _patsService = null;
                 _api = null;
+                
+                // Dispose workflow service on disconnect
+                _workflowService?.Dispose();
+                _workflowService = null;
+                _workflowConfigured = false;
             }
             catch { /* ignore on shutdown */ }
         }
+
+        #region Workflow Integration
+
+        /// <summary>
+        /// Creates the UDS transport delegate for the workflow layer.
+        /// Bridges FordUdsProtocol to the workflow's UdsResponse type.
+        /// </summary>
+        private Func<uint, byte[], Task<Workflow.UdsResponse>> CreateWorkflowTransport()
+        {
+            return async (moduleAddress, data) =>
+            {
+                if (_patsService == null)
+                    return Workflow.UdsResponse.Failed("Not connected");
+
+                return await Task.Run(() =>
+                {
+                    try
+                    {
+                        // Set target module (address is TX, +8 is RX for Ford)
+                        _patsService.SetTargetModule(moduleAddress, moduleAddress + 8);
+                        
+                        // Send UDS request via FordUdsProtocol
+                        var j2534Response = _patsService.SendUdsRequest(data);
+                        
+                        // Convert J2534.UdsResponse to Workflow.UdsResponse
+                        if (j2534Response.Success)
+                        {
+                            return Workflow.UdsResponse.Ok(j2534Response.Data);
+                        }
+                        else if (j2534Response.NegativeResponse && j2534Response.NRC != 0)
+                        {
+                            return Workflow.UdsResponse.FromNrc(j2534Response.NRC);
+                        }
+                        else
+                        {
+                            return Workflow.UdsResponse.Failed(j2534Response.ErrorMessage ?? "UDS request failed");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        return Workflow.UdsResponse.Failed(ex.Message);
+                    }
+                });
+            };
+        }
+
+        /// <summary>
+        /// Configures the workflow service after a successful device connection.
+        /// Call this after ConnectDeviceAsync succeeds and ReadVehicleInfoAsync completes.
+        /// </summary>
+        public void ConfigureWorkflow(string? vin = null, string? platformCode = null)
+        {
+            if (_patsService == null)
+            {
+                Log?.Invoke("Cannot configure workflow: not connected");
+                return;
+            }
+
+            _currentVin = vin;
+            _currentPlatform = platformCode;
+
+            // Create or reuse workflow service
+            _workflowService ??= new WorkflowService(Log);
+
+            // Create transport delegate
+            var transport = CreateWorkflowTransport();
+
+            // Configure with platform info
+            _workflowService.Configure(transport, platformCode, vin);
+            _workflowConfigured = true;
+
+            Log?.Invoke($"Workflow configured: VIN={vin ?? "unknown"}, Platform={platformCode ?? "default"}");
+        }
+
+        /// <summary>
+        /// Programs a key using the workflow engine with proper timing, retries, and verification.
+        /// </summary>
+        public async Task<KeyOperationResult> ProgramKeyWithWorkflowAsync(string incode, int slot, CancellationToken ct = default)
+        {
+            if (!_workflowConfigured || _workflowService == null)
+                return KeyOperationResult.Fail("Workflow not configured. Connect to vehicle first.");
+
+            try
+            {
+                Log?.Invoke($"[Workflow] Programming key to slot {slot}...");
+                
+                var result = await _workflowService.ProgramKeyAsync(incode, slot, ct);
+                
+                if (result.Success)
+                {
+                    // Read final key count
+                    var kcResult = await _workflowService.ReadKeyCountAsync(ct);
+                    var keyCount = kcResult.Success ? kcResult.KeyCount : slot;
+                    
+                    Log?.Invoke($"[Workflow] Key programmed successfully. Keys: {keyCount}");
+                    return KeyOperationResult.Ok(keyCount);
+                }
+                
+                Log?.Invoke($"[Workflow] Key programming failed: {result.ErrorMessage}");
+                return KeyOperationResult.Fail(result.ErrorMessage ?? "Key programming failed");
+            }
+            catch (OperationCanceledException)
+            {
+                return KeyOperationResult.Fail("Operation cancelled");
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"[Workflow] Exception: {ex.Message}");
+                return KeyOperationResult.Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Erases all keys using the workflow engine.
+        /// </summary>
+        public async Task<KeyOperationResult> EraseAllKeysWithWorkflowAsync(string incode, CancellationToken ct = default)
+        {
+            if (!_workflowConfigured || _workflowService == null)
+                return KeyOperationResult.Fail("Workflow not configured. Connect to vehicle first.");
+
+            try
+            {
+                Log?.Invoke("[Workflow] Erasing all keys...");
+                
+                var result = await _workflowService.EraseAllKeysAsync(incode, ct);
+                
+                if (result.Success)
+                {
+                    Log?.Invoke("[Workflow] All keys erased successfully");
+                    return KeyOperationResult.Ok(0);
+                }
+                
+                Log?.Invoke($"[Workflow] Erase failed: {result.ErrorMessage}");
+                return KeyOperationResult.Fail(result.ErrorMessage ?? "Erase failed");
+            }
+            catch (OperationCanceledException)
+            {
+                return KeyOperationResult.Fail("Operation cancelled");
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"[Workflow] Exception: {ex.Message}");
+                return KeyOperationResult.Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Reads outcode using the workflow engine.
+        /// </summary>
+        public async Task<OutcodeResult> ReadOutcodeWithWorkflowAsync(CancellationToken ct = default)
+        {
+            if (!_workflowConfigured || _workflowService == null)
+                return OutcodeResult.Fail("Workflow not configured. Connect to vehicle first.");
+
+            try
+            {
+                Log?.Invoke("[Workflow] Reading outcode...");
+                
+                var result = await _workflowService.ReadOutcodeAsync(ct);
+                
+                if (result.Success && !string.IsNullOrEmpty(result.Outcode))
+                {
+                    Log?.Invoke($"[Workflow] Outcode: {result.Outcode}");
+                    return OutcodeResult.Ok(result.Outcode);
+                }
+                
+                Log?.Invoke($"[Workflow] Failed to read outcode: {result.Error}");
+                return OutcodeResult.Fail(result.Error ?? "Failed to read outcode");
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"[Workflow] Exception: {ex.Message}");
+                return OutcodeResult.Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Reads key count using the workflow engine.
+        /// </summary>
+        public async Task<KeyCountResult> ReadKeyCountWithWorkflowAsync(CancellationToken ct = default)
+        {
+            if (!_workflowConfigured || _workflowService == null)
+                return KeyCountResult.Fail("Workflow not configured. Connect to vehicle first.");
+
+            try
+            {
+                var result = await _workflowService.ReadKeyCountAsync(ct);
+                
+                if (result.Success)
+                {
+                    return KeyCountResult.Ok(result.KeyCount);
+                }
+                
+                return KeyCountResult.Fail(result.Error ?? "Failed to read key count");
+            }
+            catch (Exception ex)
+            {
+                return KeyCountResult.Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Clears DTCs using the workflow engine.
+        /// </summary>
+        public async Task<OperationResult> ClearDtcsWithWorkflowAsync(CancellationToken ct = default)
+        {
+            if (!_workflowConfigured || _workflowService == null)
+                return OperationResult.Fail("Workflow not configured. Connect to vehicle first.");
+
+            try
+            {
+                Log?.Invoke("[Workflow] Clearing DTCs...");
+                
+                var result = await _workflowService.ClearDtcsAsync(null, ct);
+                
+                if (result.Success)
+                {
+                    Log?.Invoke("[Workflow] DTCs cleared successfully");
+                    return OperationResult.Ok();
+                }
+                
+                return OperationResult.Fail(result.Error ?? "Failed to clear DTCs");
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Parameter reset using the workflow engine.
+        /// </summary>
+        public async Task<OperationResult> ParameterResetWithWorkflowAsync(string incode, CancellationToken ct = default)
+        {
+            if (!_workflowConfigured || _workflowService == null)
+                return OperationResult.Fail("Workflow not configured. Connect to vehicle first.");
+
+            try
+            {
+                Log?.Invoke("[Workflow] Performing parameter reset...");
+                
+                var result = await _workflowService.ParameterResetAsync(incode, ct);
+                
+                if (result.Success)
+                {
+                    Log?.Invoke("[Workflow] Parameter reset successful");
+                    return OperationResult.Ok();
+                }
+                
+                return OperationResult.Fail(result.ErrorMessage ?? "Parameter reset failed");
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Gateway unlock using the workflow engine (for 2020+ vehicles).
+        /// </summary>
+        public async Task<GatewayResult> UnlockGatewayWithWorkflowAsync(string incode, CancellationToken ct = default)
+        {
+            if (!_workflowConfigured || _workflowService == null)
+                return GatewayResult.Fail("Workflow not configured. Connect to vehicle first.");
+
+            try
+            {
+                Log?.Invoke("[Workflow] Unlocking gateway...");
+                
+                var result = await _workflowService.UnlockGatewayAsync(incode, ct);
+                
+                if (result.Success)
+                {
+                    Log?.Invoke("[Workflow] Gateway unlocked successfully");
+                    return GatewayResult.Ok(true);
+                }
+                
+                return GatewayResult.Fail(result.ErrorMessage ?? "Gateway unlock failed");
+            }
+            catch (Exception ex)
+            {
+                return GatewayResult.Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Subscribes to workflow progress events.
+        /// Creates workflow service if not already created.
+        /// </summary>
+        public void SubscribeToWorkflowProgress(EventHandler<OperationProgressEventArgs> handler)
+        {
+            EnsureWorkflowServiceCreated();
+            _workflowService!.ProgressUpdated += handler;
+        }
+
+        /// <summary>
+        /// Subscribes to workflow error events.
+        /// </summary>
+        public void SubscribeToWorkflowErrors(EventHandler<OperationErrorEventArgs> handler)
+        {
+            EnsureWorkflowServiceCreated();
+            _workflowService!.ErrorOccurred += handler;
+        }
+
+        /// <summary>
+        /// Subscribes to operation completion events.
+        /// </summary>
+        public void SubscribeToWorkflowComplete(EventHandler<OperationCompleteEventArgs> handler)
+        {
+            EnsureWorkflowServiceCreated();
+            _workflowService!.OperationCompleted += handler;
+        }
+
+        /// <summary>
+        /// Subscribes to user action required events (e.g., "insert key now").
+        /// </summary>
+        public void SubscribeToUserActionRequired(EventHandler<UserActionRequiredEventArgs> handler)
+        {
+            EnsureWorkflowServiceCreated();
+            _workflowService!.UserActionRequired += handler;
+        }
+        
+        /// <summary>
+        /// Ensures the workflow service instance is created (but not necessarily configured).
+        /// </summary>
+        private void EnsureWorkflowServiceCreated()
+        {
+            _workflowService ??= new WorkflowService(Log);
+        }
+
+        /// <summary>
+        /// Resumes workflow after user action.
+        /// </summary>
+        public void ResumeWorkflowAfterUserAction(bool success = true)
+        {
+            _workflowService?.ResumeAfterUserAction(success);
+        }
+
+        /// <summary>
+        /// Cancels the current workflow operation.
+        /// </summary>
+        public void CancelWorkflowOperation()
+        {
+            _workflowService?.CancelCurrentOperation();
+        }
+
+        /// <summary>
+        /// Gets whether workflow is currently busy.
+        /// </summary>
+        public bool IsWorkflowBusy => _workflowService?.IsBusy ?? false;
+
+        /// <summary>
+        /// Gets the current workflow operation state.
+        /// </summary>
+        public OperationState WorkflowState => _workflowService?.State ?? OperationState.Idle;
+
+        /// <summary>
+        /// Gets remaining security session time.
+        /// </summary>
+        public TimeSpan? SecurityTimeRemaining => _workflowService?.SecurityTimeRemaining;
+
+        #endregion
 
         // ---------------- Result Types ----------------
 

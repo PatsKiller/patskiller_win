@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.J2534;
 using PatsKillerPro.Services;
+using PatsKillerPro.Services.Workflow;
 using PatsKillerPro.Utils;
 using PatsKillerPro.Vehicle;
 
@@ -938,6 +939,9 @@ namespace PatsKillerPro
                     _lblStatus.Text = "Status: Connected";
                     _lblStatus.ForeColor = SUCCESS;
                     Log("success", $"Connected to {device.Name}");
+                    
+                    // Subscribe to workflow events for progress updates
+                    SubscribeToWorkflowEvents();
                 }
                 else
                 {
@@ -951,36 +955,120 @@ namespace PatsKillerPro
                 ShowError("Connect Failed", "Could not connect to device", ex);
             }
         }
+        
+        private bool _workflowEventsSubscribed = false;
+        
+        private void SubscribeToWorkflowEvents()
+        {
+            if (_workflowEventsSubscribed) return;
+            _workflowEventsSubscribed = true;
+            
+            // Subscribe to workflow progress for logging
+            J2534Service.Instance.SubscribeToWorkflowProgress((sender, e) =>
+            {
+                if (IsDisposed) return;
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        var desc = e.StepDescription ?? e.State.ToString();
+                        Log("info", $"[Step {e.StepIndex}/{e.TotalSteps}] {e.StepName}: {desc}");
+                    }));
+                }
+                catch { /* UI disposed */ }
+            });
+            
+            // Subscribe to workflow errors
+            J2534Service.Instance.SubscribeToWorkflowErrors((sender, e) =>
+            {
+                if (IsDisposed) return;
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        var level = e.WillRetry ? "warning" : "error";
+                        var retryMsg = e.WillRetry ? $" (retry {e.RetryAttempt})" : "";
+                        Log(level, $"{e.ErrorMessage}{retryMsg}");
+                    }));
+                }
+                catch { /* UI disposed */ }
+            });
+            
+            // Subscribe to operation completion
+            J2534Service.Instance.SubscribeToWorkflowComplete((sender, e) =>
+            {
+                if (IsDisposed) return;
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        var level = e.Result.Success ? "success" : "error";
+                        var resultMsg = e.Result.Success ? "completed" : $"failed: {e.Result.ErrorMessage}";
+                        Log(level, $"{e.OperationName} {resultMsg} ({e.Duration.TotalSeconds:F1}s)");
+                    }));
+                }
+                catch { /* UI disposed */ }
+            });
+            
+            // Subscribe to user action required events
+            J2534Service.Instance.SubscribeToUserActionRequired((sender, e) =>
+            {
+                if (IsDisposed) return;
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        Log("warning", $"ACTION REQUIRED: {e.Prompt.Instruction}");
+                        var result = MessageBox.Show(
+                            e.Prompt.Instruction, 
+                            e.Prompt.Title, 
+                            MessageBoxButtons.OKCancel, 
+                            MessageBoxIcon.Information);
+                        J2534Service.Instance.ResumeWorkflowAfterUserAction(result == DialogResult.OK);
+                    }));
+                }
+                catch { /* UI disposed */ }
+            });
+        }
 
         private async void BtnReadVin_Click(object? s, EventArgs e)
-{
-    if (!_isConnected)
-    {
-        MessageBox.Show("Connect to a device first");
-        return;
-    }
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
 
-    try
-    {
-        var result = await J2534Service.Instance.ReadVehicleInfoAsync();
-        if (result.Success && !string.IsNullOrEmpty(result.Vin))
-        {
-            _lblVin.Text = $"VIN: {result.Vin}";
-            _lblVin.ForeColor = SUCCESS;
-            Log("success", $"VIN: {result.Vin}");
+            try
+            {
+                var result = await J2534Service.Instance.ReadVehicleInfoAsync();
+                if (result.Success && !string.IsNullOrEmpty(result.Vin))
+                {
+                    _lblVin.Text = $"VIN: {result.Vin}";
+                    _lblVin.ForeColor = SUCCESS;
+                    Log("success", $"VIN: {result.Vin}");
+                    
+                    // Configure workflow service with VIN and platform for proper timing/routing
+                    J2534Service.Instance.ConfigureWorkflow(result.Vin, result.PlatformCode);
+                    Log("info", $"Workflow configured: Platform={result.PlatformCode ?? "default"}");
+                    
+                    if (!string.IsNullOrEmpty(result.AdditionalInfo))
+                    {
+                        Log("info", result.AdditionalInfo);
+                    }
+                }
+                else
+                {
+                    _lblVin.Text = "VIN: Could not read";
+                    _lblVin.ForeColor = DANGER;
+                    Log("error", result.Error ?? "Failed to read VIN");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Read Failed", "Could not read VIN", ex);
+            }
         }
-        else
-        {
-            _lblVin.Text = "VIN: Could not read";
-            _lblVin.ForeColor = DANGER;
-            Log("error", result.Error ?? "Failed to read VIN");
-        }
-    }
-    catch (Exception ex)
-    {
-        ShowError("Read Failed", "Could not read VIN", ex);
-    }
-}
 
 private async void BtnGetIncode_Click(object? s, EventArgs e)
         {
@@ -1013,131 +1101,128 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
         }
         #endregion
 
-        #region PATS - Using J2534Service Singleton
-private async void BtnProgram_Click(object? s, EventArgs e)
-{
-    if (!_isConnected)
-    {
-        MessageBox.Show("Connect to a device first");
-        return;
-    }
+        #region PATS - Using Workflow System
+        private async void BtnProgram_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
 
-    var ic = _txtIncode.Text.Trim();
-    if (string.IsNullOrEmpty(ic))
-    {
-        MessageBox.Show("Enter incode first");
-        return;
-    }
+            // Check workflow is configured
+            if (!J2534Service.Instance.IsWorkflowConfigured)
+            {
+                MessageBox.Show("Please read VIN first to configure the workflow system.");
+                return;
+            }
 
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first");
+                return;
+            }
 
             if (!Confirm(1, "Program Key"))
                 return;
 
-    try
-    {
-        Log("info", "Programming key...");
+            try
+            {
+                Log("info", "Starting key programming workflow...");
 
-        // 1) Unlock PATS security using the provided incode
-        var unlock = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
-        if (!unlock.Success)
-        {
-            var msg = unlock.Error ?? "Incode rejected";
-            Log("error", msg);
-            MessageBox.Show($"Incode rejected: {msg}");
-            return;
+                // First, read current key count to determine slot
+                var kc = await J2534Service.Instance.ReadKeyCountWithWorkflowAsync();
+                int current = kc.Success ? kc.KeyCount : 0;
+                int max = kc.MaxKeys;
+
+                if (current >= max)
+                {
+                    var msg = $"Max keys already programmed ({current}/{max}). Erase keys first if you need to add a new one.";
+                    Log("warning", msg);
+                    MessageBox.Show(msg);
+                    _lblKeys.Text = current.ToString();
+                    return;
+                }
+
+                int nextSlot = current + 1;
+                Log("info", $"Programming to slot {nextSlot} (current: {current}, max: {max})");
+
+                // Use workflow-based key programming with proper timing, retries, and verification
+                var prog = await J2534Service.Instance.ProgramKeyWithWorkflowAsync(ic, nextSlot);
+                
+                if (prog.Success)
+                {
+                    _lblKeys.Text = prog.CurrentKeyCount.ToString();
+                    MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\nRemove key, insert next key, and click Program again.");
+                    Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
+                }
+                else
+                {
+                    var msg = prog.Error ?? "Programming failed";
+                    Log("error", msg);
+                    MessageBox.Show($"Programming failed: {msg}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Program Failed", "Could not program key", ex);
+            }
         }
 
-        // 2) Determine next slot based on current key count
-        var kc = await J2534Service.Instance.ReadKeyCountAsync();
-        int current = kc.Success ? kc.KeyCount : 0;
-        int max = kc.Success ? kc.MaxKeys : 8;
-
-        if (current >= max)
+        private async void BtnErase_Click(object? s, EventArgs e)
         {
-            var msg = $"Max keys already programmed ({current}/{max}). Erase keys first if you need to add a new one.";
-            Log("warning", msg);
-            MessageBox.Show(msg);
-            _lblKeys.Text = current.ToString();
-            return;
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            // Check workflow is configured
+            if (!J2534Service.Instance.IsWorkflowConfigured)
+            {
+                MessageBox.Show("Please read VIN first to configure the workflow system.");
+                return;
+            }
+
+            if (!Confirm(1, "Erase All Keys"))
+                return;
+
+            if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!\n\nAre you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first");
+                return;
+            }
+
+            try
+            {
+                Log("info", "Starting erase all keys workflow...");
+
+                // Use workflow-based key erase with proper timing, retries, and verification
+                var erase = await J2534Service.Instance.EraseAllKeysWithWorkflowAsync(ic);
+                
+                if (erase.Success)
+                {
+                    _lblKeys.Text = erase.CurrentKeyCount.ToString();
+                    MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}\n\nIMPORTANTLY: Program at least one key now!");
+                    Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
+                }
+                else
+                {
+                    var msg = erase.Error ?? "Erase failed";
+                    Log("error", msg);
+                    MessageBox.Show($"Erase failed: {msg}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Erase Failed", "Could not erase keys", ex);
+            }
         }
-
-        int nextSlot = current + 1;
-
-        // 3) Perform the actual key programming operation
-        var prog = await J2534Service.Instance.ProgramKeyAsync(ic, nextSlot);
-        if (prog.Success)
-        {
-            _lblKeys.Text = prog.CurrentKeyCount.ToString();
-            MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\nRemove key, insert next key, and click Program again.");
-            Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
-        }
-        else
-        {
-            var msg = prog.Error ?? "Programming failed";
-            Log("error", msg);
-            MessageBox.Show($"Programming failed: {msg}");
-        }
-    }
-    catch (Exception ex)
-    {
-        ShowError("Program Failed", "Could not program key", ex);
-    }
-}
-private async void BtnErase_Click(object? s, EventArgs e)
-{
-    if (!_isConnected)
-    {
-        MessageBox.Show("Connect to a device first");
-        return;
-    }
-
-    if (!Confirm(1, "Erase All Keys"))
-        return;
-
-    if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!\n\nAre you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-        return;
-
-    var ic = _txtIncode.Text.Trim();
-    if (string.IsNullOrEmpty(ic))
-    {
-        MessageBox.Show("Enter incode first");
-        return;
-    }
-
-    try
-    {
-        Log("info", "Erasing all keys...");
-
-        // 1) Unlock PATS security using the provided incode
-        var unlock = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
-        if (!unlock.Success)
-        {
-            var msg = unlock.Error ?? "Incode rejected";
-            Log("error", msg);
-            MessageBox.Show($"Incode rejected: {msg}");
-            return;
-        }
-
-        // 2) Perform the actual erase operation
-        var erase = await J2534Service.Instance.EraseAllKeysAsync(ic);
-        if (erase.Success)
-        {
-            _lblKeys.Text = erase.CurrentKeyCount.ToString();
-            MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}");
-            Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
-        }
-        else
-        {
-            var msg = erase.Error ?? "Erase failed";
-            Log("error", msg);
-            MessageBox.Show($"Erase failed: {msg}");
-        }
-    }
-    catch (Exception ex)
-    {
-        ShowError("Erase Failed", "Could not erase keys", ex);
-    }
-}
 
         private async void BtnParam_Click(object? s, EventArgs e)
         {
@@ -1147,18 +1232,38 @@ private async void BtnErase_Click(object? s, EventArgs e)
                 return;
             }
 
+            // Check workflow is configured
+            if (!J2534Service.Instance.IsWorkflowConfigured)
+            {
+                MessageBox.Show("Please read VIN first to configure the workflow system.");
+                return;
+            }
+
+            if (!Confirm(1, "Parameter Reset"))
+                return;
+
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first");
+                return;
+            }
+
             try
             {
-                Log("info", "Parameter reset...");
-                var result = await J2534Service.Instance.RestoreBcmDefaultsAsync();
+                Log("info", "Starting parameter reset workflow...");
+                
+                // Use workflow-based parameter reset
+                var result = await J2534Service.Instance.ParameterResetWithWorkflowAsync(ic);
                 if (result.Success)
                 {
-                    MessageBox.Show("Parameter reset complete!\n\nTurn ignition OFF and wait 15 seconds.");
+                    MessageBox.Show("Parameter reset complete!\n\nTurn ignition OFF and wait 15 seconds before proceeding.");
                     Log("success", "Parameter reset done");
                 }
                 else
                 {
-                    Log("error", result.Error ?? "Reset failed");
+                    Log("error", result.Error ?? "Parameter reset failed");
+                    MessageBox.Show($"Parameter reset failed: {result.Error ?? "Unknown error"}");
                 }
             }
             catch (Exception ex)
@@ -1295,12 +1400,20 @@ private async void BtnErase_Click(object? s, EventArgs e)
         {
             if (!_isConnected) { MessageBox.Show("Connect first"); return; }
             
+            // Check workflow is configured
+            if (!J2534Service.Instance.IsWorkflowConfigured)
+            {
+                MessageBox.Show("Please read VIN first to configure the workflow system.");
+                return;
+            }
+            
             try
             {
                 var gw = await J2534Service.Instance.CheckGatewayAsync();
                 if (!gw.Success || !gw.HasGateway)
                 {
-                    MessageBox.Show("No gateway detected");
+                    MessageBox.Show("No gateway detected on this vehicle");
+                    Log("info", "No gateway module detected");
                     return;
                 }
 
@@ -1313,15 +1426,19 @@ private async void BtnErase_Click(object? s, EventArgs e)
                     return;
                 }
 
-                var result = await J2534Service.Instance.SubmitIncodeAsync("GWM", ic);
+                Log("info", "Starting gateway unlock workflow...");
+                
+                // Use workflow-based gateway unlock
+                var result = await J2534Service.Instance.UnlockGatewayWithWorkflowAsync(ic);
                 if (result.Success)
                 {
-                    MessageBox.Show("Gateway unlocked!");
+                    MessageBox.Show("Gateway unlocked!\n\nYou can now proceed with key programming.");
                     Log("success", "Gateway unlocked");
                 }
                 else
                 {
-                    Log("error", result.Error ?? "Failed");
+                    Log("error", result.Error ?? "Gateway unlock failed");
+                    MessageBox.Show($"Gateway unlock failed: {result.Error ?? "Unknown error"}");
                 }
             }
             catch (Exception ex) { ShowError("Error", "Failed", ex); }
@@ -1386,49 +1503,49 @@ private async void BtnErase_Click(object? s, EventArgs e)
         }
 
         private async void BtnModInfo_Click(object? s, EventArgs e)
-{
-    if (!_isConnected)
-    {
-        MessageBox.Show("Connect first");
-        return;
-    }
-
-    try
-    {
-        var result = await J2534Service.Instance.ReadVehicleInfoAsync();
-        if (result.Success == false)
         {
-            Log("error", $"ReadVehicleInfo failed: {result.ErrorMessage}");
-            MessageBox.Show(result.ErrorMessage ?? "Failed to read module info.");
-            return;
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect first");
+                return;
+            }
+
+            try
+            {
+                var result = await J2534Service.Instance.ReadVehicleInfoAsync();
+                if (result.Success == false)
+                {
+                    Log("error", $"ReadVehicleInfo failed: {result.ErrorMessage}");
+                    MessageBox.Show(result.ErrorMessage ?? "Failed to read module info.");
+                    return;
+                }
+
+                var lines = new List<string>
+                {
+                    $"VIN: {result.Vin ?? \"N/A\"}",
+                    $"Year: {(result.Year?.ToString() ?? \"N/A\")}",
+                    $"Model: {result.Model ?? \"N/A\"}",
+                    $"Platform: {result.PlatformCode ?? \"N/A\"}",
+                    $"Security Target: {result.SecurityTargetModule ?? \"N/A\"}"
+                };
+
+                if (!string.IsNullOrWhiteSpace(result.AdditionalInfo))
+                {
+                    lines.Add(string.Empty);
+                    lines.Add(result.AdditionalInfo.Trim());
+                }
+
+                var info = string.Join(Environment.NewLine, lines);
+
+                MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Log("info", "Module info shown to user.");
+            }
+            catch (Exception ex)
+            {
+                Log("error", $"Read module info failed: {ex.Message}");
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
-
-        var lines = new List<string>
-        {
-            $"VIN: {result.Vin ?? "N/A"}",
-            $"Year: {(result.Year?.ToString() ?? "N/A")}",
-            $"Model: {result.Model ?? "N/A"}",
-            $"Platform: {result.PlatformCode ?? "N/A"}",
-            $"Security Target: {result.SecurityTargetModule ?? "N/A"}"
-        };
-
-        if (!string.IsNullOrWhiteSpace(result.AdditionalInfo))
-        {
-            lines.Add(string.Empty);
-            lines.Add(result.AdditionalInfo.Trim());
-        }
-
-        var info = string.Join(Environment.NewLine, lines);
-
-        MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        Log("info", "Module info shown to user.");
-    }
-    catch (Exception ex)
-    {
-        Log("error", $"Read module info failed: {ex.Message}");
-        MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-    }
-}
 
         #endregion
 
