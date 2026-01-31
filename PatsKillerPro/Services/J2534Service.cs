@@ -98,7 +98,6 @@ namespace PatsKillerPro.Services
             {
                 Log?.Invoke("Scanning for J2534 devices...");
 
-                // J2534DeviceScanner is static - use ScanForDevices()
                 var devices = J2534DeviceScanner.ScanForDevices();
 
                 Log?.Invoke($"Found {devices.Count} device(s).");
@@ -117,17 +116,12 @@ namespace PatsKillerPro.Services
                 _currentDevice = device;
                 Log?.Invoke($"Opening device: {device.Name} ({device.FunctionLibrary})");
 
-                // J2534Api constructor just loads the DLL
                 _api = new J2534Api(device.FunctionLibrary);
-
-                // Create PATS service - it handles device/channel through FordUdsProtocol
                 _patsService = new FordPatsService(_api);
 
-                // FordPatsService.ConnectAsync() calls FordUdsProtocol.Connect()
-                // which internally does PassThruOpen + PassThruConnect
                 var patsConnect = await WithRetriesAsync(
                     () => _patsService.ConnectAsync(),
-                    r => !r, // ConnectAsync returns bool
+                    r => !r,
                     maxAttempts: 3,
                     baseDelayMs: 300
                 ).ConfigureAwait(false);
@@ -148,11 +142,7 @@ namespace PatsKillerPro.Services
         {
             try
             {
-                // FordPatsService.Disconnect() calls FordUdsProtocol.Disconnect()
-                // which handles PassThruDisconnect and PassThruClose
                 _patsService?.Disconnect();
-
-                // Dispose the API
                 try { _api?.Dispose(); } catch { /* ignore */ }
 
                 _patsService = null;
@@ -175,9 +165,17 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return VehicleInfoResult.Fail("Not connected.");
 
-                var info = await _patsService.ReadVehicleInfoAsync();
-                if (info == null)
+                var patsInfo = await _patsService.ReadVehicleInfoAsync();
+                if (patsInfo == null)
                     return VehicleInfoResult.Fail("Unable to read vehicle info.");
+
+                // Map from FordPatsService's VehicleInfo to our result
+                var info = new VehicleInfoData
+                {
+                    Year = patsInfo.Year,
+                    Model = patsInfo.Model ?? "",
+                    Is2020Plus = patsInfo.Is2020Plus
+                };
 
                 return VehicleInfoResult.Ok(info, _patsService.CurrentVin ?? "", _patsService.BatteryVoltage);
             }
@@ -229,17 +227,14 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return KeyOperationResult.Fail("Not connected.");
 
-                // First submit incode
                 var unlocked = await _patsService.SubmitIncodeAsync("BCM", incode);
                 if (!unlocked)
                     return KeyOperationResult.Fail("Incode rejected.");
 
-                // Then program key
                 var success = await _patsService.ProgramKeyAsync(slot);
                 if (!success)
                     return KeyOperationResult.Fail("Key programming failed.");
 
-                // Read updated key count
                 var keyCount = await _patsService.ReadKeyCountAsync();
                 return KeyOperationResult.Ok(keyCount);
             }
@@ -256,17 +251,14 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return KeyOperationResult.Fail("Not connected.");
 
-                // First submit incode
                 var unlocked = await _patsService.SubmitIncodeAsync("BCM", incode);
                 if (!unlocked)
                     return KeyOperationResult.Fail("Incode rejected.");
 
-                // Then erase keys
                 var success = await _patsService.EraseAllKeysAsync();
                 if (!success)
                     return KeyOperationResult.Fail("Erase failed.");
 
-                // Read updated key count
                 var keyCount = await _patsService.ReadKeyCountAsync();
                 return KeyOperationResult.Ok(keyCount);
             }
@@ -356,7 +348,20 @@ namespace PatsKillerPro.Services
             }
         });
 
-        // ---------------- Results ----------------
+        // ---------------- Data Types ----------------
+
+        /// <summary>
+        /// Vehicle information data transfer object
+        /// </summary>
+        public sealed class VehicleInfoData
+        {
+            public int Year { get; set; }
+            public string Model { get; set; } = "";
+            public bool Is2020Plus { get; set; }
+            public override string ToString() => $"{Year} {Model}";
+        }
+
+        // ---------------- Result Types ----------------
 
         public record OperationResult(bool Success, string? Error = null)
         {
@@ -370,9 +375,9 @@ namespace PatsKillerPro.Services
             public static DeviceListResult Fail(string error) => new(false, new List<J2534DeviceInfo>(), error);
         }
 
-        public record VehicleInfoResult(bool Success, FordPatsService.VehicleInfo? VehicleInfo, string? Vin, double BatteryVoltage, string? Error = null)
+        public record VehicleInfoResult(bool Success, VehicleInfoData? VehicleInfo, string? Vin, double BatteryVoltage, string? Error = null)
         {
-            public static VehicleInfoResult Ok(FordPatsService.VehicleInfo info, string vin, double battery) => new(true, info, vin, battery);
+            public static VehicleInfoResult Ok(VehicleInfoData info, string vin, double battery) => new(true, info, vin, battery);
             public static VehicleInfoResult Fail(string error) => new(false, null, null, 0, error);
         }
 
