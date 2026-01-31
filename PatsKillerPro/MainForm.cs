@@ -1430,13 +1430,6 @@ private async void BtnErase_Click(object? s, EventArgs e)
     }
 }
 
-                else
-                {
-                    Log("error", result.Error ?? "Failed");
-                }
-            }
-            catch (Exception ex) { ShowError("Error", "Failed", ex); }
-        }
         #endregion
 
         #region Free - Using J2534Service Singleton
