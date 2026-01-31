@@ -1326,13 +1326,11 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 var result = await J2534Service.Instance.ReadVehicleInfoAsync();
                 if (result.Success && result.VehicleInfo != null)
                 {
-                    var info = $"VIN: {result.Vin ?? "N/A"}
-" +
-           $"Year: {result.VehicleInfo?.Year.ToString() ?? "N/A"}
-" +
-           $"Model: {result.VehicleInfo?.Model ?? "N/A"}
-" +
-           $"Battery: {result.BatteryVoltage:F1}V";
+                    const string NA = "N/A";
+                    var info = $"VIN: {result.Vin ?? NA}\n" +
+                               $"Year: {(result.VehicleInfo?.Year.ToString() ?? NA)}\n" +
+                               $"Model: {result.VehicleInfo?.Model ?? NA}\n" +
+                               $"Battery: {result.BatteryVoltage:F1}V";
                     MessageBox.Show(info, "Module Info");
                     Log("success", "Module info read");
                 }
