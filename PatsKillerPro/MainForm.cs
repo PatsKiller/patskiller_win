@@ -1010,6 +1010,10 @@ private async void BtnProgram_Click(object? s, EventArgs e)
         return;
     }
 
+
+            if (!Confirm(1, "Program Key"))
+                return;
+
     try
     {
         Log("info", "Programming key...");
@@ -1045,11 +1049,7 @@ private async void BtnProgram_Click(object? s, EventArgs e)
         if (prog.Success)
         {
             _lblKeys.Text = prog.CurrentKeyCount.ToString();
-            MessageBox.Show($"Key programmed successfully!
-
-Keys now: {prog.CurrentKeyCount}
-
-Remove key, insert next key, and click Program again.");
+            MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\nRemove key, insert next key, and click Program again.");
             Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
         }
         else
@@ -1075,9 +1075,7 @@ private async void BtnErase_Click(object? s, EventArgs e)
     if (!Confirm(1, "Erase All Keys"))
         return;
 
-    if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!
-
-Are you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+    if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!\n\nAre you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
         return;
 
     var ic = _txtIncode.Text.Trim();
@@ -1106,9 +1104,7 @@ Are you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxI
         if (erase.Success)
         {
             _lblKeys.Text = erase.CurrentKeyCount.ToString();
-            MessageBox.Show($"All keys erased!
-
-Keys remaining: {erase.CurrentKeyCount}");
+            MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}");
             Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
         }
         else
