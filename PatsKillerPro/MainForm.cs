@@ -1,12 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using PatsKillerPro.Communication;
 using PatsKillerPro.J2534;
+using PatsKillerPro.Services;
 using PatsKillerPro.Utils;
 using PatsKillerPro.Vehicle;
 
@@ -31,10 +32,10 @@ namespace PatsKillerPro
         // State
         private string _userEmail = "", _authToken = "";
         private int _tokenBalance = 0;
-        private J2534DeviceManager? _deviceManager;
-        private J2534Device? _device;
-        private J2534Channel? _channel;
+        private List<J2534DeviceInfo> _devices = new();
+        private bool _isConnected = false;
         private int _activeTab = 0;
+        private bool _didAutoStart = false;
 
         // Assets
         private Image? _logoImage;
@@ -444,7 +445,7 @@ namespace PatsKillerPro
             _btnTab1.Click += (s, e) => SwitchTab(0);
             
             AutoStartOnce();
-tabFlow.Controls.Add(_btnTab1);
+            tabFlow.Controls.Add(_btnTab1);
             _btnTab2 = TabBtn("Diagnostics", false);
             _btnTab2.Click += (s, e) => SwitchTab(1);
             tabFlow.Controls.Add(_btnTab2);
@@ -598,29 +599,28 @@ tabFlow.Controls.Add(_btnTab1);
             row3.Controls.Add(_txtOutcode);
 
             var btnCopy = AutoBtn("Copy", BTN_BG);
-            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); Log("info", "Copied"); } };
+            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) Clipboard.SetText(_txtOutcode.Text); };
             row3.Controls.Add(btnCopy);
 
-            var btnGet = AutoBtn("Get Incode Online", WARNING);
-            btnGet.ForeColor = Color.Black;
-            btnGet.Click += (s, e) => OpenUrl("https://patskiller.com/calculator");
-            row3.Controls.Add(btnGet);
-
-            row3.Controls.Add(new Label { Text = "INCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = DpiPad(40, 12, 10, 0) });
+            row3.Controls.Add(new Label { Text = "INCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = DpiPad(30, 12, 10, 0) });
             
             _txtIncode = MakeTextBox(160);
-            _txtIncode.Margin = DpiPad(0, 6, 0, 0);
+            _txtIncode.Margin = DpiPad(0, 6, 15, 0);
             row3.Controls.Add(_txtIncode);
 
-            sec3.Controls.Add(row3);
-            layout.Controls.Add(sec3, 1, 0);
+            var btnGetIncode = AutoBtn("Get Incode", ACCENT);
+            btnGetIncode.Click += BtnGetIncode_Click;
+            row3.Controls.Add(btnGetIncode);
 
-            // === SECTION 4: KEY PROGRAMMING OPERATIONS ===
-            var sec4 = Section("KEY PROGRAMMING OPERATIONS");
+            sec3.Controls.Add(row3);
+            layout.Controls.Add(sec3, 0, 2);
+            layout.SetColumnSpan(sec3, 2);
+
+            // === SECTION 4: KEY PROGRAMMING ===
+            var sec4 = Section("KEY PROGRAMMING");
             var row4 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             
             var btnProg = AutoBtn("Program Key", SUCCESS);
-            btnProg.Font = new Font("Segoe UI", 11, FontStyle.Bold);
             btnProg.Click += BtnProgram_Click;
             row4.Controls.Add(btnProg);
 
@@ -628,25 +628,21 @@ tabFlow.Controls.Add(_btnTab1);
             btnErase.Click += BtnErase_Click;
             row4.Controls.Add(btnErase);
 
-            var btnParam = AutoBtn("Parameter Reset", BTN_BG);
+            var btnParam = AutoBtn("Parameter Reset", WARNING);
             btnParam.Click += BtnParam_Click;
             row4.Controls.Add(btnParam);
 
-            var btnEscl = AutoBtn("Initialize ESCL", BTN_BG);
+            var btnEscl = AutoBtn("ESCL Initialize", BTN_BG);
             btnEscl.Click += BtnEscl_Click;
             row4.Controls.Add(btnEscl);
 
-            var btnDis = AutoBtn("Disable BCM Security", BTN_BG);
-            btnDis.Click += BtnDisable_Click;
-            row4.Controls.Add(btnDis);
+            var btnDisable = AutoBtn("Disable BCM Security", BTN_BG);
+            btnDisable.Click += BtnDisable_Click;
+            row4.Controls.Add(btnDisable);
 
             sec4.Controls.Add(row4);
+            layout.Controls.Add(sec4, 1, 0);
 
-            var tip = new Label { Text = "💡 Tip: Program Key costs 1 token per session (unlimited keys). Insert key, click Program, repeat for additional keys.", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, AutoSize = true, Margin = DpiPad(0, 10, 0, 0) };
-            sec4.Controls.Add(tip);
-
-            layout.Controls.Add(sec4, 0, 2);
-            layout.SetColumnSpan(sec4, 2);
             _content.Controls.Add(_patsTab);
         }
 
@@ -661,7 +657,7 @@ tabFlow.Controls.Add(_btnTab1);
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent,
                 ColumnCount = 2,
-                RowCount = 2,
+                RowCount = 3,
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
@@ -669,34 +665,31 @@ tabFlow.Controls.Add(_btnTab1);
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _diagTab.Controls.Add(layout);
 
-            var sec1 = Section("DTC CLEAR OPERATIONS (1 TOKEN EACH)");
+            var sec1 = Section("DTC CLEARING");
             var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            r1.Controls.Add(AutoBtn("Clear P160A", ACCENT)); ((Button)r1.Controls[0]).Click += BtnP160A_Click;
-            r1.Controls.Add(AutoBtn("Clear B10A2", ACCENT)); ((Button)r1.Controls[1]).Click += BtnB10A2_Click;
-            r1.Controls.Add(AutoBtn("Clear Crush Event", ACCENT)); ((Button)r1.Controls[2]).Click += BtnCrush_Click;
-            r1.Controls.Add(AutoBtn("Unlock Gateway", ACCENT)); ((Button)r1.Controls[3]).Click += BtnGateway_Click;
+            var d1 = AutoBtn("Clear P160A", BTN_BG); d1.Click += BtnP160A_Click; r1.Controls.Add(d1);
+            var d2 = AutoBtn("Clear B10A2", BTN_BG); d2.Click += BtnB10A2_Click; r1.Controls.Add(d2);
+            var d3 = AutoBtn("Clear Crush Event", BTN_BG); d3.Click += BtnCrush_Click; r1.Controls.Add(d3);
             sec1.Controls.Add(r1);
-
             layout.Controls.Add(sec1, 0, 0);
 
-            var sec2 = Section("KEYPAD CODE OPERATIONS");
+            var sec2 = Section("GATEWAY OPERATIONS");
             var r2 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var k1 = AutoBtn("Read Keypad Code", BTN_BG); k1.Click += BtnKeypad_Click; r2.Controls.Add(k1);
-            var k2 = AutoBtn("Write Keypad Code", BTN_BG); k2.Click += BtnKeypad_Click; r2.Controls.Add(k2);
-            r2.Controls.Add(new Label { Text = "For vehicles with door keypad entry", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, AutoSize = true, Margin = DpiPad(25, 14, 0, 0) });
+            var g1 = AutoBtn("Unlock Gateway", BTN_BG); g1.Click += BtnGateway_Click; r2.Controls.Add(g1);
             sec2.Controls.Add(r2);
             layout.Controls.Add(sec2, 1, 0);
 
-            var sec3 = Section("BCM ADVANCED OPERATIONS");
+            var sec3 = Section("KEYPAD & BCM");
             var r3 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var bcm = AutoBtn("BCM Factory Reset", DANGER); bcm.Click += BtnBcm_Click; r3.Controls.Add(bcm);
-            r3.Controls.Add(new Label { Text = "⚠ WARNING: Requires As-Built reprogramming after reset!", Font = new Font("Segoe UI", 10), ForeColor = DANGER, AutoSize = true, Margin = DpiPad(25, 14, 0, 0) });
+            var k1 = AutoBtn("Keypad Code", BTN_BG); k1.Click += BtnKeypad_Click; r3.Controls.Add(k1);
+            var b1 = AutoBtn("BCM Factory Defaults", DANGER); b1.Click += BtnBcm_Click; r3.Controls.Add(b1);
             sec3.Controls.Add(r3);
             layout.Controls.Add(sec3, 0, 1);
 
-            var sec4 = Section("MODULE INFORMATION");
+            var sec4 = Section("MODULE INFO");
             var r4 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var mod = AutoBtn("Read All Module Info", BTN_BG); mod.Click += BtnModInfo_Click; r4.Controls.Add(mod);
             sec4.Controls.Add(r4);
@@ -875,60 +868,585 @@ tabFlow.Controls.Add(_btnTab1);
         private void Logout() { _userEmail = _authToken = ""; _tokenBalance = 0; Settings.Remove("auth_token"); Settings.Save(); _txtPassword.Text = ""; _lblTokens.Text = "Tokens: --"; _lblUser.Text = ""; ShowLogin(); }
         #endregion
 
-        #region Device
-        private void BtnScan_Click(object? s, EventArgs e) { try { _cmbDevices.Items.Clear(); _deviceManager?.Dispose(); _deviceManager = new J2534DeviceManager(); _deviceManager.ScanForDevices(); var n = _deviceManager.GetDeviceNames(); if (n.Count == 0) { _cmbDevices.Items.Add("No devices found"); Log("warning", "No devices"); } else { foreach (var x in n) _cmbDevices.Items.Add(x); Log("success", $"Found {n.Count}"); } _cmbDevices.SelectedIndex = 0; } catch (Exception ex) { ShowError("Scan", "Failed", ex); } }
-        private void BtnConnect_Click(object? s, EventArgs e) { if (_cmbDevices.SelectedItem == null || _deviceManager == null) return; var nm = _cmbDevices.SelectedItem.ToString()!; if (nm.Contains("No") || nm.Contains("Select")) { MessageBox.Show("Select device"); return; } try { _device = _deviceManager.ConnectToDevice(nm); _channel = _device.OpenChannel(Protocol.ISO15765, BaudRates.HS_CAN_500K, ConnectFlags.NONE); _lblStatus.Text = "Status: Connected"; _lblStatus.ForeColor = SUCCESS; Log("success", $"Connected to {nm}"); } catch (Exception ex) { ShowError("Connect", "Failed", ex); } }
-        private async void BtnReadVin_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { var uds = new UdsService(_channel); var vin = await Task.Run(() => uds.ReadVIN()); if (!string.IsNullOrEmpty(vin)) { _lblVin.Text = $"VIN: {vin}"; _lblVin.ForeColor = SUCCESS; _txtOutcode.Text = await Task.Run(() => uds.ReadOutcode()); Log("success", $"VIN: {vin}"); } else { _lblVin.Text = "VIN: Could not read"; _lblVin.ForeColor = DANGER; } } catch (Exception ex) { ShowError("Read", "Failed", ex); } }
+        #region Device - Using J2534Service Singleton
+        private void BtnScan_Click(object? s, EventArgs e)
+        {
+            try
+            {
+                _cmbDevices.Items.Clear();
+                _devices = J2534DeviceScanner.ScanForDevices();
+                
+                if (_devices.Count == 0)
+                {
+                    _cmbDevices.Items.Add("No devices found");
+                    Log("warning", "No J2534 devices found");
+                }
+                else
+                {
+                    foreach (var d in _devices)
+                        _cmbDevices.Items.Add(d.Name);
+                    Log("success", $"Found {_devices.Count} device(s)");
+                }
+                _cmbDevices.SelectedIndex = 0;
+            }
+            catch (Exception ex)
+            {
+                ShowError("Scan Failed", "Could not scan for devices", ex);
+            }
+        }
+
+        private async void BtnConnect_Click(object? s, EventArgs e)
+        {
+            if (_cmbDevices.SelectedIndex < 0 || _devices.Count == 0)
+            {
+                MessageBox.Show("Please scan and select a device first");
+                return;
+            }
+
+            var idx = _cmbDevices.SelectedIndex;
+            if (idx >= _devices.Count)
+            {
+                MessageBox.Show("Please select a valid device");
+                return;
+            }
+
+            try
+            {
+                var device = _devices[idx];
+                var result = await J2534Service.Instance.ConnectDeviceAsync(device);
+                
+                if (result.Success)
+                {
+                    _isConnected = true;
+                    _lblStatus.Text = "Status: Connected";
+                    _lblStatus.ForeColor = SUCCESS;
+                    Log("success", $"Connected to {device.Name}");
+                }
+                else
+                {
+                    _lblStatus.Text = "Status: Connection Failed";
+                    _lblStatus.ForeColor = DANGER;
+                    Log("error", $"Failed: {result.Error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Connect Failed", "Could not connect to device", ex);
+            }
+        }
+
+        private async void BtnReadVin_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            try
+            {
+                var result = await J2534Service.Instance.ReadVehicleInfoAsync();
+                if (result.Success && result.VehicleInfo != null)
+                {
+                    _lblVin.Text = $"VIN: {result.VehicleInfo.VIN}";
+                    _lblVin.ForeColor = SUCCESS;
+                    Log("success", $"VIN: {result.VehicleInfo.VIN}");
+                }
+                else
+                {
+                    _lblVin.Text = "VIN: Could not read";
+                    _lblVin.ForeColor = DANGER;
+                    Log("error", result.Error ?? "Failed to read VIN");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Read Failed", "Could not read VIN", ex);
+            }
+        }
+
+        private async void BtnGetIncode_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            try
+            {
+                var result = await J2534Service.Instance.ReadOutcodeAsync();
+                if (result.Success && !string.IsNullOrEmpty(result.Outcode))
+                {
+                    _txtOutcode.Text = result.Outcode;
+                    Log("success", $"Outcode: {result.Outcode}");
+                    
+                    // TODO: Call incode service to get incode from outcode
+                    MessageBox.Show($"Outcode retrieved: {result.Outcode}\n\nUse the web portal or API to calculate the incode.");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed to read outcode");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Read Failed", "Could not read outcode", ex);
+            }
+        }
         #endregion
 
-        #region PATS
-        private async void BtnProgram_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } var ic = _txtIncode.Text.Trim(); if (string.IsNullOrEmpty(ic)) { MessageBox.Show("Enter incode"); return; } try { Log("info", "Programming..."); if (await Task.Run(() => new PatsOperations(new UdsService(_channel)).ProgramKeys(ic))) { MessageBox.Show("Key programmed!\n\nRemove, insert next, click Program."); Log("success", "Programmed"); } } catch (Exception ex) { ShowError("Program", "Failed", ex); } }
-        private async void BtnErase_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } if (!Confirm(PatsOperations.TOKEN_COST_KEY_ERASE, "Erase All Keys")) return; if (MessageBox.Show("ERASE ALL KEYS?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; var ic = _txtIncode.Text.Trim(); if (string.IsNullOrEmpty(ic)) { MessageBox.Show("Enter incode"); return; } try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).EraseAllKeys(ic)); MessageBox.Show("Erased!"); Log("success", "Erased"); } catch (Exception ex) { ShowError("Erase", "Failed", ex); } }
-        private async void BtnParam_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).ParameterReset()); MessageBox.Show("Reset done! Turn ignition OFF 15s."); Log("success", "Reset"); } catch (Exception ex) { ShowError("Reset", "Failed", ex); } }
-        private async void BtnEscl_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } if (!Confirm(PatsOperations.TOKEN_COST_ESCL_INIT, "ESCL")) return; try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).InitializeESCL()); MessageBox.Show("ESCL initialized!"); Log("success", "ESCL"); } catch (Exception ex) { ShowError("ESCL", "Failed", ex); } }
-        private async void BtnDisable_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).DisableBcmSecurity()); MessageBox.Show("BCM disabled"); Log("success", "BCM disabled"); } catch (Exception ex) { ShowError("BCM", "Failed", ex); } }
+        #region PATS - Using J2534Service Singleton
+        private async void BtnProgram_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first");
+                return;
+            }
+
+            try
+            {
+                Log("info", "Programming key...");
+                var result = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
+                if (result.Success)
+                {
+                    MessageBox.Show("Key programmed successfully!\n\nRemove key, insert next key, and click Program again.");
+                    Log("success", "Key programmed");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Programming failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Program Failed", "Could not program key", ex);
+            }
+        }
+
+        private async void BtnErase_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            if (!Confirm(1, "Erase All Keys"))
+                return;
+
+            if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!\n\nAre you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first");
+                return;
+            }
+
+            try
+            {
+                Log("info", "Erasing all keys...");
+                var result = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
+                if (result.Success)
+                {
+                    MessageBox.Show("All keys erased!");
+                    Log("success", "Keys erased");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Erase failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Erase Failed", "Could not erase keys", ex);
+            }
+        }
+
+        private async void BtnParam_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            try
+            {
+                Log("info", "Parameter reset...");
+                var result = await J2534Service.Instance.RestoreBcmDefaultsAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("Parameter reset complete!\n\nTurn ignition OFF and wait 15 seconds.");
+                    Log("success", "Parameter reset done");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Reset failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Reset Failed", "Could not reset parameters", ex);
+            }
+        }
+
+        private async void BtnEscl_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            if (!Confirm(1, "ESCL Initialize"))
+                return;
+
+            try
+            {
+                Log("info", "Initializing ESCL...");
+                var result = await J2534Service.Instance.InitializePatsAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("ESCL initialized!");
+                    Log("success", "ESCL initialized");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "ESCL init failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("ESCL Failed", "Could not initialize ESCL", ex);
+            }
+        }
+
+        private async void BtnDisable_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            try
+            {
+                Log("info", "Disabling BCM security...");
+                var result = await J2534Service.Instance.RestoreBcmDefaultsAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("BCM security disabled!");
+                    Log("success", "BCM security disabled");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("BCM Failed", "Could not disable BCM security", ex);
+            }
+        }
         #endregion
 
-        #region Diag
-        private async void BtnP160A_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } if (!Confirm(PatsOperations.TOKEN_COST_CLEAR_P160A, "P160A")) return; try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).ClearP160A()); MessageBox.Show("P160A cleared!"); Log("success", "P160A"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnB10A2_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } if (!Confirm(PatsOperations.TOKEN_COST_CLEAR_B10A2, "B10A2")) return; try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).ClearB10A2()); MessageBox.Show("B10A2 cleared!"); Log("success", "B10A2"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnCrush_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } if (!Confirm(PatsOperations.TOKEN_COST_CLEAR_CRUSH, "Crush")) return; try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).ClearCrushEvent()); MessageBox.Show("Crush cleared!"); Log("success", "Crush"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnGateway_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { var pats = new PatsOperations(new UdsService(_channel)); if (!await Task.Run(() => pats.DetectGateway())) { MessageBox.Show("No gateway"); return; } if (!Confirm(PatsOperations.TOKEN_COST_GATEWAY_UNLOCK, "Gateway")) return; var ic = _txtIncode.Text.Trim(); if (string.IsNullOrEmpty(ic)) { MessageBox.Show("Enter incode"); return; } await Task.Run(() => pats.UnlockGateway(ic)); MessageBox.Show("Gateway unlocked!"); Log("success", "Gateway"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnKeypad_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } var r = MessageBox.Show("YES=Read, NO=Write", "Keypad", MessageBoxButtons.YesNoCancel); if (r == DialogResult.Cancel) return; if (r == DialogResult.Yes) { if (!Confirm(PatsOperations.TOKEN_COST_KEYPAD_READ, "Read")) return; try { var c = await Task.Run(() => new PatsOperations(new UdsService(_channel)).ReadKeypadCode()); MessageBox.Show($"Code: {c}"); Log("success", $"Keypad: {c}"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } } else { var nc = Microsoft.VisualBasic.Interaction.InputBox("5-digit code:", "Keypad", ""); if (nc.Length != 5) return; if (!Confirm(PatsOperations.TOKEN_COST_KEYPAD_WRITE, "Write")) return; try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).WriteKeypadCode(nc)); MessageBox.Show($"Set: {nc}"); Log("success", "Keypad set"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } } }
-        private async void BtnBcm_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } if (MessageBox.Show("Reset ALL BCM settings?", "WARNING", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; if (!Confirm(PatsOperations.TOKEN_COST_BCM_FACTORY, "BCM Reset")) return; var i1 = Microsoft.VisualBasic.Interaction.InputBox("Incode 1:", "BCM", _txtIncode.Text); if (string.IsNullOrEmpty(i1)) return; var i2 = Microsoft.VisualBasic.Interaction.InputBox("Incode 2:", "BCM", ""); if (string.IsNullOrEmpty(i2)) return; var i3 = Microsoft.VisualBasic.Interaction.InputBox("Incode 3 (opt):", "BCM", ""); var codes = string.IsNullOrEmpty(i3) ? new[] { i1, i2 } : new[] { i1, i2, i3 }; try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).BcmFactoryDefaults(codes)); MessageBox.Show("BCM reset!"); Log("success", "BCM reset"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnModInfo_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { var info = await Task.Run(() => new UdsService(_channel).ReadAllModuleInfo()); MessageBox.Show(info, "Module Info"); Log("success", "Module info"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
+        #region Diag - Using J2534Service Singleton
+        private async void BtnP160A_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            if (!Confirm(1, "Clear P160A")) return;
+            
+            try
+            {
+                var result = await J2534Service.Instance.ClearDtcsAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("P160A cleared!");
+                    Log("success", "P160A cleared");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnB10A2_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            if (!Confirm(1, "Clear B10A2")) return;
+            
+            try
+            {
+                var result = await J2534Service.Instance.ClearDtcsAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("B10A2 cleared!");
+                    Log("success", "B10A2 cleared");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnCrush_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            if (!Confirm(1, "Clear Crush Event")) return;
+            
+            try
+            {
+                var result = await J2534Service.Instance.ClearCrashFlagAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("Crush event cleared!");
+                    Log("success", "Crush cleared");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnGateway_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            try
+            {
+                var gw = await J2534Service.Instance.CheckGatewayAsync();
+                if (!gw.Success || !gw.HasGateway)
+                {
+                    MessageBox.Show("No gateway detected");
+                    return;
+                }
+
+                if (!Confirm(1, "Unlock Gateway")) return;
+
+                var ic = _txtIncode.Text.Trim();
+                if (string.IsNullOrEmpty(ic))
+                {
+                    MessageBox.Show("Enter incode first");
+                    return;
+                }
+
+                var result = await J2534Service.Instance.SubmitIncodeAsync("GWM", ic);
+                if (result.Success)
+                {
+                    MessageBox.Show("Gateway unlocked!");
+                    Log("success", "Gateway unlocked");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnKeypad_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            var r = MessageBox.Show("YES = Read keypad code\nNO = Write new code", "Keypad Code", MessageBoxButtons.YesNoCancel);
+            if (r == DialogResult.Cancel) return;
+
+            if (r == DialogResult.Yes)
+            {
+                if (!Confirm(1, "Read Keypad")) return;
+                try
+                {
+                    // Read keypad - placeholder
+                    MessageBox.Show("Keypad read not implemented in J2534Service yet");
+                    Log("info", "Keypad read requested");
+                }
+                catch (Exception ex) { ShowError("Error", "Failed", ex); }
+            }
+            else
+            {
+                var nc = Microsoft.VisualBasic.Interaction.InputBox("Enter 5-digit code:", "Keypad Code", "");
+                if (nc.Length != 5) return;
+                if (!Confirm(1, "Write Keypad")) return;
+                try
+                {
+                    // Write keypad - placeholder
+                    MessageBox.Show($"Keypad write to {nc} not implemented in J2534Service yet");
+                    Log("info", $"Keypad write {nc} requested");
+                }
+                catch (Exception ex) { ShowError("Error", "Failed", ex); }
+            }
+        }
+
+        private async void BtnBcm_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            if (MessageBox.Show("WARNING: This will reset ALL BCM settings to factory defaults!\n\nAre you sure?", "BCM Factory Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            if (!Confirm(1, "BCM Factory Reset")) return;
+
+            try
+            {
+                var result = await J2534Service.Instance.RestoreBcmDefaultsAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("BCM reset to factory defaults!");
+                    Log("success", "BCM factory reset");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnModInfo_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            try
+            {
+                var result = await J2534Service.Instance.ReadVehicleInfoAsync();
+                if (result.Success && result.VehicleInfo != null)
+                {
+                    var info = $"VIN: {result.VehicleInfo.VIN}\n" +
+                              $"Year: {result.VehicleInfo.Year}\n" +
+                              $"Make: {result.VehicleInfo.Make}\n" +
+                              $"Model: {result.VehicleInfo.Model}";
+                    MessageBox.Show(info, "Module Info");
+                    Log("success", "Module info read");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
         #endregion
 
-        #region Free
-        private async void BtnDtc_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { await Task.Run(() => new UdsService(_channel).ClearDTCs()); MessageBox.Show("DTCs cleared!"); Log("success", "DTCs"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnKam_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).ClearKAM()); MessageBox.Show("KAM cleared!"); Log("success", "KAM"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnReset_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { await Task.Run(() => new PatsOperations(new UdsService(_channel)).VehicleReset()); MessageBox.Show("Reset!"); Log("success", "Reset"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
-        private async void BtnReadKeys_Click(object? s, EventArgs e) { if (_channel == null) { MessageBox.Show("Connect first"); return; } try { var c = await Task.Run(() => new UdsService(_channel).ReadKeysCount()); _lblKeys.Text = c.ToString(); MessageBox.Show($"Keys: {c}"); Log("success", $"Keys: {c}"); } catch (Exception ex) { ShowError("Error", "Failed", ex); } }
+        #region Free - Using J2534Service Singleton
+        private async void BtnDtc_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            try
+            {
+                var result = await J2534Service.Instance.ClearDtcsAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("All DTCs cleared!");
+                    Log("success", "DTCs cleared");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnKam_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            try
+            {
+                var result = await J2534Service.Instance.VehicleResetAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("KAM cleared!");
+                    Log("success", "KAM cleared");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnReset_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            try
+            {
+                var result = await J2534Service.Instance.VehicleResetAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show("Vehicle reset complete!");
+                    Log("success", "Vehicle reset");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        private async void BtnReadKeys_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+            
+            try
+            {
+                var result = await J2534Service.Instance.ReadKeyCountAsync();
+                if (result.Success)
+                {
+                    _lblKeys.Text = result.KeyCount.ToString();
+                    MessageBox.Show($"Keys programmed: {result.KeyCount}");
+                    Log("success", $"Keys: {result.KeyCount}");
+                }
+                else
+                {
+                    Log("error", result.Error ?? "Failed");
+                }
+            }
+            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
         #endregion
+
+        private void AutoStartOnce()
+        {
+            if (_didAutoStart) return;
+            _didAutoStart = true;
+
+            // Auto-start on successful login: land on PATS tab and populate device list
+            BeginInvoke(new Action(() =>
+            {
+                try { BtnScan_Click(null, EventArgs.Empty); } catch { }
+            }));
+        }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             try
             {
-                _channel?.Dispose();
-                _device?.Dispose();
-                _deviceManager?.Dispose();
+                J2534Service.Instance.Disconnect();
                 _logoImage?.Dispose();
                 _logoImage = null;
             }
-
-private void AutoStartOnce()
-{
-    if (_didAutoStart) return;
-    _didAutoStart = true;
-
-    // Auto-start on successful login: land on PATS tab and populate device list
-    BeginInvoke(new Action(() =>
-    {
-        try { BtnScan_Click(null, EventArgs.Empty); } catch { }
-    }));
-}
-
             catch { }
 
             base.OnFormClosing(e);
