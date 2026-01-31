@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using System.Threading.Tasks;
+using PatsKillerPro.Vehicle;
 
 namespace PatsKillerPro.J2534
 {
@@ -318,23 +319,22 @@ namespace PatsKillerPro.J2534
 
         private VehicleInfo DecodeVehicle(string vin)
         {
-            var info = new VehicleInfo();
+            // Prefer the shared decoder so the UI + service layer use one canonical model.
+            var decoded = VinDecoder.Decode(vin);
+            if (decoded != null)
+                return decoded;
 
-            // Position 10 = model year
-            if (vin.Length >= 10)
+            // Fallback (should be rare).
+            return new VehicleInfo
             {
-                info.Year = DecodeModelYear(vin[9]);
-                info.Is2020Plus = info.Year >= 2020;
-            }
-
-            // Position 4-8 = model info (simplified)
-            if (vin.Length >= 8)
-            {
-                var modelCode = vin.Substring(3, 5);
-                info.Model = DecodeModel(modelCode);
-            }
-
-            return info;
+                Vin = vin,
+                ModelYear = 0,
+                Model = "Unknown",
+                Platform = "Unknown",
+                Keyless = false,
+                RequiresGatewayUnlock = false,
+                CanConfig = CanConfiguration.SingleHsCan
+            };
         }
 
         private int DecodeModelYear(char c)
@@ -386,15 +386,6 @@ namespace PatsKillerPro.J2534
     }
 
     #region Supporting Classes
-
-    public class VehicleInfo
-    {
-        public int Year { get; set; }
-        public string Model { get; set; } = "";
-        public bool Is2020Plus { get; set; }
-
-        public override string ToString() => $"{Year} {Model}";
-    }
 
     public class PatsStatus
     {
