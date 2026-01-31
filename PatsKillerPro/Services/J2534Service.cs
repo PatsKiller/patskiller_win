@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using PatsKillerPro.J2534;
+using PatsKillerPro.Vehicle;
 
 namespace PatsKillerPro.Services
 {
@@ -169,15 +170,18 @@ namespace PatsKillerPro.Services
                 if (patsInfo == null)
                     return VehicleInfoResult.Fail("Unable to read vehicle info.");
 
-                // Map from FordPatsService's VehicleInfo to our result
-                var info = new VehicleInfoData
-                {
-                    Year = patsInfo.ModelYear,
-                    Model = patsInfo.Model ?? "",
-                    Is2020Plus = patsInfo.ModelYear >= 2020
-                };
-
-                return VehicleInfoResult.Ok(info, _patsService.CurrentVin ?? "", _patsService.BatteryVoltage);
+                return new VehicleInfoResult(
+                    Success: true,
+                    Vin: _patsService.CurrentVin ?? "",
+                    Year: patsInfo.ModelYear,
+                    Model: patsInfo.Model ?? "",
+                    PlatformCode: patsInfo.Platform ?? "",
+                    SecurityTargetModule: "BCM (0x726)",
+                    BatteryVoltage: _patsService.BatteryVoltage,
+                    AdditionalInfo: patsInfo.Is2020Plus ? "Gateway unlock may be required" : null,
+                    Error: null,
+                    ErrorMessage: null
+                );
             }
             catch (Exception ex)
             {
@@ -300,6 +304,25 @@ namespace PatsKillerPro.Services
             }
         });
 
+        public Task<GatewayResult> CheckGatewayAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return GatewayResult.Fail("Not connected.");
+
+                // Check if vehicle is 2020+ which requires gateway
+                var info = await _patsService.ReadVehicleInfoAsync();
+                var hasGateway = info?.Is2020Plus ?? false;
+                
+                return GatewayResult.Ok(hasGateway);
+            }
+            catch (Exception ex)
+            {
+                return GatewayResult.Fail(ex.Message);
+            }
+        });
+
         public Task<OperationResult> ClearCrashEventAsync() => RunExclusiveAsync(async () =>
         {
             try
@@ -309,6 +332,25 @@ namespace PatsKillerPro.Services
 
                 var success = await _patsService.ClearCrashEventAsync();
                 return success ? OperationResult.Ok() : OperationResult.Fail("Clear crash event failed.");
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        // Alias for ClearCrashEventAsync
+        public Task<OperationResult> ClearCrashFlagAsync() => ClearCrashEventAsync();
+
+        public Task<OperationResult> ClearDtcsAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                var success = await _patsService.ClearCrashEventAsync(); // Uses same DTC clear
+                return success ? OperationResult.Ok() : OperationResult.Fail("Clear DTCs failed.");
             }
             catch (Exception ex)
             {
@@ -364,19 +406,6 @@ namespace PatsKillerPro.Services
             }
         });
 
-        // ---------------- Data Types ----------------
-
-        /// <summary>
-        /// Vehicle information data transfer object
-        /// </summary>
-        public sealed class VehicleInfoData
-        {
-            public int Year { get; set; }
-            public string Model { get; set; } = "";
-            public bool Is2020Plus { get; set; }
-            public override string ToString() => $"{Year} {Model}";
-        }
-
         // ---------------- Result Types ----------------
 
         public record OperationResult(bool Success, string? Error = null)
@@ -391,10 +420,23 @@ namespace PatsKillerPro.Services
             public static DeviceListResult Fail(string error) => new(false, new List<J2534DeviceInfo>(), error);
         }
 
-        public record VehicleInfoResult(bool Success, VehicleInfoData? VehicleInfo, string? Vin, double BatteryVoltage, string? Error = null)
+        public record VehicleInfoResult(
+            bool Success,
+            string? Vin = null,
+            int? Year = null,
+            string? Model = null,
+            string? PlatformCode = null,
+            string? SecurityTargetModule = null,
+            double BatteryVoltage = 0,
+            string? AdditionalInfo = null,
+            string? Error = null,
+            string? ErrorMessage = null)
         {
-            public static VehicleInfoResult Ok(VehicleInfoData info, string vin, double battery) => new(true, info, vin, battery);
-            public static VehicleInfoResult Fail(string error) => new(false, null, null, 0, error);
+            public static VehicleInfoResult Ok(string vin, int year, string model, string platform, double battery) =>
+                new(true, vin, year, model, platform, "BCM (0x726)", battery);
+            
+            public static VehicleInfoResult Fail(string error) =>
+                new(false, Error: error, ErrorMessage: error);
         }
 
         public record OutcodeResult(bool Success, string? Outcode, string? Error = null)

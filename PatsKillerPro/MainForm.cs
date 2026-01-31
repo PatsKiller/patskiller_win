@@ -1398,7 +1398,7 @@ private async void BtnErase_Click(object? s, EventArgs e)
         var result = await J2534Service.Instance.ReadVehicleInfoAsync();
         if (result.Success == false)
         {
-            _log?.Warn($"ReadVehicleInfo failed: {result.ErrorMessage}");
+            Log("error", $"ReadVehicleInfo failed: {result.ErrorMessage}");
             MessageBox.Show(result.ErrorMessage ?? "Failed to read module info.");
             return;
         }
@@ -1421,11 +1421,11 @@ private async void BtnErase_Click(object? s, EventArgs e)
         var info = string.Join(Environment.NewLine, lines);
 
         MessageBox.Show(info, "Module Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        _log?.Info("Module info shown to user.");
+        Log("info", "Module info shown to user.");
     }
     catch (Exception ex)
     {
-        _log?.Error(ex, "Read module info failed");
+        Log("error", $"Read module info failed: {ex.Message}");
         MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }
