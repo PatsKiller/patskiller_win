@@ -1522,11 +1522,11 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
 
                 var lines = new List<string>
                 {
-                    $"VIN: {result.Vin ?? \"N/A\"}",
-                    $"Year: {(result.Year?.ToString() ?? \"N/A\")}",
-                    $"Model: {result.Model ?? \"N/A\"}",
-                    $"Platform: {result.PlatformCode ?? \"N/A\"}",
-                    $"Security Target: {result.SecurityTargetModule ?? \"N/A\"}"
+                    $"VIN: {result.Vin ?? "N/A"}",
+                    $"Year: {(result.Year?.ToString() ?? "N/A")}",
+                    $"Model: {result.Model ?? "N/A"}",
+                    $"Platform: {result.PlatformCode ?? "N/A"}",
+                    $"Security Target: {result.SecurityTargetModule ?? "N/A"}"
                 };
 
                 if (!string.IsNullOrWhiteSpace(result.AdditionalInfo))
