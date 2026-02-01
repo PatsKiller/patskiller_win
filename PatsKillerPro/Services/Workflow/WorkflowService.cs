@@ -204,6 +204,7 @@ namespace PatsKillerPro.Services.Workflow
 
         /// <summary>
         /// Unlocks the gateway (for 2020+ vehicles) using the workflow runner.
+        /// Also unlocks BCM and starts keep-alive so all subsequent key operations are FREE.
         /// </summary>
         public async Task<OperationResult> UnlockGatewayAsync(string incode, CancellationToken ct = default)
         {
@@ -211,6 +212,7 @@ namespace PatsKillerPro.Services.Workflow
 
             var operation = new GatewayUnlockOperation(
                 _uds!,
+                _keepAlive,
                 _session,
                 incode,
                 _pacingConfig,

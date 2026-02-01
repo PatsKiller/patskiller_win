@@ -7,24 +7,26 @@ namespace PatsKillerPro.Services.Workflow.Operations
 {
     /// <summary>
     /// Gateway Unlock Operation for 2020+ Ford vehicles.
-    /// Required before any diagnostic operations on newer vehicles.
-    /// Token Cost: 1 token
+    /// Unlocks BOTH gateway AND BCM, starting a session that enables all key operations for FREE.
+    /// Token Cost: 1 token (covers all subsequent key operations within session)
     /// </summary>
     public sealed class GatewayUnlockOperation : OperationBase
     {
         private readonly UdsCommunication _uds;
+        private readonly KeepAliveTimer _keepAlive;
         private readonly VehicleSession _session;
         private readonly string _incode;
         private readonly Action<string>? _log;
 
         public override string Name => "Unlock Gateway";
-        public override string Description => "Unlocks security gateway for diagnostic access";
-        public override TimeSpan? EstimatedDuration => TimeSpan.FromSeconds(5);
+        public override string Description => "Unlocks gateway and BCM for all key operations";
+        public override TimeSpan? EstimatedDuration => TimeSpan.FromSeconds(8);
         public override int TokenCost => 1;
         public override bool RequiresIncode => true;
 
         public GatewayUnlockOperation(
             UdsCommunication uds,
+            KeepAliveTimer keepAlive,
             VehicleSession session,
             string incode,
             PlatformPacingConfig? pacing = null,
@@ -32,6 +34,7 @@ namespace PatsKillerPro.Services.Workflow.Operations
             Action<string>? log = null)
         {
             _uds = uds ?? throw new ArgumentNullException(nameof(uds));
+            _keepAlive = keepAlive ?? throw new ArgumentNullException(nameof(keepAlive));
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _incode = incode ?? throw new ArgumentNullException(nameof(incode));
             _log = log;
@@ -54,14 +57,15 @@ namespace PatsKillerPro.Services.Workflow.Operations
                 {
                     CreateStep(
                         "Check Gateway",
-                        ct => Task.CompletedTask,
+                        ct => { _log?.Invoke("No gateway required for this vehicle (pre-2020)"); return Task.CompletedTask; },
                         "No gateway required for this vehicle"
                     )
                 };
             }
 
-            return new List<OperationStep>
+            var steps = new List<OperationStep>
             {
+                // Step 1: Unlock Gateway Module
                 CreateStep(
                     "Start Gateway Session",
                     StartGatewaySessionAsync,
@@ -86,8 +90,46 @@ namespace PatsKillerPro.Services.Workflow.Operations
                     postDelay: pacing.PostSecurityUnlockDelay,
                     retryPolicy: RetryPolicy.Security,
                     nrcContext: NrcContext.SecurityAccess
+                ),
+
+                // Step 2: Start Diagnostic Session on BCM
+                CreateStep(
+                    "Start BCM Session",
+                    StartBcmSessionAsync,
+                    "Starting extended session on BCM",
+                    postDelay: pacing.PostSessionStartDelay,
+                    retryPolicy: RetryPolicy.Standard,
+                    nrcContext: NrcContext.DiagnosticSession
+                ),
+
+                // Step 3: Start Keep-Alive
+                CreateStep(
+                    "Start Keep-Alive",
+                    StartKeepAliveAsync,
+                    "Starting session maintenance",
+                    retryPolicy: RetryPolicy.NoRetry
+                ),
+
+                // Step 4: Unlock BCM Security
+                CreateStep(
+                    "Unlock BCM Security",
+                    UnlockBcmSecurityAsync,
+                    "Unlocking BCM for key operations",
+                    postDelay: pacing.PostSecurityUnlockDelay,
+                    retryPolicy: RetryPolicy.Security,
+                    nrcContext: NrcContext.SecurityAccess
+                ),
+
+                // Step 5: Confirm Ready
+                CreateStep(
+                    "Confirm Ready",
+                    ConfirmReadyAsync,
+                    "Session ready for key operations",
+                    retryPolicy: RetryPolicy.NoRetry
                 )
             };
+
+            return steps;
         }
 
         private async Task StartGatewaySessionAsync(CancellationToken ct)
@@ -140,7 +182,70 @@ namespace PatsKillerPro.Services.Workflow.Operations
             response.ThrowIfFailed(NrcContext.SecurityAccess);
             _session.RecordSecurityUnlock(routing.GatewayModule);
 
-            _log?.Invoke("Gateway unlocked successfully");
+            _log?.Invoke("Gateway unlocked ✓");
+        }
+
+        private async Task StartBcmSessionAsync(CancellationToken ct)
+        {
+            var routing = RoutingConfig!;
+
+            var response = await _uds.DiagnosticSessionControlAsync(
+                routing.PrimaryModule,
+                DiagnosticSessionType.Extended,
+                ct);
+
+            response.ThrowIfFailed(NrcContext.DiagnosticSession);
+            _session.RecordDiagnosticSession(routing.PrimaryModule, DiagnosticSessionType.Extended);
+
+            _log?.Invoke("BCM session started");
+        }
+
+        private Task StartKeepAliveAsync(CancellationToken ct)
+        {
+            _keepAlive.ConfigureFromPlatform(PacingConfig!, RoutingConfig!);
+            _keepAlive.Start();
+            _log?.Invoke("Keep-alive started - session will be maintained");
+            return Task.CompletedTask;
+        }
+
+        private async Task UnlockBcmSecurityAsync(CancellationToken ct)
+        {
+            var routing = RoutingConfig!;
+
+            // Request seed from BCM
+            var seedResp = await _uds.SecurityAccessRequestSeedAsync(routing.PrimaryModule, 0x01, ct);
+            seedResp.ThrowIfFailed(NrcContext.SecurityAccess);
+
+            // Submit BCM incode
+            string bcmIncode;
+            if (routing.HasKeyless && _incode.Length >= 8)
+            {
+                (bcmIncode, _) = routing.SplitKeylessIncode(_incode);
+            }
+            else
+            {
+                bcmIncode = _incode;
+            }
+
+            var incodeBytes = UdsCommunication.HexToBytes(bcmIncode);
+            if (incodeBytes == null)
+            {
+                throw new StepException("Invalid BCM incode format", ErrorCategory.FailFast);
+            }
+
+            var keyResp = await _uds.SecurityAccessSendKeyAsync(routing.PrimaryModule, incodeBytes, 0x02, ct);
+            keyResp.ThrowIfFailed(NrcContext.SecurityAccess);
+
+            _session.RecordSecurityUnlock(routing.PrimaryModule);
+            _log?.Invoke("BCM unlocked ✓");
+        }
+
+        private Task ConfirmReadyAsync(CancellationToken ct)
+        {
+            var remaining = _session.SecurityTimeRemaining;
+            _log?.Invoke($"✓ Gateway + BCM unlocked - ALL key operations are FREE for {remaining?.TotalMinutes:F0} minutes!");
+            _log?.Invoke("→ Program keys, erase keys - no additional tokens needed!");
+            return Task.CompletedTask;
         }
     }
 }

@@ -23,7 +23,6 @@ namespace PatsKillerPro.Services.Workflow.Operations
         private int _initialKeyCount;
         private int _finalKeyCount;
         private byte[]? _seed;
-        private bool _didUnlockSecurity;
         private bool _wasAlreadyUnlocked;
 
         public override string Name => "Program Key";
@@ -171,17 +170,18 @@ namespace PatsKillerPro.Services.Workflow.Operations
         {
             var routing = RoutingConfig!;
 
-            // Check if we have an active security session already
+            // Check if BCM specifically is unlocked (required for key functions)
+            // Note: Gateway unlock alone is NOT enough - BCM must be unlocked
             _wasAlreadyUnlocked = _session.IsSecurityUnlocked(routing.PrimaryModule);
             
             if (_wasAlreadyUnlocked)
             {
                 var remaining = _session.GetTimeRemaining(routing.PrimaryModule);
-                _log?.Invoke($"✓ Reusing active security session (time remaining: {remaining?.TotalSeconds:F0}s)");
+                _log?.Invoke($"✓ Reusing active BCM session (time remaining: {remaining?.TotalSeconds:F0}s)");
             }
             else
             {
-                _log?.Invoke("New security unlock required (will consume 1 token)");
+                _log?.Invoke("BCM unlock required (will consume 1 token)");
             }
 
             // Verify incode format
@@ -291,25 +291,23 @@ namespace PatsKillerPro.Services.Workflow.Operations
         }
 
         /// <summary>
-        /// Combined security access step that checks for existing session.
-        /// SKIPS seed request and incode submission if already unlocked!
+        /// Security access step that checks for existing BCM session.
+        /// SKIPS if BCM already unlocked!
         /// </summary>
         private async Task RequestSecurityAccessAsync(CancellationToken ct)
         {
             var routing = RoutingConfig!;
 
-            // CHECK FOR EXISTING SESSION - THIS IS THE KEY TO MULTI-KEY SUPPORT!
+            // Check if BCM specifically is already unlocked
             if (_session.IsSecurityUnlocked(routing.PrimaryModule))
             {
                 var remaining = _session.GetTimeRemaining(routing.PrimaryModule);
-                _log?.Invoke($"✓ Session already unlocked - SKIPPING incode submission (time left: {remaining?.TotalSeconds:F0}s)");
-                _log?.Invoke("→ No token consumed for this key!");
-                _didUnlockSecurity = false;
+                _log?.Invoke($"✓ BCM already unlocked - SKIPPING incode submission (time left: {remaining?.TotalSeconds:F0}s)");
                 return;
             }
 
-            // Need to unlock - this will consume a token
-            _log?.Invoke("Performing security unlock (consuming 1 token)...");
+            // BCM not unlocked - need to unlock it (consumes token)
+            _log?.Invoke("Unlocking BCM security (consuming 1 token)...");
 
             // Request seed
             var seedResp = await _uds.SecurityAccessRequestSeedAsync(routing.PrimaryModule, 0x01, ct);
@@ -344,7 +342,6 @@ namespace PatsKillerPro.Services.Workflow.Operations
             response.ThrowIfFailed(NrcContext.SecurityAccess);
 
             _session.RecordSecurityUnlock(routing.PrimaryModule, PacingConfig?.SecuritySessionDuration);
-            _didUnlockSecurity = true;
             _log?.Invoke("Security unlocked on primary module ✓");
 
             // For keyless, also unlock secondary module
