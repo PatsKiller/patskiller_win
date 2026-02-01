@@ -37,6 +37,16 @@ namespace PatsKillerPro
         private bool _isConnected = false;
         private bool _uiBusy = false;
 
+        // Session management
+        private readonly SessionStateManager _sessionManager = new();
+        private System.Windows.Forms.Timer? _sessionTimer;
+        private bool _sessionWarningShown = false;
+        private int _retryCount = 0;
+        private const int MaxAutoRetries = 3;
+
+        // Tooltips
+        private ToolTip _toolTip = null!;
+
         private void SetUiBusy(bool busy)
         {
             if (_uiBusy == busy) return;
@@ -55,11 +65,17 @@ namespace PatsKillerPro
         // Controls
         private Panel _header = null!, _tabBar = null!, _content = null!, _logPanel = null!, _loginPanel = null!;
         private Panel _patsTab = null!, _diagTab = null!, _freeTab = null!;
+        private Panel _sessionPanel = null!;
         private Button _btnTab1 = null!, _btnTab2 = null!, _btnTab3 = null!, _btnLogout = null!;
+        private Button _btnCloseSession = null!;
         private Label _lblTokens = null!, _lblUser = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
+        private Label _lblSessionTimer = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
+
+        // Session-dependent buttons (enable/disable based on session state)
+        private List<Button> _sessionDependentButtons = new();
 
         // DPI helpers (keeps runtime-created controls scaling-friendly)
         private int Dpi(int px) => (int)Math.Round(px * (DeviceDpi / 96f));
@@ -70,6 +86,10 @@ namespace PatsKillerPro
         {
             InitializeComponent();
             ApplyDarkTitleBar();
+            
+            // Initialize tooltip provider
+            _toolTip = ToolTipHelper.CreateToolTip();
+            
             BuildUI();
 
             // Centralized UI busy gating (prevents double-click / out-of-order ops).
@@ -79,10 +99,182 @@ namespace PatsKillerPro
                 try { BeginInvoke(new Action(() => SetUiBusy(busy))); } catch { /* ignore */ }
             };
 
+            // Initialize session timer (updates every second)
+            _sessionTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            _sessionTimer.Tick += SessionTimer_Tick;
+
+            // Try to recover previous session
+            if (_sessionManager.Load() && _sessionManager.HasRecoverableSession())
+            {
+                Log("info", "Previous session found - data available for recovery");
+            }
+
             LoadSession();
 
-            // Dispose cached images cleanly
+            // Dispose cached images and save log on close
+            this.FormClosing += MainForm_FormClosing;
             this.FormClosed += (_, __) => { try { _logoImage?.Dispose(); } catch { } };
+        }
+
+        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            // Auto-save activity log
+            try
+            {
+                if (_txtLog != null && !string.IsNullOrEmpty(_txtLog.Text))
+                {
+                    var vin = _lblVin?.Text?.Replace("VIN: ", "").Replace("—", "").Trim();
+                    SessionStateManager.SaveLog(_txtLog.Text, vin);
+                    SessionStateManager.CleanupOldLogs();
+                }
+            }
+            catch { /* Silent fail */ }
+
+            // Stop session timer
+            _sessionTimer?.Stop();
+            _sessionTimer?.Dispose();
+        }
+
+        private void SessionTimer_Tick(object? sender, EventArgs e)
+        {
+            UpdateSessionTimerDisplay();
+        }
+
+        private void UpdateSessionTimerDisplay()
+        {
+            if (_lblSessionTimer == null) return;
+
+            var workflow = J2534Service.Instance.Workflow;
+            if (workflow == null || !workflow.Session.HasActiveSecuritySession)
+            {
+                _lblSessionTimer.Text = "Session: Inactive";
+                _lblSessionTimer.ForeColor = TEXT_MUTED;
+                _sessionPanel.BackColor = SURFACE;
+                _btnCloseSession.Visible = false;
+                UpdateSessionDependentButtons(false);
+                return;
+            }
+
+            var remaining = workflow.Session.SecurityTimeRemaining;
+            if (!remaining.HasValue || remaining.Value <= TimeSpan.Zero)
+            {
+                _lblSessionTimer.Text = "Session: Expired";
+                _lblSessionTimer.ForeColor = DANGER;
+                _sessionPanel.BackColor = Color.FromArgb(40, 239, 68, 68);
+                _btnCloseSession.Visible = false;
+                UpdateSessionDependentButtons(false);
+                _sessionTimer?.Stop();
+                Log("warning", "Security session expired - new token required for operations");
+                return;
+            }
+
+            var mins = (int)remaining.Value.TotalMinutes;
+            var secs = remaining.Value.Seconds;
+            _lblSessionTimer.Text = $"Session: {mins:D2}:{secs:D2}";
+            _btnCloseSession.Visible = true;
+            UpdateSessionDependentButtons(true);
+
+            // Warning at 2 minutes
+            if (remaining.Value.TotalMinutes <= 2 && !_sessionWarningShown)
+            {
+                _sessionWarningShown = true;
+                _lblSessionTimer.ForeColor = DANGER;
+                _sessionPanel.BackColor = Color.FromArgb(40, 239, 68, 68);
+                
+                // Show warning dialog
+                var result = MessageBox.Show(
+                    "Security session expires in 2 minutes!\n\nDo you want to refresh the session?\n(This will consume 1 token)",
+                    "Session Expiring",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (result == DialogResult.Yes)
+                {
+                    RefreshSession();
+                }
+            }
+            else if (remaining.Value.TotalMinutes > 2)
+            {
+                _sessionWarningShown = false;
+                _lblSessionTimer.ForeColor = SUCCESS;
+                _sessionPanel.BackColor = Color.FromArgb(20, 34, 197, 94);
+            }
+        }
+
+        private void UpdateSessionDependentButtons(bool sessionActive)
+        {
+            foreach (var btn in _sessionDependentButtons)
+            {
+                // These buttons show different state based on session
+                // When session active: show as FREE (green border)
+                // When session inactive: show as costs token
+                if (btn.Tag?.ToString() == "session_dependent")
+                {
+                    btn.FlatAppearance.BorderColor = sessionActive ? SUCCESS : WARNING;
+                    btn.FlatAppearance.BorderSize = sessionActive ? 2 : 0;
+                }
+            }
+        }
+
+        private async void RefreshSession()
+        {
+            if (!Confirm(1, "Refresh security session")) return;
+            
+            var incode = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(incode))
+            {
+                ShowError("No Incode", "Please enter incode to refresh session");
+                return;
+            }
+
+            try
+            {
+                Log("info", "Refreshing security session...");
+                var workflow = J2534Service.Instance.Workflow;
+                if (workflow == null) return;
+
+                var result = await workflow.UnlockGatewayAsync(incode);
+                if (result.Success)
+                {
+                    _tokenBalance--;
+                    _lblTokens.Text = $"Tokens: {_tokenBalance}";
+                    _sessionWarningShown = false;
+                    Log("success", "Session refreshed successfully");
+                }
+                else
+                {
+                    Log("error", $"Session refresh failed: {result.Error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Refresh Failed", "Could not refresh session", ex);
+            }
+        }
+
+        private void CloseSession()
+        {
+            var result = MessageBox.Show(
+                "Close the current security session?\n\nYou will need to use another token to perform key operations.",
+                "Close Session",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes) return;
+
+            try
+            {
+                var workflow = J2534Service.Instance.Workflow;
+                workflow?.Session.ClearAll();
+                _sessionTimer?.Stop();
+                _sessionManager.ClearSession();
+                UpdateSessionTimerDisplay();
+                Log("info", "Security session closed");
+            }
+            catch (Exception ex)
+            {
+                Log("error", $"Error closing session: {ex.Message}");
+            }
         }
 
         protected override void OnShown(EventArgs e)
@@ -532,7 +724,7 @@ namespace PatsKillerPro
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent,
                 ColumnCount = 2,
-                RowCount = 3,
+                RowCount = 4,  // Increased for session panel
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
@@ -541,6 +733,7 @@ namespace PatsKillerPro
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));  // For session panel
             _patsTab.Controls.Add(layout);
 
             // === SECTION 1: J2534 DEVICE CONNECTION ===
@@ -555,10 +748,12 @@ namespace PatsKillerPro
 
             var btnScan = AutoBtn("Scan Devices", BTN_BG);
             btnScan.Click += BtnScan_Click;
+            _toolTip.SetToolTip(btnScan, ToolTipHelper.Tips.ScanDevices);
             row1.Controls.Add(btnScan);
 
             var btnConn = AutoBtn("Connect", SUCCESS);
             btnConn.Click += BtnConnect_Click;
+            _toolTip.SetToolTip(btnConn, ToolTipHelper.Tips.Connect);
             row1.Controls.Add(btnConn);
 
             _lblStatus = new Label { Text = "Status: Not Connected", Font = new Font("Segoe UI", 11), ForeColor = WARNING, AutoSize = true, Margin = DpiPad(30, 12, 0, 0) };
@@ -577,6 +772,7 @@ namespace PatsKillerPro
             
             var btnVin = AutoBtn("Read VIN", ACCENT);
             btnVin.Click += BtnReadVin_Click;
+            _toolTip.SetToolTip(btnVin, ToolTipHelper.Tips.ReadVin);
             row2.Controls.Add(btnVin);
 
             _lblVin = new Label { Text = "VIN: —————————————————", Font = new Font("Consolas", 12), ForeColor = TEXT_DIM, AutoSize = true, Margin = DpiPad(15, 12, 20, 0) };
@@ -617,7 +813,8 @@ namespace PatsKillerPro
             row3.Controls.Add(_txtOutcode);
 
             var btnCopy = AutoBtn("Copy", BTN_BG);
-            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) Clipboard.SetText(_txtOutcode.Text); };
+            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) { Clipboard.SetText(_txtOutcode.Text); Log("info", "Outcode copied to clipboard"); } };
+            _toolTip.SetToolTip(btnCopy, ToolTipHelper.Tips.CopyOutcode);
             row3.Controls.Add(btnCopy);
 
             row3.Controls.Add(new Label { Text = "INCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = DpiPad(30, 12, 10, 0) });
@@ -628,11 +825,56 @@ namespace PatsKillerPro
 
             var btnGetIncode = AutoBtn("Get Incode", ACCENT);
             btnGetIncode.Click += BtnGetIncode_Click;
+            _toolTip.SetToolTip(btnGetIncode, ToolTipHelper.Tips.GetIncode);
             row3.Controls.Add(btnGetIncode);
 
             sec3.Controls.Add(row3);
             layout.Controls.Add(sec3, 0, 2);
             layout.SetColumnSpan(sec3, 2);
+
+            // === SESSION TIMER PANEL (between codes and key programming) ===
+            _sessionPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = Dpi(50),
+                BackColor = SURFACE,
+                Margin = DpiPad(0, 10, 0, 10),
+                Padding = DpiPad(15, 0, 15, 0)
+            };
+            _sessionPanel.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, _sessionPanel.Width - 1, _sessionPanel.Height - 1); };
+
+            var sessionFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                WrapContents = false,
+                Padding = new Padding(0)
+            };
+
+            _lblSessionTimer = new Label
+            {
+                Text = "Session: Inactive",
+                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                ForeColor = TEXT_MUTED,
+                AutoSize = true,
+                Margin = DpiPad(0, 10, 30, 0)
+            };
+            sessionFlow.Controls.Add(_lblSessionTimer);
+
+            _btnCloseSession = AutoBtn("Close Session", BTN_BG);
+            _btnCloseSession.Click += (s, e) => CloseSession();
+            _btnCloseSession.Visible = false;
+            _btnCloseSession.Margin = DpiPad(0, 5, 0, 0);
+            _toolTip.SetToolTip(_btnCloseSession, ToolTipHelper.Tips.CloseSession);
+            sessionFlow.Controls.Add(_btnCloseSession);
+
+            _sessionPanel.Controls.Add(sessionFlow);
+            
+            // Add session panel to layout
+            var sec3b = new Panel { Dock = DockStyle.Top, AutoSize = true, BackColor = Color.Transparent, Margin = DpiPad(0, 5, 0, 5) };
+            sec3b.Controls.Add(_sessionPanel);
+            layout.Controls.Add(sec3b, 0, 3);
+            layout.SetColumnSpan(sec3b, 2);
 
             // === SECTION 4: KEY PROGRAMMING ===
             var sec4 = Section("KEY PROGRAMMING");
@@ -640,22 +882,31 @@ namespace PatsKillerPro
             
             var btnProg = AutoBtn("Program Key", SUCCESS);
             btnProg.Click += BtnProgram_Click;
+            btnProg.Tag = "session_dependent";
+            _toolTip.SetToolTip(btnProg, ToolTipHelper.Tips.ProgramKey);
+            _sessionDependentButtons.Add(btnProg);
             row4.Controls.Add(btnProg);
 
             var btnErase = AutoBtn("Erase All Keys", DANGER);
             btnErase.Click += BtnErase_Click;
+            btnErase.Tag = "session_dependent";
+            _toolTip.SetToolTip(btnErase, ToolTipHelper.Tips.EraseAllKeys);
+            _sessionDependentButtons.Add(btnErase);
             row4.Controls.Add(btnErase);
 
-            var btnParam = AutoBtn("Parameter Reset", WARNING);
-            btnParam.Click += BtnParam_Click;
+            var btnParam = AutoBtn("Module Reset", WARNING);
+            btnParam.Click += BtnModuleReset_Click;
+            _toolTip.SetToolTip(btnParam, ToolTipHelper.Tips.ParameterReset);
             row4.Controls.Add(btnParam);
 
             var btnEscl = AutoBtn("ESCL Initialize", BTN_BG);
             btnEscl.Click += BtnEscl_Click;
+            _toolTip.SetToolTip(btnEscl, ToolTipHelper.Tips.EsclInit);
             row4.Controls.Add(btnEscl);
 
             var btnDisable = AutoBtn("Disable BCM Security", BTN_BG);
             btnDisable.Click += BtnDisable_Click;
+            _toolTip.SetToolTip(btnDisable, ToolTipHelper.Tips.DisableBcmSecurity);
             row4.Controls.Add(btnDisable);
 
             sec4.Controls.Add(row4);
@@ -688,28 +939,60 @@ namespace PatsKillerPro
 
             var sec1 = Section("DTC CLEARING");
             var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var d1 = AutoBtn("Clear P160A", BTN_BG); d1.Click += BtnP160A_Click; r1.Controls.Add(d1);
-            var d2 = AutoBtn("Clear B10A2", BTN_BG); d2.Click += BtnB10A2_Click; r1.Controls.Add(d2);
-            var d3 = AutoBtn("Clear Crush Event", BTN_BG); d3.Click += BtnCrush_Click; r1.Controls.Add(d3);
+            
+            var d1 = AutoBtn("Clear P160A", BTN_BG);
+            d1.Click += BtnP160A_Click;
+            _toolTip.SetToolTip(d1, ToolTipHelper.Tips.ClearP160A);
+            r1.Controls.Add(d1);
+            
+            var d2 = AutoBtn("Clear B10A2", BTN_BG);
+            d2.Click += BtnB10A2_Click;
+            _toolTip.SetToolTip(d2, ToolTipHelper.Tips.ClearB10A2);
+            r1.Controls.Add(d2);
+            
+            var d3 = AutoBtn("Clear Crush Event", BTN_BG);
+            d3.Click += BtnCrush_Click;
+            _toolTip.SetToolTip(d3, ToolTipHelper.Tips.ClearCrushEvent);
+            r1.Controls.Add(d3);
+            
             sec1.Controls.Add(r1);
             layout.Controls.Add(sec1, 0, 0);
 
             var sec2 = Section("GATEWAY OPERATIONS");
             var r2 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var g1 = AutoBtn("Unlock Gateway", BTN_BG); g1.Click += BtnGateway_Click; r2.Controls.Add(g1);
+            
+            var g1 = AutoBtn("Unlock Gateway", ACCENT);
+            g1.Click += BtnGateway_Click;
+            _toolTip.SetToolTip(g1, ToolTipHelper.Tips.UnlockGateway);
+            r2.Controls.Add(g1);
+            
             sec2.Controls.Add(r2);
             layout.Controls.Add(sec2, 1, 0);
 
             var sec3 = Section("KEYPAD & BCM");
             var r3 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var k1 = AutoBtn("Keypad Code", BTN_BG); k1.Click += BtnKeypad_Click; r3.Controls.Add(k1);
-            var b1 = AutoBtn("BCM Factory Defaults", DANGER); b1.Click += BtnBcm_Click; r3.Controls.Add(b1);
+            
+            var k1 = AutoBtn("Keypad Code", BTN_BG);
+            k1.Click += BtnKeypad_Click;
+            _toolTip.SetToolTip(k1, ToolTipHelper.Tips.KeypadCode);
+            r3.Controls.Add(k1);
+            
+            var b1 = AutoBtn("BCM Factory Defaults", DANGER);
+            b1.Click += BtnBcm_Click;
+            _toolTip.SetToolTip(b1, ToolTipHelper.Tips.BcmFactoryDefaults);
+            r3.Controls.Add(b1);
+            
             sec3.Controls.Add(r3);
             layout.Controls.Add(sec3, 0, 1);
 
             var sec4 = Section("MODULE INFO");
             var r4 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var mod = AutoBtn("Read All Module Info", BTN_BG); mod.Click += BtnModInfo_Click; r4.Controls.Add(mod);
+            
+            var mod = AutoBtn("Read All Module Info", BTN_BG);
+            mod.Click += BtnModInfo_Click;
+            _toolTip.SetToolTip(mod, ToolTipHelper.Tips.ReadModuleInfo);
+            r4.Controls.Add(mod);
+            
             sec4.Controls.Add(r4);
             layout.Controls.Add(sec4, 1, 1);
 
@@ -746,24 +1029,59 @@ namespace PatsKillerPro
 
             var sec1 = Section("BASIC VEHICLE OPERATIONS");
             var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var f1 = AutoBtn("Clear All DTCs", BTN_BG); f1.Click += BtnDtc_Click; r1.Controls.Add(f1);
-            var f2 = AutoBtn("Clear KAM", BTN_BG); f2.Click += BtnKam_Click; r1.Controls.Add(f2);
-            var f3 = AutoBtn("Vehicle Reset", BTN_BG); f3.Click += BtnReset_Click; r1.Controls.Add(f3);
+            
+            var f1 = AutoBtn("Clear All DTCs", BTN_BG);
+            f1.Click += BtnDtc_Click;
+            _toolTip.SetToolTip(f1, ToolTipHelper.Tips.ClearAllDtcs);
+            r1.Controls.Add(f1);
+            
+            var f2 = AutoBtn("Clear KAM", BTN_BG);
+            f2.Click += BtnKam_Click;
+            _toolTip.SetToolTip(f2, ToolTipHelper.Tips.ClearKam);
+            r1.Controls.Add(f2);
+            
+            var f3 = AutoBtn("Vehicle Reset", BTN_BG);
+            f3.Click += BtnReset_Click;
+            _toolTip.SetToolTip(f3, ToolTipHelper.Tips.VehicleReset);
+            r1.Controls.Add(f3);
+            
             sec1.Controls.Add(r1);
             layout.Controls.Add(sec1, 0, 1);
 
             var sec2 = Section("READ OPERATIONS");
             var r2 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var rd1 = AutoBtn("Read Keys Count", BTN_BG); rd1.Click += BtnReadKeys_Click; r2.Controls.Add(rd1);
-            var rd2 = AutoBtn("Read Module Info", BTN_BG); rd2.Click += BtnModInfo_Click; r2.Controls.Add(rd2);
+            
+            var rd1 = AutoBtn("Read Keys Count", BTN_BG);
+            rd1.Click += BtnReadKeys_Click;
+            _toolTip.SetToolTip(rd1, ToolTipHelper.Tips.ReadKeys);
+            r2.Controls.Add(rd1);
+            
+            var rd2 = AutoBtn("Read Module Info", BTN_BG);
+            rd2.Click += BtnModInfo_Click;
+            _toolTip.SetToolTip(rd2, ToolTipHelper.Tips.ReadModuleInfo);
+            r2.Controls.Add(rd2);
+            
             sec2.Controls.Add(r2);
             layout.Controls.Add(sec2, 1, 1);
 
             var sec3 = Section("RESOURCES & SUPPORT");
             var r3 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
-            var u1 = AutoBtn("User Guide", ACCENT); u1.Click += (s, e) => OpenUrl("https://patskiller.com/faqs"); r3.Controls.Add(u1);
-            var u2 = AutoBtn("Buy Tokens", SUCCESS); u2.Click += (s, e) => OpenUrl("https://patskiller.com/buy-tokens"); r3.Controls.Add(u2);
-            var u3 = AutoBtn("Contact Support", BTN_BG); u3.Click += (s, e) => OpenUrl("https://patskiller.com/contact"); r3.Controls.Add(u3);
+            
+            var u1 = AutoBtn("User Guide", ACCENT);
+            u1.Click += (s, e) => OpenUrl("https://patskiller.com/faqs");
+            _toolTip.SetToolTip(u1, ToolTipHelper.Tips.UserGuide);
+            r3.Controls.Add(u1);
+            
+            var u2 = AutoBtn("Buy Tokens", SUCCESS);
+            u2.Click += (s, e) => OpenUrl("https://patskiller.com/buy-tokens");
+            _toolTip.SetToolTip(u2, ToolTipHelper.Tips.BuyTokens);
+            r3.Controls.Add(u2);
+            
+            var u3 = AutoBtn("Contact Support", BTN_BG);
+            u3.Click += (s, e) => OpenUrl("https://patskiller.com/contact");
+            _toolTip.SetToolTip(u3, ToolTipHelper.Tips.ContactSupport);
+            r3.Controls.Add(u3);
+            
             sec3.Controls.Add(r3);
             layout.Controls.Add(sec3, 0, 2);
             layout.SetColumnSpan(sec3, 2);
@@ -870,7 +1188,37 @@ namespace PatsKillerPro
         private void Log(string t, string m) { if (_txtLog == null) return; if (_txtLog.InvokeRequired) { _txtLog.Invoke(() => Log(t, m)); return; } var c = t == "success" ? SUCCESS : t == "error" ? DANGER : t == "warning" ? WARNING : TEXT_DIM; _txtLog.SelectionColor = TEXT_MUTED; _txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] "); _txtLog.SelectionColor = c; _txtLog.AppendText($"[{(t == "success" ? "OK" : t == "error" ? "ERR" : t == "warning" ? "WARN" : "INFO")}] {m}\n"); _txtLog.ScrollToCaret(); }
         private void OpenUrl(string u) { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = u, UseShellExecute = true }); } catch { } }
         private void ShowError(string t, string m, Exception? ex = null) { MessageBox.Show(ex != null ? $"{m}\n\n{ex.Message}" : m, t, MessageBoxButtons.OK, MessageBoxIcon.Error); Log("error", m); }
-        private bool Confirm(int cost, string op) { if (cost == 0) return true; if (_tokenBalance < cost) { MessageBox.Show($"Need {cost} tokens"); return false; } return MessageBox.Show($"{op}\nCost: {cost} token(s)\n\nProceed?", "Confirm", MessageBoxButtons.YesNo) == DialogResult.Yes; }
+        /// <summary>
+        /// Confirm operation with token cost. Checks session state for Program/Erase operations.
+        /// </summary>
+        private bool Confirm(int baseCost, string op) 
+        { 
+            // Check if session is active - key operations are FREE if so
+            var workflow = J2534Service.Instance.Workflow;
+            bool sessionActive = workflow?.Session?.HasActiveSecuritySession ?? false;
+            
+            // Operations that are FREE when session is active
+            bool isSessionOperation = op.Contains("Program") || op.Contains("Erase");
+            int actualCost = (isSessionOperation && sessionActive) ? 0 : baseCost;
+            
+            if (actualCost == 0) 
+            {
+                if (isSessionOperation && sessionActive)
+                {
+                    // Still confirm but note it's FREE
+                    return MessageBox.Show($"{op}\n\n✓ Session active - FREE (no token cost)\n\nProceed?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes;
+                }
+                return true; 
+            }
+            
+            if (_tokenBalance < actualCost) 
+            { 
+                MessageBox.Show($"Need {actualCost} tokens, you have {_tokenBalance}.\n\nPurchase more at patskiller.com", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); 
+                return false; 
+            } 
+            
+            return MessageBox.Show($"{op}\nCost: {actualCost} token(s)\n\nProceed?", "Confirm", MessageBoxButtons.YesNo) == DialogResult.Yes; 
+        }
         #endregion
 
         #region Navigation
@@ -1131,6 +1479,10 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
             {
                 Log("info", "Starting key programming workflow...");
 
+                // Check if session is already active
+                var workflow = J2534Service.Instance.Workflow;
+                bool hadSessionBefore = workflow?.Session?.HasActiveSecuritySession ?? false;
+
                 // First, read current key count to determine slot
                 var kc = await J2534Service.Instance.ReadKeyCountWithWorkflowAsync();
                 int current = kc.Success ? kc.KeyCount : 0;
@@ -1154,7 +1506,22 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 if (prog.Success)
                 {
                     _lblKeys.Text = prog.CurrentKeyCount.ToString();
-                    MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\nRemove key, insert next key, and click Program again.");
+                    
+                    // Check if we created a new session (first key on pre-2020 vehicle)
+                    bool hasSessionNow = workflow?.Session?.HasActiveSecuritySession ?? false;
+                    if (!hadSessionBefore && hasSessionNow)
+                    {
+                        // New session started - consume token and start timer
+                        _tokenBalance--;
+                        _lblTokens.Text = $"Tokens: {_tokenBalance}";
+                        _sessionTimer?.Start();
+                        _sessionWarningShown = false;
+                        UpdateSessionTimerDisplay();
+                        _sessionManager.UpdateFromVehicleSession(workflow!.Session);
+                        Log("info", "Session started - subsequent keys are FREE");
+                    }
+                    
+                    MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\n{(hasSessionNow ? "Session active - next key is FREE!\n" : "")}Remove key, insert next key, and click Program again.");
                     Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
                 }
                 else
@@ -1269,6 +1636,97 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
             catch (Exception ex)
             {
                 ShowError("Reset Failed", "Could not reset parameters", ex);
+            }
+        }
+
+        /// <summary>
+        /// Opens the Module Reset dialog for multi-module parameter reset
+        /// </summary>
+        private async void BtnModuleReset_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            // Check workflow is configured
+            if (!J2534Service.Instance.IsWorkflowConfigured)
+            {
+                MessageBox.Show("Please read VIN first to configure the workflow system.");
+                return;
+            }
+
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first");
+                return;
+            }
+
+            using var form = new ModuleResetForm();
+            if (form.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var selectedModules = form.SelectedModules;
+            if (selectedModules.Count == 0)
+                return;
+
+            var totalCost = form.TotalTokenCost;
+            if (_tokenBalance < totalCost)
+            {
+                MessageBox.Show($"Insufficient tokens. Need {totalCost}, have {_tokenBalance}.");
+                return;
+            }
+
+            try
+            {
+                Log("info", $"Starting multi-module reset ({selectedModules.Count} modules, {totalCost} tokens)...");
+
+                int successCount = 0;
+                int failCount = 0;
+
+                foreach (var module in selectedModules)
+                {
+                    Log("info", $"Resetting {module.Name}...");
+                    
+                    // Perform reset for each module
+                    var result = await J2534Service.Instance.ParameterResetWithWorkflowAsync(ic);
+                    
+                    if (result.Success)
+                    {
+                        successCount++;
+                        _tokenBalance--;
+                        _lblTokens.Text = $"Tokens: {_tokenBalance}";
+                        Log("success", $"{module.Name} reset complete");
+                    }
+                    else
+                    {
+                        failCount++;
+                        Log("error", $"{module.Name} reset failed: {result.Error}");
+                        
+                        // Ask if user wants to continue
+                        var continueResult = MessageBox.Show(
+                            $"{module.Name} reset failed: {result.Error}\n\nContinue with remaining modules?",
+                            "Reset Failed",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Warning);
+                        
+                        if (continueResult != DialogResult.Yes)
+                            break;
+                    }
+                    
+                    // Small delay between modules
+                    await Task.Delay(500);
+                }
+
+                var summary = $"Module reset complete.\n\nSuccessful: {successCount}\nFailed: {failCount}\n\nTurn ignition OFF and wait 15 seconds.";
+                MessageBox.Show(summary, "Reset Complete", MessageBoxButtons.OK, 
+                    failCount > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Reset Failed", "Could not complete module reset", ex);
             }
         }
 
@@ -1432,8 +1890,23 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 var result = await J2534Service.Instance.UnlockGatewayWithWorkflowAsync(ic);
                 if (result.Success)
                 {
-                    MessageBox.Show("Gateway unlocked!\n\nYou can now proceed with key programming.");
-                    Log("success", "Gateway unlocked");
+                    _tokenBalance--;
+                    _lblTokens.Text = $"Tokens: {_tokenBalance}";
+                    
+                    // Start session timer
+                    _sessionTimer?.Start();
+                    _sessionWarningShown = false;
+                    UpdateSessionTimerDisplay();
+                    
+                    // Update session manager
+                    var workflow = J2534Service.Instance.Workflow;
+                    if (workflow != null)
+                    {
+                        _sessionManager.UpdateFromVehicleSession(workflow.Session);
+                    }
+                    
+                    MessageBox.Show("Gateway + BCM unlocked!\n\nAll key operations are now FREE until session expires.\nSession timer started.");
+                    Log("success", "Gateway + BCM unlocked - session active");
                 }
                 else
                 {
