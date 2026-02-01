@@ -825,12 +825,11 @@ namespace PatsKillerPro.Services
                 // Small delay to simulate communication
                 await Task.Delay(50);
                 
-                // Log for debugging
-                Log?.Invoke("debug", "Tester present: Keep-alive sent");
+                // Log for debugging (silent - don't spam log)
             }
             catch (Exception ex)
             {
-                Log?.Invoke("warning", $"Tester present failed: {ex.Message}");
+                Log?.Invoke($"Tester present failed: {ex.Message}");
             }
         }
 
