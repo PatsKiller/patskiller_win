@@ -457,12 +457,12 @@ namespace PatsKillerPro.Services
         /// Creates the UDS transport delegate for the workflow layer.
         /// Bridges FordUdsProtocol to the workflow's UdsResponse type.
         /// </summary>
-        private Func<uint, byte[], Task<UdsResponse>> CreateWorkflowTransport()
+        private Func<uint, byte[], Task<Workflow.UdsResponse>> CreateWorkflowTransport()
         {
             return async (moduleAddress, data) =>
             {
                 if (_patsService == null)
-                    return UdsResponse.Failed("Not connected");
+                    return Workflow.UdsResponse.Failed("Not connected");
 
                 return await Task.Run(() =>
                 {
@@ -477,20 +477,20 @@ namespace PatsKillerPro.Services
                         // Convert J2534.UdsResponse to UdsResponse
                         if (j2534Response.Success)
                         {
-                            return UdsResponse.Ok(j2534Response.Data);
+                            return Workflow.UdsResponse.Ok(j2534Response.Data);
                         }
                         else if (j2534Response.NegativeResponse && j2534Response.NRC != 0)
                         {
-                            return UdsResponse.FromNrc(j2534Response.NRC);
+                            return Workflow.UdsResponse.FromNrc(j2534Response.NRC);
                         }
                         else
                         {
-                            return UdsResponse.Failed(j2534Response.ErrorMessage ?? "UDS request failed");
+                            return Workflow.UdsResponse.Failed(j2534Response.ErrorMessage ?? "UDS request failed");
                         }
                     }
                     catch (Exception ex)
                     {
-                        return UdsResponse.Failed(ex.Message);
+                        return Workflow.UdsResponse.Failed(ex.Message);
                     }
                 });
             };
