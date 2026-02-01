@@ -67,6 +67,9 @@ namespace PatsKillerPro.Services.Workflow
         /// <summary>Current platform routing configuration</summary>
         public PlatformRoutingConfig? RoutingConfig => _routingConfig;
 
+        /// <summary>Access to the vehicle session for session state queries</summary>
+        public VehicleSession Session => _session;
+
         #endregion
 
         public WorkflowService(Action<string>? log = null)

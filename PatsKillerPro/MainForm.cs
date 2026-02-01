@@ -243,7 +243,7 @@ namespace PatsKillerPro
                 }
                 else
                 {
-                    Log("error", $"Session refresh failed: {result.Error}");
+                    Log("error", $"Session refresh failed: {result.ErrorMessage}");
                 }
             }
             catch (Exception ex)
