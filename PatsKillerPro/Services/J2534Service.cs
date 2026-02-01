@@ -457,12 +457,12 @@ namespace PatsKillerPro.Services
         /// Creates the UDS transport delegate for the workflow layer.
         /// Bridges FordUdsProtocol to the workflow's UdsResponse type.
         /// </summary>
-        private Func<uint, byte[], Task<Workflow.UdsResponse>> CreateWorkflowTransport()
+        private Func<uint, byte[], Task<UdsResponse>> CreateWorkflowTransport()
         {
             return async (moduleAddress, data) =>
             {
                 if (_patsService == null)
-                    return Workflow.UdsResponse.Failed("Not connected");
+                    return UdsResponse.Failed("Not connected");
 
                 return await Task.Run(() =>
                 {
@@ -474,23 +474,23 @@ namespace PatsKillerPro.Services
                         // Send UDS request via FordUdsProtocol
                         var j2534Response = _patsService.SendUdsRequest(data);
                         
-                        // Convert J2534.UdsResponse to Workflow.UdsResponse
+                        // Convert J2534.UdsResponse to UdsResponse
                         if (j2534Response.Success)
                         {
-                            return Workflow.UdsResponse.Ok(j2534Response.Data);
+                            return UdsResponse.Ok(j2534Response.Data);
                         }
                         else if (j2534Response.NegativeResponse && j2534Response.NRC != 0)
                         {
-                            return Workflow.UdsResponse.FromNrc(j2534Response.NRC);
+                            return UdsResponse.FromNrc(j2534Response.NRC);
                         }
                         else
                         {
-                            return Workflow.UdsResponse.Failed(j2534Response.ErrorMessage ?? "UDS request failed");
+                            return UdsResponse.Failed(j2534Response.ErrorMessage ?? "UDS request failed");
                         }
                     }
                     catch (Exception ex)
                     {
-                        return Workflow.UdsResponse.Failed(ex.Message);
+                        return UdsResponse.Failed(ex.Message);
                     }
                 });
             };
@@ -691,7 +691,7 @@ namespace PatsKillerPro.Services
             {
                 Log?.Invoke("[Workflow] Performing parameter reset...");
                 
-                var result = await _workflowService.ParameterResetAsync(incode, ct);
+                var result = await _workflowService.ParameterResetAsync(incode, 1, ct);
                 
                 if (result.Success)
                 {
