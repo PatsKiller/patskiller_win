@@ -7,7 +7,8 @@ using System.Windows.Forms;
 namespace PatsKillerPro
 {
     /// <summary>
-    /// Full-screen 10-minute timed security access countdown
+    /// Full-screen countdown for security lockout recovery (NRC 0x36).
+    /// Shows when BCM is temporarily locked after failed authentication attempts.
     /// </summary>
     public class TimedSecurityAccessForm : Form
     {
@@ -104,9 +105,9 @@ namespace PatsKillerPro
             // Title
             _lblTitle = new Label
             {
-                Text = "SECURITY ACCESS IN PROGRESS",
+                Text = "SECURITY LOCKOUT - PLEASE WAIT",
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = ACCENT,
+                ForeColor = WARNING,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock = DockStyle.Top,
                 Height = 50,
@@ -185,7 +186,7 @@ namespace PatsKillerPro
             // Info label
             _lblInfo = new Label
             {
-                Text = "Timed security access required for this vehicle.\nThe vehicle does not support instant coded access.",
+                Text = "Security temporarily locked.\nPlease wait for the countdown to complete before retrying.",
                 Font = new Font("Segoe UI", 9),
                 ForeColor = TEXT_MUTED,
                 TextAlign = ContentAlignment.MiddleCenter,

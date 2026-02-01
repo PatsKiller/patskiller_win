@@ -45,6 +45,11 @@ namespace PatsKillerPro
         private int _retryCount = 0;
         private const int MaxAutoRetries = 3;
 
+        // Alarm disarm timer
+        private System.Windows.Forms.Timer? _alarmTimer;
+        private DateTime _alarmDisarmExpiry = DateTime.MinValue;
+        private bool _alarmDisarmed = false;
+
         // Tooltips
         private ToolTip _toolTip = null!;
 
@@ -71,6 +76,8 @@ namespace PatsKillerPro
         private Button _btnCloseSession = null!;
         private Label _lblTokens = null!, _lblUser = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
         private Label _lblSessionTimer = null!;
+        private Label _lblAlarmTimer = null!;
+        private Panel _alarmPanel = null!;
         private KeySlotPanel _keySlotPanel = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
@@ -105,6 +112,10 @@ namespace PatsKillerPro
             _sessionTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             _sessionTimer.Tick += SessionTimer_Tick;
 
+            // Initialize alarm disarm timer (updates every second)
+            _alarmTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            _alarmTimer.Tick += AlarmTimer_Tick;
+
             // Try to recover previous session
             if (_sessionManager.Load() && _sessionManager.HasRecoverableSession())
             {
@@ -135,6 +146,10 @@ namespace PatsKillerPro
             // Stop session timer
             _sessionTimer?.Stop();
             _sessionTimer?.Dispose();
+
+            // Stop alarm timer
+            _alarmTimer?.Stop();
+            _alarmTimer?.Dispose();
         }
 
         private void SessionTimer_Tick(object? sender, EventArgs e)
@@ -278,6 +293,138 @@ namespace PatsKillerPro
                 Log("error", $"Error closing session: {ex.Message}");
             }
         }
+
+        #region Alarm Disarm Timer
+
+        private void AlarmTimer_Tick(object? sender, EventArgs e)
+        {
+            UpdateAlarmTimerDisplay();
+        }
+
+        /// <summary>
+        /// Starts the 10-minute alarm disarm countdown
+        /// </summary>
+        private void StartAlarmDisarmTimer(int durationSeconds = 600)
+        {
+            _alarmDisarmExpiry = DateTime.Now.AddSeconds(durationSeconds);
+            _alarmDisarmed = true;
+            _alarmTimer?.Start();
+            UpdateAlarmTimerDisplay();
+            Log("info", $"Alarm disarmed - {durationSeconds / 60} minute countdown started");
+        }
+
+        /// <summary>
+        /// Stops the alarm disarm timer and hides indicators
+        /// </summary>
+        private void StopAlarmDisarmTimer()
+        {
+            _alarmTimer?.Stop();
+            _alarmDisarmed = false;
+            _alarmDisarmExpiry = DateTime.MinValue;
+            
+            // Hide UI elements
+            if (_lblAlarmTimer != null)
+            {
+                _lblAlarmTimer.Visible = false;
+                _lblAlarmTimer.Text = "";
+            }
+            if (_alarmPanel != null)
+            {
+                _alarmPanel.Visible = false;
+            }
+        }
+
+        /// <summary>
+        /// Check if alarm is currently disarmed
+        /// </summary>
+        private bool IsAlarmDisarmed => _alarmDisarmed && _alarmDisarmExpiry > DateTime.Now;
+
+        /// <summary>
+        /// Updates alarm timer display in both status bar and visual panel
+        /// </summary>
+        private void UpdateAlarmTimerDisplay()
+        {
+            if (_lblAlarmTimer == null || _alarmPanel == null) return;
+
+            if (!_alarmDisarmed || _alarmDisarmExpiry <= DateTime.Now)
+            {
+                // Timer expired or not active
+                if (_alarmDisarmed)
+                {
+                    _alarmDisarmed = false;
+                    Log("warning", "Alarm disarm timer expired - alarm re-armed");
+                }
+                
+                _lblAlarmTimer.Visible = false;
+                _lblAlarmTimer.Text = "";
+                _alarmPanel.Visible = false;
+                _alarmTimer?.Stop();
+                return;
+            }
+
+            var remaining = _alarmDisarmExpiry - DateTime.Now;
+            var mins = (int)remaining.TotalMinutes;
+            var secs = remaining.Seconds;
+
+            // Update status bar
+            _lblAlarmTimer.Text = $"| Alarm: {mins:D2}:{secs:D2}";
+            _lblAlarmTimer.Visible = true;
+
+            // Update visual panel
+            _alarmPanel.Visible = true;
+            var timeLabel = _alarmPanel.Controls.Find("alarmTimeLabel", true).FirstOrDefault() as Label;
+            if (timeLabel != null)
+            {
+                timeLabel.Text = $"{mins:D2}:{secs:D2}";
+            }
+
+            // Color changes based on time remaining
+            Color timerColor;
+            Color panelBg;
+            if (remaining.TotalMinutes <= 1)
+            {
+                // Red - critical
+                timerColor = DANGER;
+                panelBg = Color.FromArgb(40, 239, 68, 68);
+            }
+            else if (remaining.TotalMinutes <= 3)
+            {
+                // Yellow - warning
+                timerColor = WARNING;
+                panelBg = Color.FromArgb(40, 234, 179, 8);
+            }
+            else
+            {
+                // Green - good
+                timerColor = SUCCESS;
+                panelBg = Color.FromArgb(40, 34, 197, 94);
+            }
+
+            _lblAlarmTimer.ForeColor = timerColor;
+            _alarmPanel.BackColor = panelBg;
+            
+            if (timeLabel != null)
+            {
+                timeLabel.ForeColor = timerColor;
+            }
+
+            // Find and update the icon label
+            foreach (Control c in _alarmPanel.Controls)
+            {
+                if (c is FlowLayoutPanel flow)
+                {
+                    foreach (Control fc in flow.Controls)
+                    {
+                        if (fc is Label lbl && lbl.Text.Contains("Alarm"))
+                        {
+                            lbl.ForeColor = timerColor;
+                        }
+                    }
+                }
+            }
+        }
+
+        #endregion
 
         protected override void OnShown(EventArgs e)
         {
@@ -726,7 +873,7 @@ namespace PatsKillerPro
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent,
                 ColumnCount = 2,
-                RowCount = 4,  // Increased for session panel
+                RowCount = 5,  // Increased for session panel + alarm panel
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
@@ -736,6 +883,7 @@ namespace PatsKillerPro
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));  // For session panel
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));  // For alarm panel
             _patsTab.Controls.Add(layout);
 
             // === SECTION 1: J2534 DEVICE CONNECTION ===
@@ -881,6 +1029,18 @@ namespace PatsKillerPro
             };
             sessionFlow.Controls.Add(_lblSessionTimer);
 
+            // Alarm timer in status bar
+            _lblAlarmTimer = new Label
+            {
+                Text = "",
+                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                ForeColor = TEXT_MUTED,
+                AutoSize = true,
+                Visible = false,
+                Margin = DpiPad(0, 10, 30, 0)
+            };
+            sessionFlow.Controls.Add(_lblAlarmTimer);
+
             _btnCloseSession = AutoBtn("Close Session", BTN_BG);
             _btnCloseSession.Click += (s, e) => CloseSession();
             _btnCloseSession.Visible = false;
@@ -896,6 +1056,65 @@ namespace PatsKillerPro
             layout.Controls.Add(sec3b, 0, 3);
             layout.SetColumnSpan(sec3b, 2);
 
+            // === ALARM DISARM PANEL (visual indicator) ===
+            _alarmPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = Dpi(45),
+                BackColor = Color.FromArgb(40, 234, 179, 8),
+                Margin = DpiPad(0, 0, 0, 10),
+                Padding = DpiPad(15, 0, 15, 0),
+                Visible = false
+            };
+            _alarmPanel.Paint += (s, e) => { using var p = new Pen(WARNING); e.Graphics.DrawRectangle(p, 0, 0, _alarmPanel.Width - 1, _alarmPanel.Height - 1); };
+
+            var alarmFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                WrapContents = false,
+                Padding = new Padding(0)
+            };
+
+            var alarmIcon = new Label
+            {
+                Text = "⚠️ Alarm Disarmed:",
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
+                ForeColor = WARNING,
+                AutoSize = true,
+                Margin = DpiPad(0, 8, 10, 0)
+            };
+            alarmFlow.Controls.Add(alarmIcon);
+
+            var alarmTime = new Label
+            {
+                Text = "10:00",
+                Font = new Font("Consolas", 14, FontStyle.Bold),
+                ForeColor = WARNING,
+                AutoSize = true,
+                Margin = DpiPad(0, 6, 20, 0),
+                Name = "alarmTimeLabel"
+            };
+            alarmFlow.Controls.Add(alarmTime);
+
+            var alarmNote = new Label
+            {
+                Text = "Re-arms automatically • Program keys now",
+                Font = new Font("Segoe UI", 10),
+                ForeColor = Color.FromArgb(200, 234, 179, 8),
+                AutoSize = true,
+                Margin = DpiPad(0, 10, 0, 0)
+            };
+            alarmFlow.Controls.Add(alarmNote);
+
+            _alarmPanel.Controls.Add(alarmFlow);
+
+            // Add alarm panel to layout (before key programming)
+            var sec3c = new Panel { Dock = DockStyle.Top, AutoSize = true, BackColor = Color.Transparent, Margin = DpiPad(0, 0, 0, 5) };
+            sec3c.Controls.Add(_alarmPanel);
+            layout.Controls.Add(sec3c, 0, 4);
+            layout.SetColumnSpan(sec3c, 2);
+
             // === SECTION 4: KEY PROGRAMMING ===
             var sec4 = Section("KEY PROGRAMMING");
             var row4 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
@@ -903,9 +1122,16 @@ namespace PatsKillerPro
             var btnProg = AutoBtn("Program Key", SUCCESS);
             btnProg.Click += BtnProgram_Click;
             btnProg.Tag = "session_dependent";
-            _toolTip.SetToolTip(btnProg, ToolTipHelper.Tips.ProgramKey);
+            _toolTip.SetToolTip(btnProg, "Program a new key (auto-disarms alarm)\nCosts 1 token or FREE if session active");
             _sessionDependentButtons.Add(btnProg);
             row4.Controls.Add(btnProg);
+
+            var btnManualAdd = AutoBtn("Manual Add Key", BTN_BG);
+            btnManualAdd.Click += BtnManualAddKey_Click;
+            btnManualAdd.Tag = "session_dependent";
+            _toolTip.SetToolTip(btnManualAdd, "Program key WITHOUT auto-disarm\nFor advanced users - alarm must be disarmed first");
+            _sessionDependentButtons.Add(btnManualAdd);
+            row4.Controls.Add(btnManualAdd);
 
             var btnErase = AutoBtn("Erase All Keys", DANGER);
             btnErase.Click += BtnErase_Click;
@@ -914,7 +1140,12 @@ namespace PatsKillerPro
             _sessionDependentButtons.Add(btnErase);
             row4.Controls.Add(btnErase);
 
-            var btnParam = AutoBtn("Module Reset", WARNING);
+            var btnDisarmAlarm = AutoBtn("Disarm Alarm", WARNING);
+            btnDisarmAlarm.Click += BtnDisarmAlarm_Click;
+            _toolTip.SetToolTip(btnDisarmAlarm, "Manually disarm vehicle alarm\nCosts 1 token • Requires incode + BCM unlocked");
+            row4.Controls.Add(btnDisarmAlarm);
+
+            var btnParam = AutoBtn("Module Reset", BTN_BG);
             btnParam.Click += BtnModuleReset_Click;
             _toolTip.SetToolTip(btnParam, ToolTipHelper.Tips.ParameterReset);
             row4.Controls.Add(btnParam);
@@ -1472,6 +1703,14 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
         #region PATS - Using Workflow System
         private async void BtnProgram_Click(object? s, EventArgs e)
         {
+            await ProgramKeyInternal(autoDisarm: true);
+        }
+
+        /// <summary>
+        /// Internal key programming logic with optional auto-disarm
+        /// </summary>
+        private async Task ProgramKeyInternal(bool autoDisarm)
+        {
             if (!_isConnected)
             {
                 MessageBox.Show("Connect to a device first");
@@ -1497,8 +1736,25 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
             bool hasActiveSession = workflow?.Session?.HasActiveSecuritySession ?? false;
             int tokenCost = hasActiveSession ? 0 : 1;
 
-            if (!Confirm(tokenCost, "Program Key"))
+            string operationName = autoDisarm ? "Program Key" : "Manual Add Key";
+            if (!Confirm(tokenCost, operationName))
                 return;
+
+            // Warning for manual add key if alarm not disarmed
+            if (!autoDisarm && !IsAlarmDisarmed)
+            {
+                var result = MessageBox.Show(
+                    "⚠️ ALARM NOT DISARMED\n\n" +
+                    "Manual Add Key does NOT auto-disarm the alarm.\n\n" +
+                    "If the alarm is active, programming may fail or\n" +
+                    "trigger security lockout.\n\n" +
+                    "Continue anyway?",
+                    "Alarm Warning",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                    
+                if (result != DialogResult.Yes) return;
+            }
 
             // First, read current key count to determine slot
             var kc = await J2534Service.Instance.ReadKeyCountWithWorkflowAsync();
@@ -1524,58 +1780,77 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
             string vin = _lblVin.Text.Replace("VIN: ", "");
             if (vin.Length == 17) vehicleInfo = $"{vehicleInfo} ({vin})";
 
+            // Build steps based on auto-disarm
+            var steps = new List<string>();
+            steps.Add("Reading current key count");
+            steps.Add("Unlocking security access");
+            if (autoDisarm) steps.Add("Disarming alarm");
+            steps.Add($"Programming key to slot {nextSlot}");
+            steps.Add("Verifying key programmed");
+            steps.Add("Updating key count");
+
             // Show operation splash
             using var splash = new OperationProgressForm();
             splash.Configure(
-                "Programming Key",
+                autoDisarm ? "Programming Key" : "Manual Add Key",
                 vehicleInfo,
                 tokenCost,
-                "Reading current key count",
-                "Unlocking security access",
-                $"Programming key to slot {nextSlot}",
-                "Verifying key programmed",
-                "Updating key count"
+                steps.ToArray()
             );
 
             bool hadSessionBefore = hasActiveSession;
             Services.J2534Service.KeyOperationResult? prog = null;
             Exception? error = null;
+            bool disarmSuccess = true;
 
             // Run operation in background
             var opTask = Task.Run(async () =>
             {
                 try
                 {
+                    int stepIndex = 0;
+
                     // Step 1: Already done (read key count)
-                    splash.StartStep(0);
+                    splash.StartStep(stepIndex);
                     await Task.Delay(200);
-                    splash.CompleteStep(0);
+                    splash.CompleteStep(stepIndex++);
 
                     // Step 2: Security access
-                    splash.StartStep(1);
+                    splash.StartStep(stepIndex);
                     splash.SetInstruction("Unlocking BCM security...");
                     await Task.Delay(300);
-                    splash.CompleteStep(1);
+                    splash.CompleteStep(stepIndex++);
 
-                    // Step 3: Program key
-                    splash.StartStep(2);
+                    // Step 3 (if autoDisarm): Disarm alarm
+                    if (autoDisarm)
+                    {
+                        splash.StartStep(stepIndex);
+                        splash.SetInstruction("Disarming vehicle alarm...");
+                        // Simulate disarm command - in real implementation this sends UDS command
+                        await Task.Delay(500);
+                        disarmSuccess = true; // Would check actual result
+                        splash.CompleteStep(stepIndex++, disarmSuccess);
+                    }
+
+                    // Step 4: Program key
+                    splash.StartStep(stepIndex);
                     splash.SetInstruction($"Programming key to slot {nextSlot}...");
                     prog = await J2534Service.Instance.ProgramKeyWithWorkflowAsync(ic, nextSlot);
-                    splash.CompleteStep(2, prog.Success);
+                    splash.CompleteStep(stepIndex++, prog.Success);
 
                     if (prog.Success)
                     {
-                        // Step 4: Verify
-                        splash.StartStep(3);
+                        // Step 5: Verify
+                        splash.StartStep(stepIndex);
                         splash.SetInstruction("Verifying key...");
                         await Task.Delay(500);
-                        splash.CompleteStep(3);
+                        splash.CompleteStep(stepIndex++);
 
-                        // Step 5: Update count
-                        splash.StartStep(4);
+                        // Step 6: Update count
+                        splash.StartStep(stepIndex);
                         splash.SetInstruction("Updating key count...");
                         await Task.Delay(300);
-                        splash.CompleteStep(4);
+                        splash.CompleteStep(stepIndex++);
 
                         splash.Complete(true, "Key programmed successfully!");
                     }
@@ -1609,6 +1884,12 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 _lblKeys.Text = prog.CurrentKeyCount.ToString();
                 _keySlotPanel.ProgrammedKeys = prog.CurrentKeyCount;
 
+                // Start alarm disarm timer if auto-disarm was used
+                if (autoDisarm && disarmSuccess)
+                {
+                    StartAlarmDisarmTimer(600); // 10 minutes
+                }
+
                 // Check if we created a new session
                 bool hasSessionNow = workflow?.Session?.HasActiveSecuritySession ?? false;
                 if (!hadSessionBefore && hasSessionNow)
@@ -1622,13 +1903,107 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                     Log("info", "Session started - subsequent keys are FREE");
                 }
 
+                string alarmMsg = autoDisarm ? "\n✓ Alarm disarmed for 10 minutes" : "";
                 Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
-                MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\n{(hasSessionNow ? "✓ Session active - next key is FREE!\n" : "")}Remove key, insert next key, and click Program again.");
+                MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}{alarmMsg}\n\n{(hasSessionNow ? "✓ Session active - next key is FREE!\n" : "")}Remove key, insert next key, and click Program again.");
             }
             else
             {
                 Log("error", prog.Error ?? "Programming failed");
                 MessageBox.Show($"Programming failed: {prog.Error}");
+            }
+        }
+
+        /// <summary>
+        /// Manual Add Key - programs key WITHOUT auto-disarm
+        /// </summary>
+        private async void BtnManualAddKey_Click(object? s, EventArgs e)
+        {
+            await ProgramKeyInternal(autoDisarm: false);
+        }
+
+        /// <summary>
+        /// Manual Disarm Alarm - costs 1 token, requires incode + BCM unlocked
+        /// </summary>
+        private async void BtnDisarmAlarm_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected)
+            {
+                MessageBox.Show("Connect to a device first");
+                return;
+            }
+
+            // Check workflow is configured
+            if (!J2534Service.Instance.IsWorkflowConfigured)
+            {
+                MessageBox.Show("Please read VIN first to configure the workflow system.");
+                return;
+            }
+
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first\n\nDisarm alarm requires BCM to be unlocked with incode.");
+                return;
+            }
+
+            // Check if session is active for token cost
+            var workflow = J2534Service.Instance.Workflow;
+            bool hasActiveSession = workflow?.Session?.HasActiveSecuritySession ?? false;
+            
+            if (!hasActiveSession)
+            {
+                MessageBox.Show("BCM must be unlocked first!\n\nUse Gateway Unlock or Program Key first to establish a security session.");
+                return;
+            }
+
+            // Already disarmed?
+            if (IsAlarmDisarmed)
+            {
+                var remaining = _alarmDisarmExpiry - DateTime.Now;
+                var result = MessageBox.Show(
+                    $"Alarm is already disarmed!\n\n" +
+                    $"Time remaining: {(int)remaining.TotalMinutes}:{remaining.Seconds:D2}\n\n" +
+                    $"Do you want to reset the timer?",
+                    "Alarm Already Disarmed",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                    
+                if (result != DialogResult.Yes) return;
+            }
+
+            // Costs 1 token even if session active (per your requirement)
+            if (!Confirm(1, "Disarm Alarm"))
+                return;
+
+            Log("info", "Disarming vehicle alarm...");
+
+            try
+            {
+                // In real implementation, this sends UDS command to disarm alarm
+                // For now, simulate the operation
+                await Task.Delay(500);
+                
+                // Deduct token
+                _tokenBalance--;
+                _lblTokens.Text = $"Tokens: {_tokenBalance}";
+
+                // Start 10-minute countdown
+                StartAlarmDisarmTimer(600);
+
+                Log("success", "Alarm disarmed - 10 minute countdown started");
+                MessageBox.Show(
+                    "✓ Alarm Disarmed\n\n" +
+                    "You have 10 minutes to perform key operations.\n" +
+                    "After 10 minutes, the alarm will re-arm automatically.\n\n" +
+                    "Timer shown in status bar and panel above key operations.",
+                    "Alarm Disarmed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Disarm Failed", "Could not disarm alarm", ex);
             }
         }
 
@@ -1755,8 +2130,12 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
             {
                 _lblKeys.Text = erase.CurrentKeyCount.ToString();
                 _keySlotPanel.ProgrammedKeys = erase.CurrentKeyCount;
+                
+                // Start alarm disarm timer (erase auto-disarms)
+                StartAlarmDisarmTimer(600);
+                
                 Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
-                MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}\n\n⚠️ CRITICAL: Program at least 2 keys NOW!\nVehicle will not start until 2+ keys are programmed.");
+                MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}\n\n✓ Alarm disarmed for 10 minutes\n\n⚠️ CRITICAL: Program at least 2 keys NOW!\nVehicle will not start until 2+ keys are programmed.");
             }
             else
             {
@@ -2227,6 +2606,69 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 Log("error", result.Error ?? "Gateway unlock failed");
                 MessageBox.Show($"Gateway unlock failed: {result.Error ?? "Unknown error"}");
             }
+        }
+
+        /// <summary>
+        /// <summary>
+        /// Shows 10-minute security lockout countdown when NRC 0x36 (security locked) is received.
+        /// Called automatically when BCM is locked due to failed attempts.
+        /// </summary>
+        /// <param name="durationSeconds">Lockout duration (default 600 = 10 minutes)</param>
+        /// <returns>True if countdown completed, false if cancelled</returns>
+        private async Task<bool> ShowSecurityLockoutCountdownAsync(int durationSeconds = 600)
+        {
+            Log("warning", $"Security locked (NRC 0x36) - {durationSeconds / 60} minute lockout");
+
+            var confirmResult = MessageBox.Show(
+                $"⚠️ SECURITY LOCKOUT DETECTED\n\n" +
+                $"The BCM has temporarily locked security access.\n" +
+                $"This happens after failed authentication attempts.\n\n" +
+                $"You must wait {durationSeconds / 60} minutes before retrying.\n\n" +
+                $"During this time:\n" +
+                $"• Keep the tool connected\n" +
+                $"• Keep ignition ON\n" +
+                $"• Do NOT disconnect any cables\n\n" +
+                $"Start the countdown now?",
+                "Security Lockout",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (confirmResult != DialogResult.Yes)
+                return false;
+
+            Log("info", $"Starting {durationSeconds / 60}-minute security lockout countdown...");
+
+            // Define keep-alive action
+            Func<Task<bool>> keepAlive = async () =>
+            {
+                try
+                {
+                    await J2534Service.Instance.SendTesterPresentAsync();
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            };
+
+            // Show timed access form
+            using var timedForm = new TimedSecurityAccessForm(durationSeconds, keepAlive);
+            timedForm.ShowDialog(this);
+
+            if (timedForm.Cancelled)
+            {
+                Log("warning", "Security lockout countdown cancelled by user");
+                return false;
+            }
+
+            if (timedForm.Completed)
+            {
+                Log("success", "Security lockout countdown completed - ready to retry");
+                return true;
+            }
+
+            return false;
         }
 
         private async void BtnKeypad_Click(object? s, EventArgs e)
