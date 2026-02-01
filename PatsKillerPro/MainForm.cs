@@ -512,7 +512,8 @@ namespace PatsKillerPro
             BuildDiagTab();
             BuildFreeTab();
             BuildLogin();
-            ShowMain();
+            // Start locked-down; login is modal and will enable the app on success.
+            ShowLogin();
             this.Shown += MainForm_Shown;
 
             // Add in docking order (last added docks first)
@@ -876,7 +877,25 @@ namespace PatsKillerPro
         #endregion
 
         #region Navigation
-        private void ShowLogin() { _loginPanel.Visible = false; _mainPanel.Visible = false; _lblTokens.Visible = false; }
+        private void ShowLogin()
+        {
+            // Modal login is handled via PromptLoginModalAsync(). This panel is a
+            // non-modal fallback surface and also prevents the user from operating
+            // features while logged out.
+
+            _tabBar.Visible = false;
+            _content.Visible = false;
+            _logPanel.Visible = false;
+
+            // Keep embedded login panel hidden; we use a modal login dialog.
+            _loginPanel.Visible = false;
+
+            // Hide token/user UI while logged out.
+            _lblTokens.Visible = false;
+            _lblTokens.Text = string.Empty;
+            _lblUser.Visible = false;
+            _btnLogout.Visible = false;
+        }
         private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = true; SwitchTab(0); AutoStartOnce(); }
         private void SwitchTab(int i) { _activeTab = i; _btnTab1.BackColor = i == 0 ? ACCENT : BTN_BG; _btnTab2.BackColor = i == 1 ? ACCENT : BTN_BG; _btnTab3.BackColor = i == 2 ? ACCENT : BTN_BG; _patsTab.Visible = i == 0; _diagTab.Visible = i == 1; _freeTab.Visible = i == 2; }
         #endregion
@@ -958,6 +977,13 @@ namespace PatsKillerPro
             {
                 // Stay logged out; do not show token display.
                 ClearSession();
+                ApplyAuthHeader();
+                ShowLogin();
+
+                // Fallback surface: if the user closes the modal, show the embedded
+                // login panel so they can re-try without restarting the app.
+                _loginPanel.Visible = true;
+                CenterLoginPanel();
                 return;
             }
 
