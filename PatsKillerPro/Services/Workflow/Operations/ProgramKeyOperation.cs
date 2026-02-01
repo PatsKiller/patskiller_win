@@ -7,7 +7,8 @@ namespace PatsKillerPro.Services.Workflow.Operations
 {
     /// <summary>
     /// Key Programming Operation per EZimmo Workflow Audit.
-    /// Implements the complete 9-step workflow with proper timing, verification, and error handling.
+    /// Implements the complete workflow with proper timing, verification, and error handling.
+    /// IMPORTANT: Reuses existing security sessions to allow multi-key programming on one token.
     /// </summary>
     public sealed class ProgramKeyOperation : OperationBase
     {
@@ -17,20 +18,34 @@ namespace PatsKillerPro.Services.Workflow.Operations
         private readonly string _incode;
         private readonly int _targetSlot;
         private readonly Action<string>? _log;
+        private readonly bool _keepSessionOpen;
 
         private int _initialKeyCount;
         private int _finalKeyCount;
         private byte[]? _seed;
+        private bool _didUnlockSecurity;
+        private bool _wasAlreadyUnlocked;
 
         public override string Name => "Program Key";
         public override string Description => $"Programs a new key to slot {_targetSlot}";
         public override TimeSpan? EstimatedDuration => TimeSpan.FromSeconds(20);
-        public override int TokenCost => 1;
+        
+        /// <summary>
+        /// Token cost: 1 for first unlock, 0 if reusing existing session
+        /// </summary>
+        public override int TokenCost => _wasAlreadyUnlocked ? 0 : 1;
         public override bool RequiresIncode => true;
 
         /// <summary>Final key count after operation</summary>
         public int FinalKeyCount => _finalKeyCount;
+        
+        /// <summary>Whether this operation reused an existing security session</summary>
+        public bool ReusedExistingSession => _wasAlreadyUnlocked;
 
+        /// <summary>
+        /// Creates a key programming operation.
+        /// </summary>
+        /// <param name="keepSessionOpen">If true, keep-alive continues after this operation for more keys. Default true.</param>
         public ProgramKeyOperation(
             UdsCommunication uds,
             KeepAliveTimer keepAlive,
@@ -39,7 +54,8 @@ namespace PatsKillerPro.Services.Workflow.Operations
             int targetSlot,
             PlatformPacingConfig? pacing = null,
             PlatformRoutingConfig? routing = null,
-            Action<string>? log = null)
+            Action<string>? log = null,
+            bool keepSessionOpen = true)
         {
             _uds = uds ?? throw new ArgumentNullException(nameof(uds));
             _keepAlive = keepAlive ?? throw new ArgumentNullException(nameof(keepAlive));
@@ -47,6 +63,7 @@ namespace PatsKillerPro.Services.Workflow.Operations
             _incode = incode ?? throw new ArgumentNullException(nameof(incode));
             _targetSlot = targetSlot;
             _log = log;
+            _keepSessionOpen = keepSessionOpen;
 
             PacingConfig = pacing ?? PlatformPacingConfig.Default;
             RoutingConfig = routing ?? PlatformRoutingConfig.Default;
@@ -60,16 +77,16 @@ namespace PatsKillerPro.Services.Workflow.Operations
             var routing = RoutingConfig!;
             var steps = new List<OperationStep>();
 
-            // Step 1: Check Preconditions
+            // Step 1: Check Preconditions (also checks for existing session)
             steps.Add(CreateStep(
                 "Check Preconditions",
                 CheckPreconditionsAsync,
-                "Verifying vehicle communication and key count",
+                "Verifying vehicle communication and session state",
                 retryPolicy: RetryPolicy.Standard,
                 nrcContext: NrcContext.Default
             ));
 
-            // Step 2: Unlock Gateway (if required)
+            // Step 2: Unlock Gateway (if required AND not already done)
             if (routing.RequiresGatewayUnlock && routing.GatewayModule != 0)
             {
                 steps.Add(CreateStep(
@@ -82,7 +99,7 @@ namespace PatsKillerPro.Services.Workflow.Operations
                 ));
             }
 
-            // Step 3: Start Diagnostic Session
+            // Step 3: Start/Refresh Diagnostic Session
             steps.Add(CreateStep(
                 "Start Diagnostic Session",
                 StartDiagnosticSessionAsync,
@@ -92,34 +109,25 @@ namespace PatsKillerPro.Services.Workflow.Operations
                 nrcContext: NrcContext.DiagnosticSession
             ));
 
-            // Step 4: Start Keep-Alive Timer
+            // Step 4: Ensure Keep-Alive is running
             steps.Add(CreateStep(
-                "Start Keep-Alive",
-                StartKeepAliveAsync,
-                "Starting session maintenance timer",
+                "Ensure Keep-Alive",
+                EnsureKeepAliveAsync,
+                "Ensuring session maintenance is active",
                 retryPolicy: RetryPolicy.NoRetry
             ));
 
-            // Step 5: Request Security Seed
+            // Step 5: Request Security Seed (SKIPPED if already unlocked)
             steps.Add(CreateStep(
-                "Request Security Seed",
-                RequestSecuritySeedAsync,
-                "Requesting security access seed",
+                "Security Access",
+                RequestSecurityAccessAsync,
+                "Obtaining security access",
+                postDelay: pacing.PostSecurityUnlockDelay,
                 retryPolicy: RetryPolicy.Security,
                 nrcContext: NrcContext.SecurityAccess
             ));
 
-            // Step 6: Submit Security Key (Incode) - CRITICAL timing!
-            steps.Add(CreateStep(
-                "Submit Incode",
-                SubmitSecurityKeyAsync,
-                "Submitting incode for security access",
-                postDelay: pacing.PostSecurityUnlockDelay, // CRITICAL delay after unlock
-                retryPolicy: RetryPolicy.Security,
-                nrcContext: NrcContext.SecurityAccess
-            ));
-
-            // Step 7: Start Key Programming Routine
+            // Step 6: Start Key Programming Routine
             steps.Add(CreateStep(
                 "Start Programming Routine",
                 StartProgrammingRoutineAsync,
@@ -129,15 +137,15 @@ namespace PatsKillerPro.Services.Workflow.Operations
                 nrcContext: NrcContext.RoutineControl
             ));
 
-            // Step 8: Poll for Completion
+            // Step 7: Poll for Completion
             steps.Add(CreateStep(
                 "Poll Routine Completion",
                 PollRoutineCompletionAsync,
                 "Waiting for key programming to complete",
-                retryPolicy: RetryPolicy.NoRetry // Polling handles its own retries
+                retryPolicy: RetryPolicy.NoRetry
             ));
 
-            // Step 9: Verify Key Count
+            // Step 8: Verify Key Count
             steps.Add(CreateStep(
                 "Verify Key Count",
                 VerifyKeyCountAsync,
@@ -145,11 +153,11 @@ namespace PatsKillerPro.Services.Workflow.Operations
                 retryPolicy: RetryPolicy.Standard
             ));
 
-            // Step 10: Cleanup
+            // Step 9: Finalize (keep session open for more keys!)
             steps.Add(CreateStep(
-                "Cleanup",
-                CleanupAsync,
-                "Stopping keep-alive and cleaning up",
+                "Finalize",
+                FinalizeAsync,
+                _keepSessionOpen ? "Ready for next key" : "Closing session",
                 retryPolicy: RetryPolicy.NoRetry,
                 critical: false
             ));
@@ -162,6 +170,19 @@ namespace PatsKillerPro.Services.Workflow.Operations
         private async Task CheckPreconditionsAsync(CancellationToken ct)
         {
             var routing = RoutingConfig!;
+
+            // Check if we have an active security session already
+            _wasAlreadyUnlocked = _session.IsSecurityUnlocked(routing.PrimaryModule);
+            
+            if (_wasAlreadyUnlocked)
+            {
+                var remaining = _session.GetTimeRemaining(routing.PrimaryModule);
+                _log?.Invoke($"✓ Reusing active security session (time remaining: {remaining?.TotalSeconds:F0}s)");
+            }
+            else
+            {
+                _log?.Invoke("New security unlock required (will consume 1 token)");
+            }
 
             // Verify incode format
             var expectedLength = routing.IncodeLength;
@@ -249,37 +270,57 @@ namespace PatsKillerPro.Services.Workflow.Operations
             _log?.Invoke("Diagnostic session started");
         }
 
-        private Task StartKeepAliveAsync(CancellationToken ct)
+        private Task EnsureKeepAliveAsync(CancellationToken ct)
         {
             var pacing = PacingConfig!;
             var routing = RoutingConfig!;
 
-            _keepAlive.ConfigureFromPlatform(pacing, routing);
-            _keepAlive.Start();
-
-            _log?.Invoke($"Keep-alive started: {pacing.EffectiveKeepAliveInterval.TotalMilliseconds}ms interval");
+            // Only start if not already running
+            if (!_keepAlive.IsRunning)
+            {
+                _keepAlive.ConfigureFromPlatform(pacing, routing);
+                _keepAlive.Start();
+                _log?.Invoke($"Keep-alive started: {pacing.EffectiveKeepAliveInterval.TotalMilliseconds}ms interval");
+            }
+            else
+            {
+                _log?.Invoke("Keep-alive already running (continuing session)");
+            }
+            
             return Task.CompletedTask;
         }
 
-        private async Task RequestSecuritySeedAsync(CancellationToken ct)
+        /// <summary>
+        /// Combined security access step that checks for existing session.
+        /// SKIPS seed request and incode submission if already unlocked!
+        /// </summary>
+        private async Task RequestSecurityAccessAsync(CancellationToken ct)
         {
             var routing = RoutingConfig!;
 
-            var response = await _uds.SecurityAccessRequestSeedAsync(routing.PrimaryModule, 0x01, ct);
-            response.ThrowIfFailed(NrcContext.SecurityAccess);
+            // CHECK FOR EXISTING SESSION - THIS IS THE KEY TO MULTI-KEY SUPPORT!
+            if (_session.IsSecurityUnlocked(routing.PrimaryModule))
+            {
+                var remaining = _session.GetTimeRemaining(routing.PrimaryModule);
+                _log?.Invoke($"✓ Session already unlocked - SKIPPING incode submission (time left: {remaining?.TotalSeconds:F0}s)");
+                _log?.Invoke("→ No token consumed for this key!");
+                _didUnlockSecurity = false;
+                return;
+            }
 
-            _seed = UdsCommunication.ExtractSeed(response.Data);
+            // Need to unlock - this will consume a token
+            _log?.Invoke("Performing security unlock (consuming 1 token)...");
+
+            // Request seed
+            var seedResp = await _uds.SecurityAccessRequestSeedAsync(routing.PrimaryModule, 0x01, ct);
+            seedResp.ThrowIfFailed(NrcContext.SecurityAccess);
+
+            _seed = UdsCommunication.ExtractSeed(seedResp.Data);
             if (_seed == null || _seed.Length < 2)
             {
                 throw new StepException("Failed to extract security seed", ErrorCategory.FailFast);
             }
-
             _log?.Invoke($"Security seed received: {BitConverter.ToString(_seed)}");
-        }
-
-        private async Task SubmitSecurityKeyAsync(CancellationToken ct)
-        {
-            var routing = RoutingConfig!;
 
             // Convert incode to bytes
             string bcmIncode, rfaIncode = "";
@@ -303,7 +344,8 @@ namespace PatsKillerPro.Services.Workflow.Operations
             response.ThrowIfFailed(NrcContext.SecurityAccess);
 
             _session.RecordSecurityUnlock(routing.PrimaryModule, PacingConfig?.SecuritySessionDuration);
-            _log?.Invoke("Security unlocked on primary module");
+            _didUnlockSecurity = true;
+            _log?.Invoke("Security unlocked on primary module ✓");
 
             // For keyless, also unlock secondary module
             if (routing.HasKeyless && routing.SecondaryModule != 0 && !string.IsNullOrEmpty(rfaIncode))
@@ -320,7 +362,7 @@ namespace PatsKillerPro.Services.Workflow.Operations
                     rfaKey.ThrowIfFailed(NrcContext.SecurityAccess);
 
                     _session.RecordSecurityUnlock(routing.SecondaryModule, PacingConfig?.SecuritySessionDuration);
-                    _log?.Invoke("Security unlocked on secondary module (RFA)");
+                    _log?.Invoke("Security unlocked on secondary module (RFA) ✓");
                 }
             }
         }
@@ -423,18 +465,31 @@ namespace PatsKillerPro.Services.Workflow.Operations
             _log?.Invoke($"Key programmed successfully! Total keys: {_finalKeyCount}");
         }
 
-        private async Task CleanupAsync(CancellationToken ct)
+        /// <summary>
+        /// Finalize: If keepSessionOpen is true, leave keep-alive running for more keys.
+        /// </summary>
+        private async Task FinalizeAsync(CancellationToken ct)
         {
-            try
+            if (_keepSessionOpen)
             {
-                await _keepAlive.StopAsync();
+                // KEEP SESSION OPEN for more keys!
+                var remaining = _session.SecurityTimeRemaining;
+                _log?.Invoke($"✓ Session kept open for next key (time remaining: {remaining?.TotalSeconds:F0}s)");
+                _log?.Invoke("→ Insert next key and click Program again - NO additional token needed!");
             }
-            catch
+            else
             {
-                // Cleanup errors are non-fatal
+                // Close session
+                try
+                {
+                    await _keepAlive.StopAsync();
+                    _log?.Invoke("Keep-alive stopped, session closed");
+                }
+                catch
+                {
+                    // Cleanup errors are non-fatal
+                }
             }
-
-            _log?.Invoke("Cleanup complete");
         }
 
         #endregion

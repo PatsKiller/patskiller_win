@@ -56,6 +56,24 @@ namespace PatsKillerPro.J2534
             IsSecurityUnlocked = false;
         }
 
+        /// <summary>
+        /// Sets the target module for UDS communication.
+        /// Used by workflow transport bridge.
+        /// </summary>
+        public void SetTargetModule(uint txId, uint rxId)
+        {
+            _uds.SetTargetModule(txId, rxId);
+        }
+
+        /// <summary>
+        /// Sends a raw UDS request and returns the response.
+        /// Used by workflow transport bridge.
+        /// </summary>
+        public UdsResponse SendUdsRequest(byte[] request, int timeout = 2000)
+        {
+            return _uds.SendRequest(request, timeout);
+        }
+
         #endregion
 
         #region Vehicle Reading
