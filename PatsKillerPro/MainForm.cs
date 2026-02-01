@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using PatsKillerPro.Controls;
 using PatsKillerPro.J2534;
 using PatsKillerPro.Services;
 using PatsKillerPro.Services.Workflow;
@@ -70,6 +71,7 @@ namespace PatsKillerPro
         private Button _btnCloseSession = null!;
         private Label _lblTokens = null!, _lblUser = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
         private Label _lblSessionTimer = null!;
+        private KeySlotPanel _keySlotPanel = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
@@ -764,9 +766,11 @@ namespace PatsKillerPro
 
             // === SECTION 2: VEHICLE INFORMATION ===
             var sec2 = Section("VEHICLE INFORMATION");
-            var grid2 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, BackColor = Color.Transparent, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
+            var grid2 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, BackColor = Color.Transparent, ColumnCount = 2, RowCount = 2, Margin = new Padding(0) };
             grid2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             grid2.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            grid2.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            grid2.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var row2 = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true, Margin = new Padding(0) };
             
@@ -787,7 +791,7 @@ namespace PatsKillerPro
             _cmbVehicles.Margin = DpiPad(0, 6, 0, 0);
             row2.Controls.Add(_cmbVehicles);
 
-            // Keys badge (right side, no manual coordinates)
+            // Keys badge (right side)
             var keysBg = new Panel { Size = new Size(Dpi(130), Dpi(50)), BackColor = SURFACE, Margin = DpiPad(20, 0, 0, 0) };
             keysBg.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, keysBg.Width - 1, keysBg.Height - 1); };
             keysBg.Controls.Add(new Label { Text = "KEYS", Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = TEXT_MUTED, Dock = DockStyle.Top, Height = Dpi(18), TextAlign = ContentAlignment.MiddleCenter });
@@ -796,6 +800,22 @@ namespace PatsKillerPro
 
             grid2.Controls.Add(row2, 0, 0);
             grid2.Controls.Add(keysBg, 1, 0);
+
+            // Key Slot Visualization (row 2, spans both columns)
+            _keySlotPanel = new KeySlotPanel
+            {
+                Dock = DockStyle.Fill,
+                Height = Dpi(70),
+                Margin = DpiPad(0, 8, 0, 0),
+                BackColor = Color.Transparent
+            };
+            _keySlotPanel.SlotSelected += (s, slot) =>
+            {
+                Log("info", slot > 0 ? $"Target slot selected: {slot}" : "Slot selection: Auto (next available)");
+            };
+            grid2.Controls.Add(_keySlotPanel, 0, 1);
+            grid2.SetColumnSpan(_keySlotPanel, 2);
+
             sec2.Controls.Add(grid2);
 
             layout.Controls.Add(sec2, 0, 1);
@@ -1494,10 +1514,19 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                     Log("warning", msg);
                     MessageBox.Show(msg);
                     _lblKeys.Text = current.ToString();
+                    _keySlotPanel.ProgrammedKeys = current;
                     return;
                 }
 
-                int nextSlot = current + 1;
+                // Use selected slot from KeySlotPanel, or auto-select next available
+                int nextSlot = _keySlotPanel.SelectedSlot > 0 ? _keySlotPanel.SelectedSlot : current + 1;
+                
+                // Validate slot is available
+                if (nextSlot <= current)
+                {
+                    nextSlot = current + 1;
+                }
+                
                 Log("info", $"Programming to slot {nextSlot} (current: {current}, max: {max})");
 
                 // Use workflow-based key programming with proper timing, retries, and verification
@@ -1506,6 +1535,7 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 if (prog.Success)
                 {
                     _lblKeys.Text = prog.CurrentKeyCount.ToString();
+                    _keySlotPanel.ProgrammedKeys = prog.CurrentKeyCount;
                     
                     // Check if we created a new session (first key on pre-2020 vehicle)
                     bool hasSessionNow = workflow?.Session?.HasActiveSecuritySession ?? false;
@@ -1555,7 +1585,8 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
             if (!Confirm(1, "Erase All Keys"))
                 return;
 
-            if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!\n\nAre you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            // Show 3-checkbox safety confirmation
+            if (!EraseKeysConfirmationForm.ShowConfirmation(this))
                 return;
 
             var ic = _txtIncode.Text.Trim();
@@ -1575,7 +1606,8 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 if (erase.Success)
                 {
                     _lblKeys.Text = erase.CurrentKeyCount.ToString();
-                    MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}\n\nIMPORTANTLY: Program at least one key now!");
+                    _keySlotPanel.ProgrammedKeys = erase.CurrentKeyCount;
+                    MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}\n\n⚠️ CRITICAL: Program at least 2 keys NOW!\nVehicle will not start until 2+ keys are programmed.");
                     Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
                 }
                 else
@@ -2093,6 +2125,7 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 if (result.Success)
                 {
                     _lblKeys.Text = result.KeyCount.ToString();
+                    _keySlotPanel.ProgrammedKeys = result.KeyCount;
                     MessageBox.Show($"Keys programmed: {result.KeyCount}");
                     Log("success", $"Keys: {result.KeyCount}");
                 }
