@@ -1492,78 +1492,143 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 return;
             }
 
-            if (!Confirm(1, "Program Key"))
+            // Check if session is active for token cost
+            var workflow = J2534Service.Instance.Workflow;
+            bool hasActiveSession = workflow?.Session?.HasActiveSecuritySession ?? false;
+            int tokenCost = hasActiveSession ? 0 : 1;
+
+            if (!Confirm(tokenCost, "Program Key"))
                 return;
 
-            try
+            // First, read current key count to determine slot
+            var kc = await J2534Service.Instance.ReadKeyCountWithWorkflowAsync();
+            int current = kc.Success ? kc.KeyCount : 0;
+            int max = kc.MaxKeys;
+
+            if (current >= max)
             {
-                Log("info", "Starting key programming workflow...");
-
-                // Check if session is already active
-                var workflow = J2534Service.Instance.Workflow;
-                bool hadSessionBefore = workflow?.Session?.HasActiveSecuritySession ?? false;
-
-                // First, read current key count to determine slot
-                var kc = await J2534Service.Instance.ReadKeyCountWithWorkflowAsync();
-                int current = kc.Success ? kc.KeyCount : 0;
-                int max = kc.MaxKeys;
-
-                if (current >= max)
-                {
-                    var msg = $"Max keys already programmed ({current}/{max}). Erase keys first if you need to add a new one.";
-                    Log("warning", msg);
-                    MessageBox.Show(msg);
-                    _lblKeys.Text = current.ToString();
-                    _keySlotPanel.ProgrammedKeys = current;
-                    return;
-                }
-
-                // Use selected slot from KeySlotPanel, or auto-select next available
-                int nextSlot = _keySlotPanel.SelectedSlot > 0 ? _keySlotPanel.SelectedSlot : current + 1;
-                
-                // Validate slot is available
-                if (nextSlot <= current)
-                {
-                    nextSlot = current + 1;
-                }
-                
-                Log("info", $"Programming to slot {nextSlot} (current: {current}, max: {max})");
-
-                // Use workflow-based key programming with proper timing, retries, and verification
-                var prog = await J2534Service.Instance.ProgramKeyWithWorkflowAsync(ic, nextSlot);
-                
-                if (prog.Success)
-                {
-                    _lblKeys.Text = prog.CurrentKeyCount.ToString();
-                    _keySlotPanel.ProgrammedKeys = prog.CurrentKeyCount;
-                    
-                    // Check if we created a new session (first key on pre-2020 vehicle)
-                    bool hasSessionNow = workflow?.Session?.HasActiveSecuritySession ?? false;
-                    if (!hadSessionBefore && hasSessionNow)
-                    {
-                        // New session started - consume token and start timer
-                        _tokenBalance--;
-                        _lblTokens.Text = $"Tokens: {_tokenBalance}";
-                        _sessionTimer?.Start();
-                        _sessionWarningShown = false;
-                        UpdateSessionTimerDisplay();
-                        _sessionManager.UpdateFromVehicleSession(workflow!.Session);
-                        Log("info", "Session started - subsequent keys are FREE");
-                    }
-                    
-                    MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\n{(hasSessionNow ? "Session active - next key is FREE!\n" : "")}Remove key, insert next key, and click Program again.");
-                    Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
-                }
-                else
-                {
-                    var msg = prog.Error ?? "Programming failed";
-                    Log("error", msg);
-                    MessageBox.Show($"Programming failed: {msg}");
-                }
+                var msg = $"Max keys already programmed ({current}/{max}). Erase keys first if you need to add a new one.";
+                Log("warning", msg);
+                MessageBox.Show(msg);
+                _lblKeys.Text = current.ToString();
+                _keySlotPanel.ProgrammedKeys = current;
+                return;
             }
-            catch (Exception ex)
+
+            // Use selected slot from KeySlotPanel, or auto-select next available
+            int nextSlot = _keySlotPanel.SelectedSlot > 0 ? _keySlotPanel.SelectedSlot : current + 1;
+            if (nextSlot <= current) nextSlot = current + 1;
+
+            // Get vehicle info for splash
+            string vehicleInfo = _cmbVehicles.SelectedItem?.ToString() ?? "Unknown Vehicle";
+            string vin = _lblVin.Text.Replace("VIN: ", "");
+            if (vin.Length == 17) vehicleInfo = $"{vehicleInfo} ({vin})";
+
+            // Show operation splash
+            using var splash = new OperationProgressForm();
+            splash.Configure(
+                "Programming Key",
+                vehicleInfo,
+                tokenCost,
+                "Reading current key count",
+                "Unlocking security access",
+                $"Programming key to slot {nextSlot}",
+                "Verifying key programmed",
+                "Updating key count"
+            );
+
+            bool hadSessionBefore = hasActiveSession;
+            Services.J2534Service.KeyOperationResult? prog = null;
+            Exception? error = null;
+
+            // Run operation in background
+            var opTask = Task.Run(async () =>
             {
-                ShowError("Program Failed", "Could not program key", ex);
+                try
+                {
+                    // Step 1: Already done (read key count)
+                    splash.StartStep(0);
+                    await Task.Delay(200);
+                    splash.CompleteStep(0);
+
+                    // Step 2: Security access
+                    splash.StartStep(1);
+                    splash.SetInstruction("Unlocking BCM security...");
+                    await Task.Delay(300);
+                    splash.CompleteStep(1);
+
+                    // Step 3: Program key
+                    splash.StartStep(2);
+                    splash.SetInstruction($"Programming key to slot {nextSlot}...");
+                    prog = await J2534Service.Instance.ProgramKeyWithWorkflowAsync(ic, nextSlot);
+                    splash.CompleteStep(2, prog.Success);
+
+                    if (prog.Success)
+                    {
+                        // Step 4: Verify
+                        splash.StartStep(3);
+                        splash.SetInstruction("Verifying key...");
+                        await Task.Delay(500);
+                        splash.CompleteStep(3);
+
+                        // Step 5: Update count
+                        splash.StartStep(4);
+                        splash.SetInstruction("Updating key count...");
+                        await Task.Delay(300);
+                        splash.CompleteStep(4);
+
+                        splash.Complete(true, "Key programmed successfully!");
+                    }
+                    else
+                    {
+                        splash.Complete(false, prog.Error ?? "Programming failed");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                    splash.Complete(false, ex.Message);
+                }
+            });
+
+            // Show splash (blocks until closed)
+            splash.ShowDialog(this);
+            await opTask;
+
+            // Handle results on UI thread
+            if (error != null)
+            {
+                ShowError("Program Failed", "Could not program key", error);
+                return;
+            }
+
+            if (prog == null) return;
+
+            if (prog.Success)
+            {
+                _lblKeys.Text = prog.CurrentKeyCount.ToString();
+                _keySlotPanel.ProgrammedKeys = prog.CurrentKeyCount;
+
+                // Check if we created a new session
+                bool hasSessionNow = workflow?.Session?.HasActiveSecuritySession ?? false;
+                if (!hadSessionBefore && hasSessionNow)
+                {
+                    _tokenBalance--;
+                    _lblTokens.Text = $"Tokens: {_tokenBalance}";
+                    _sessionTimer?.Start();
+                    _sessionWarningShown = false;
+                    UpdateSessionTimerDisplay();
+                    _sessionManager.UpdateFromVehicleSession(workflow!.Session);
+                    Log("info", "Session started - subsequent keys are FREE");
+                }
+
+                Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
+                MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\n{(hasSessionNow ? "✓ Session active - next key is FREE!\n" : "")}Remove key, insert next key, and click Program again.");
+            }
+            else
+            {
+                Log("error", prog.Error ?? "Programming failed");
+                MessageBox.Show($"Programming failed: {prog.Error}");
             }
         }
 
@@ -1582,7 +1647,12 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 return;
             }
 
-            if (!Confirm(1, "Erase All Keys"))
+            // Check session for token cost
+            var workflow = J2534Service.Instance.Workflow;
+            bool hasActiveSession = workflow?.Session?.HasActiveSecuritySession ?? false;
+            int tokenCost = hasActiveSession ? 0 : 1;
+
+            if (!Confirm(tokenCost, "Erase All Keys"))
                 return;
 
             // Show 3-checkbox safety confirmation
@@ -1596,30 +1666,102 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 return;
             }
 
-            try
-            {
-                Log("info", "Starting erase all keys workflow...");
+            // Get vehicle info for splash
+            string vehicleInfo = _cmbVehicles.SelectedItem?.ToString() ?? "Unknown Vehicle";
+            string vin = _lblVin.Text.Replace("VIN: ", "");
+            if (vin.Length == 17) vehicleInfo = $"{vehicleInfo} ({vin})";
 
-                // Use workflow-based key erase with proper timing, retries, and verification
-                var erase = await J2534Service.Instance.EraseAllKeysWithWorkflowAsync(ic);
-                
-                if (erase.Success)
-                {
-                    _lblKeys.Text = erase.CurrentKeyCount.ToString();
-                    _keySlotPanel.ProgrammedKeys = erase.CurrentKeyCount;
-                    MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}\n\n⚠️ CRITICAL: Program at least 2 keys NOW!\nVehicle will not start until 2+ keys are programmed.");
-                    Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
-                }
-                else
-                {
-                    var msg = erase.Error ?? "Erase failed";
-                    Log("error", msg);
-                    MessageBox.Show($"Erase failed: {msg}");
-                }
-            }
-            catch (Exception ex)
+            // Show operation splash
+            using var splash = new OperationProgressForm();
+            splash.Configure(
+                "Erasing All Keys",
+                vehicleInfo,
+                tokenCost,
+                "Unlocking security access",
+                "Disarming BCM",
+                "Erasing all programmed keys",
+                "Verifying keys erased",
+                "Updating key count"
+            );
+
+            Services.J2534Service.KeyOperationResult? erase = null;
+            Exception? error = null;
+
+            // Run operation in background
+            var opTask = Task.Run(async () =>
             {
-                ShowError("Erase Failed", "Could not erase keys", ex);
+                try
+                {
+                    // Step 1: Security access
+                    splash.StartStep(0);
+                    splash.SetInstruction("Unlocking BCM security...");
+                    await Task.Delay(300);
+                    splash.CompleteStep(0);
+
+                    // Step 2: Disarm
+                    splash.StartStep(1);
+                    splash.SetInstruction("Disarming BCM...");
+                    await Task.Delay(300);
+                    splash.CompleteStep(1);
+
+                    // Step 3: Erase keys
+                    splash.StartStep(2);
+                    splash.SetInstruction("Erasing all programmed keys...");
+                    erase = await J2534Service.Instance.EraseAllKeysWithWorkflowAsync(ic);
+                    splash.CompleteStep(2, erase.Success);
+
+                    if (erase.Success)
+                    {
+                        // Step 4: Verify
+                        splash.StartStep(3);
+                        splash.SetInstruction("Verifying keys erased...");
+                        await Task.Delay(500);
+                        splash.CompleteStep(3);
+
+                        // Step 5: Update count
+                        splash.StartStep(4);
+                        splash.SetInstruction("Updating key count...");
+                        await Task.Delay(300);
+                        splash.CompleteStep(4);
+
+                        splash.Complete(true, "All keys erased! Program 2+ keys now.");
+                    }
+                    else
+                    {
+                        splash.Complete(false, erase.Error ?? "Erase failed");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                    splash.Complete(false, ex.Message);
+                }
+            });
+
+            // Show splash (blocks until closed)
+            splash.ShowDialog(this);
+            await opTask;
+
+            // Handle results on UI thread
+            if (error != null)
+            {
+                ShowError("Erase Failed", "Could not erase keys", error);
+                return;
+            }
+
+            if (erase == null) return;
+
+            if (erase.Success)
+            {
+                _lblKeys.Text = erase.CurrentKeyCount.ToString();
+                _keySlotPanel.ProgrammedKeys = erase.CurrentKeyCount;
+                Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
+                MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}\n\n⚠️ CRITICAL: Program at least 2 keys NOW!\nVehicle will not start until 2+ keys are programmed.");
+            }
+            else
+            {
+                Log("error", erase.Error ?? "Erase failed");
+                MessageBox.Show($"Erase failed: {erase.Error}");
             }
         }
 
@@ -1648,26 +1790,93 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 return;
             }
 
-            try
+            // Get vehicle info for splash
+            string vehicleInfo = _cmbVehicles.SelectedItem?.ToString() ?? "Unknown Vehicle";
+            string vin = _lblVin.Text.Replace("VIN: ", "");
+            if (vin.Length == 17) vehicleInfo = $"{vehicleInfo} ({vin})";
+
+            // Show operation splash
+            using var splash = new OperationProgressForm();
+            splash.Configure(
+                "Parameter Reset",
+                vehicleInfo,
+                1,
+                "Unlocking security access",
+                "Resetting BCM parameters",
+                "Clearing calibration data",
+                "Verifying reset complete"
+            );
+
+            Services.J2534Service.OperationResult? result = null;
+            Exception? error = null;
+
+            // Run operation in background
+            var opTask = Task.Run(async () =>
             {
-                Log("info", "Starting parameter reset workflow...");
-                
-                // Use workflow-based parameter reset
-                var result = await J2534Service.Instance.ParameterResetWithWorkflowAsync(ic);
-                if (result.Success)
+                try
                 {
-                    MessageBox.Show("Parameter reset complete!\n\nTurn ignition OFF and wait 15 seconds before proceeding.");
-                    Log("success", "Parameter reset done");
+                    // Step 1: Security access
+                    splash.StartStep(0);
+                    splash.SetInstruction("Unlocking BCM security...");
+                    await Task.Delay(300);
+                    splash.CompleteStep(0);
+
+                    // Step 2: Reset parameters
+                    splash.StartStep(1);
+                    splash.SetInstruction("Resetting BCM parameters...");
+                    result = await J2534Service.Instance.ParameterResetWithWorkflowAsync(ic);
+                    splash.CompleteStep(1, result.Success);
+
+                    if (result.Success)
+                    {
+                        // Step 3: Clear calibration
+                        splash.StartStep(2);
+                        splash.SetInstruction("Clearing calibration data...");
+                        await Task.Delay(500);
+                        splash.CompleteStep(2);
+
+                        // Step 4: Verify
+                        splash.StartStep(3);
+                        splash.SetInstruction("Verifying reset complete...");
+                        await Task.Delay(300);
+                        splash.CompleteStep(3);
+
+                        splash.Complete(true, "Parameter reset complete!");
+                    }
+                    else
+                    {
+                        splash.Complete(false, result.Error ?? "Reset failed");
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    Log("error", result.Error ?? "Parameter reset failed");
-                    MessageBox.Show($"Parameter reset failed: {result.Error ?? "Unknown error"}");
+                    error = ex;
+                    splash.Complete(false, ex.Message);
                 }
+            });
+
+            // Show splash (blocks until closed)
+            splash.ShowDialog(this);
+            await opTask;
+
+            // Handle results on UI thread
+            if (error != null)
+            {
+                ShowError("Reset Failed", "Could not reset parameters", error);
+                return;
             }
-            catch (Exception ex)
+
+            if (result == null) return;
+
+            if (result.Success)
             {
-                ShowError("Reset Failed", "Could not reset parameters", ex);
+                Log("success", "Parameter reset done");
+                MessageBox.Show("Parameter reset complete!\n\n⚠️ Turn ignition OFF and wait 15 seconds before proceeding.");
+            }
+            else
+            {
+                Log("error", result.Error ?? "Parameter reset failed");
+                MessageBox.Show($"Parameter reset failed: {result.Error ?? "Unknown error"}");
             }
         }
 
@@ -1896,57 +2105,128 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 MessageBox.Show("Please read VIN first to configure the workflow system.");
                 return;
             }
-            
-            try
+
+            // Check for gateway first
+            var gw = await J2534Service.Instance.CheckGatewayAsync();
+            if (!gw.Success || !gw.HasGateway)
             {
-                var gw = await J2534Service.Instance.CheckGatewayAsync();
-                if (!gw.Success || !gw.HasGateway)
-                {
-                    MessageBox.Show("No gateway detected on this vehicle");
-                    Log("info", "No gateway module detected");
-                    return;
-                }
-
-                if (!Confirm(1, "Unlock Gateway")) return;
-
-                var ic = _txtIncode.Text.Trim();
-                if (string.IsNullOrEmpty(ic))
-                {
-                    MessageBox.Show("Enter incode first");
-                    return;
-                }
-
-                Log("info", "Starting gateway unlock workflow...");
-                
-                // Use workflow-based gateway unlock
-                var result = await J2534Service.Instance.UnlockGatewayWithWorkflowAsync(ic);
-                if (result.Success)
-                {
-                    _tokenBalance--;
-                    _lblTokens.Text = $"Tokens: {_tokenBalance}";
-                    
-                    // Start session timer
-                    _sessionTimer?.Start();
-                    _sessionWarningShown = false;
-                    UpdateSessionTimerDisplay();
-                    
-                    // Update session manager
-                    var workflow = J2534Service.Instance.Workflow;
-                    if (workflow != null)
-                    {
-                        _sessionManager.UpdateFromVehicleSession(workflow.Session);
-                    }
-                    
-                    MessageBox.Show("Gateway + BCM unlocked!\n\nAll key operations are now FREE until session expires.\nSession timer started.");
-                    Log("success", "Gateway + BCM unlocked - session active");
-                }
-                else
-                {
-                    Log("error", result.Error ?? "Gateway unlock failed");
-                    MessageBox.Show($"Gateway unlock failed: {result.Error ?? "Unknown error"}");
-                }
+                MessageBox.Show("No gateway detected on this vehicle");
+                Log("info", "No gateway module detected");
+                return;
             }
-            catch (Exception ex) { ShowError("Error", "Failed", ex); }
+
+            if (!Confirm(1, "Unlock Gateway")) return;
+
+            var ic = _txtIncode.Text.Trim();
+            if (string.IsNullOrEmpty(ic))
+            {
+                MessageBox.Show("Enter incode first");
+                return;
+            }
+
+            // Get vehicle info for splash
+            string vehicleInfo = _cmbVehicles.SelectedItem?.ToString() ?? "Unknown Vehicle";
+            string vin = _lblVin.Text.Replace("VIN: ", "");
+            if (vin.Length == 17) vehicleInfo = $"{vehicleInfo} ({vin})";
+
+            // Show operation splash
+            using var splash = new OperationProgressForm();
+            splash.Configure(
+                "Unlocking Gateway",
+                vehicleInfo,
+                1,
+                "Detecting gateway module",
+                "Unlocking gateway (GWM)",
+                "Unlocking BCM",
+                "Starting security session"
+            );
+
+            Services.J2534Service.GatewayResult? result = null;
+            Exception? error = null;
+
+            // Run operation in background
+            var opTask = Task.Run(async () =>
+            {
+                try
+                {
+                    // Step 1: Gateway detection (already done)
+                    splash.StartStep(0);
+                    splash.SetInstruction("Gateway detected...");
+                    await Task.Delay(200);
+                    splash.CompleteStep(0);
+
+                    // Step 2: Unlock gateway
+                    splash.StartStep(1);
+                    splash.SetInstruction("Unlocking gateway module...");
+                    await Task.Delay(300);
+                    splash.CompleteStep(1);
+
+                    // Step 3: Unlock BCM
+                    splash.StartStep(2);
+                    splash.SetInstruction("Unlocking BCM...");
+                    result = await J2534Service.Instance.UnlockGatewayWithWorkflowAsync(ic);
+                    splash.CompleteStep(2, result.Success);
+
+                    if (result.Success)
+                    {
+                        // Step 4: Session started
+                        splash.StartStep(3);
+                        splash.SetInstruction("Starting security session...");
+                        await Task.Delay(300);
+                        splash.CompleteStep(3);
+
+                        splash.Complete(true, "Gateway + BCM unlocked!");
+                    }
+                    else
+                    {
+                        splash.Complete(false, result.Error ?? "Unlock failed");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                    splash.Complete(false, ex.Message);
+                }
+            });
+
+            // Show splash (blocks until closed)
+            splash.ShowDialog(this);
+            await opTask;
+
+            // Handle results on UI thread
+            if (error != null)
+            {
+                ShowError("Error", "Gateway unlock failed", error);
+                return;
+            }
+
+            if (result == null) return;
+
+            if (result.Success)
+            {
+                _tokenBalance--;
+                _lblTokens.Text = $"Tokens: {_tokenBalance}";
+
+                // Start session timer
+                _sessionTimer?.Start();
+                _sessionWarningShown = false;
+                UpdateSessionTimerDisplay();
+
+                // Update session manager
+                var workflow = J2534Service.Instance.Workflow;
+                if (workflow != null)
+                {
+                    _sessionManager.UpdateFromVehicleSession(workflow.Session);
+                }
+
+                Log("success", "Gateway + BCM unlocked - session active");
+                MessageBox.Show("Gateway + BCM unlocked!\n\n✓ All key operations are now FREE until session expires.\n✓ Session timer started (10 minutes).");
+            }
+            else
+            {
+                Log("error", result.Error ?? "Gateway unlock failed");
+                MessageBox.Show($"Gateway unlock failed: {result.Error ?? "Unknown error"}");
+            }
         }
 
         private async void BtnKeypad_Click(object? s, EventArgs e)
