@@ -65,16 +65,19 @@ namespace PatsKillerPro.Utils
         /// </summary>
         public static ToolTip CreateToolTip()
         {
-            return new ToolTip
+            var tip = new ToolTip
             {
-                AutoPopDelay = 15000,  // 15 seconds
-                InitialDelay = 500,
-                ReshowDelay = 200,
+                AutoPopDelay = 15000,  // 15 seconds - long enough to read
+                InitialDelay = 300,     // 300ms - show quickly on hover
+                ReshowDelay = 100,      // 100ms - fast reshow when moving between buttons
                 ShowAlways = true,
                 IsBalloon = false,
-                BackColor = Color.FromArgb(45, 45, 50),
-                ForeColor = Color.FromArgb(240, 240, 240)
+                UseAnimation = true,
+                UseFading = true
             };
+            // Note: BackColor/ForeColor don't work on Windows 10/11 themed tooltips
+            // They show with default Windows styling which is fine
+            return tip;
         }
 
         /// <summary>
