@@ -183,6 +183,44 @@ namespace PatsKillerPro.Services.Workflow
         }
 
         /// <summary>
+        /// Performs parameter reset using the workflow runner.
+        /// </summary>
+        public async Task<OperationResult> ParameterResetAsync(string incode, int minKeys = 1, CancellationToken ct = default)
+        {
+            EnsureConfigured();
+
+            var operation = new ParameterResetOperation(
+                _uds!,
+                _keepAlive,
+                _session,
+                incode,
+                minKeys,
+                _pacingConfig,
+                _routingConfig,
+                _log);
+
+            return await _runner.RunAsync(operation, ct);
+        }
+
+        /// <summary>
+        /// Unlocks the gateway (for 2020+ vehicles) using the workflow runner.
+        /// </summary>
+        public async Task<OperationResult> UnlockGatewayAsync(string incode, CancellationToken ct = default)
+        {
+            EnsureConfigured();
+
+            var operation = new GatewayUnlockOperation(
+                _uds!,
+                _session,
+                incode,
+                _pacingConfig,
+                _routingConfig,
+                _log);
+
+            return await _runner.RunAsync(operation, ct);
+        }
+
+        /// <summary>
         /// Reads current key count.
         /// </summary>
         public async Task<(bool Success, int KeyCount, string? Error)> ReadKeyCountAsync(CancellationToken ct = default)
