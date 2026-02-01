@@ -30,7 +30,7 @@ namespace PatsKillerPro
         private readonly Color BTN_BG = Color.FromArgb(54, 54, 64);
 
         // State
-        private string _userEmail = "", _authToken = "";
+        private string _userEmail = "", _authToken = "", _refreshToken = "";
         private int _tokenBalance = 0;
         private List<J2534DeviceInfo> _devices = new();
         private bool _isConnected = false;
@@ -382,9 +382,7 @@ namespace PatsKillerPro
                 AutoEllipsis = true,
                 MaximumSize = new Size(Dpi(900), 0),
                 Margin = new Padding(0, Dpi(2), 0, 0),
-                Visible = false,
-                Visible = false
-            };
+                Visible = false};
             textStack.Controls.Add(title, 0, 0);
             textStack.Controls.Add(subtitle, 0, 1);
 
@@ -777,7 +775,7 @@ namespace PatsKillerPro
 
         private void BuildLogin()
         {
-            _loginPanel = new Panel { Dock = DockStyle.Fill, BackColor = BG };
+            _loginPanel = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false };
             var card = new Panel { Size = new Size(450, 520), BackColor = CARD };
             card.Paint += (s, e) => { using var p = new Pen(BORDER, 2); e.Graphics.DrawRectangle(p, 1, 1, 447, 517); };
 
@@ -878,7 +876,7 @@ namespace PatsKillerPro
         #endregion
 
         #region Navigation
-        private void ShowLogin() { _loginPanel.Visible = true; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = false; }
+        private void ShowLogin() { _loginPanel.Visible = false; _mainPanel.Visible = false; _lblTokens.Visible = false; }
         private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = true; SwitchTab(0); AutoStartOnce(); }
         private void SwitchTab(int i) { _activeTab = i; _btnTab1.BackColor = i == 0 ? ACCENT : BTN_BG; _btnTab2.BackColor = i == 1 ? ACCENT : BTN_BG; _btnTab3.BackColor = i == 2 ? ACCENT : BTN_BG; _patsTab.Visible = i == 0; _diagTab.Visible = i == 1; _freeTab.Visible = i == 2; }
         #endregion
@@ -887,7 +885,7 @@ namespace PatsKillerPro
 
         private bool IsLoggedIn => !string.IsNullOrWhiteSpace(_authToken);
 
-        private async void MainForm_Shown(object sender, EventArgs e)
+        private async void MainForm_Shown(object? sender, EventArgs e)
         {
             // Load any cached session first.
             LoadSession();
@@ -963,7 +961,7 @@ namespace PatsKillerPro
                 return;
             }
 
-            await CompleteLoginAsync(f.AuthToken, f.RefreshToken, f.UserEmail);
+            await CompleteLoginAsync(f.AuthToken ?? "", f.RefreshToken ?? "", f.UserEmail ?? "");
             ShowMain();
         }
 
@@ -986,13 +984,11 @@ namespace PatsKillerPro
             {
                 TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
                 await TokenBalanceService.Instance.RefreshBalanceAsync();
-                var purchased = TokenBalanceService.Instance.PurchasedTokens;
-                var promo = TokenBalanceService.Instance.PromoTokens;
-                _tokenBalance = purchased + promo;
+                _tokenBalance = TokenBalanceService.Instance.TotalTokens;
             }
             catch (Exception ex)
             {
-                Log($"Token balance refresh failed: {ex.Message}");
+                Log("warning", $"Token balance refresh failed: {ex.Message}");
                 // Keep current value (0). UI still hides tokens when logged out.
             }
         }
@@ -1004,7 +1000,7 @@ namespace PatsKillerPro
             ApplyAuthHeader();
         }
 
-        private async void BtnGoogle_Click(object sender, EventArgs e)
+        private async void BtnGoogle_Click(object? sender, EventArgs e)
         {
             await PromptLoginModalAsync();
             ApplyAuthHeader();
