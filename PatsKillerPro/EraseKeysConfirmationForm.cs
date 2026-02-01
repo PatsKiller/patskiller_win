@@ -16,6 +16,7 @@ namespace PatsKillerPro
         private readonly Color BORDER = Color.FromArgb(58, 58, 66);
         private readonly Color TEXT = Color.FromArgb(240, 240, 240);
         private readonly Color TEXT_DIM = Color.FromArgb(160, 160, 165);
+        private readonly Color TEXT_MUTED = Color.FromArgb(112, 112, 117);
         private readonly Color DANGER = Color.FromArgb(239, 68, 68);
         private readonly Color WARNING = Color.FromArgb(234, 179, 8);
         private readonly Color BTN_BG = Color.FromArgb(54, 54, 64);
