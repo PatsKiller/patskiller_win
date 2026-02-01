@@ -90,10 +90,13 @@ namespace PatsKillerPro
         {
             // Form settings
             this.Text = "PatsKiller Pro 2026 (Ford & Lincoln PATS Solution)";
-            this.Size = new Size(900, 700);
-            this.MinimumSize = new Size(800, 600);
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.Size = new Size(560, 620);
+            this.MinimumSize = new Size(560, 620);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.ShowInTaskbar = false;
             this.BackColor = _colorBackground;
             this.Font = new Font("Segoe UI", 9F);
             this.AutoScaleMode = AutoScaleMode.Dpi;
@@ -176,10 +179,11 @@ namespace PatsKillerPro
             // Tokens display (right side)
             _lblTokens = new Label
             {
-                Text = "Tokens: --",
+                Text = "",
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 ForeColor = _colorGreen,
                 AutoSize = true,
+                Visible = false,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 BackColor = Color.Transparent
             };
