@@ -935,24 +935,28 @@ private void LoadLogo()
             CenterActivePanel();
         }
 
-                private void CenterActivePanel()
-        {
-            if (_contentPanel == null) return;
 
-            Panel? activePanel = null;
-            if (_loginPanel.Visible) activePanel = _loginPanel;
-            else if (_waitingPanel.Visible) activePanel = _waitingPanel;
-            else if (_successPanel.Visible) activePanel = _successPanel;
-            else if (_errorPanel.Visible) activePanel = _errorPanel;
+private void CenterActivePanel()
+{
+    // During InitializeComponent(), the content panel can raise Resize/Layout
+    // before the state panels are created. Guard against that.
+    if (_contentPanel == null) return;
+    if (_loginPanel == null || _waitingPanel == null || _successPanel == null || _errorPanel == null) return;
 
-            if (activePanel == null) return;
+    Panel? activePanel = null;
 
-            var x = (_contentPanel.ClientSize.Width - activePanel.Width) / 2;
-            var y = (_contentPanel.ClientSize.Height - activePanel.Height) / 2;
+    if (_loginPanel.Visible) activePanel = _loginPanel;
+    else if (_waitingPanel.Visible) activePanel = _waitingPanel;
+    else if (_successPanel.Visible) activePanel = _successPanel;
+    else if (_errorPanel.Visible) activePanel = _errorPanel;
 
-            activePanel.Location = new Point(Math.Max(0, x), Math.Max(0, y));
-        }
+    if (activePanel == null) return;
 
+    var x = (_contentPanel.ClientSize.Width - activePanel.Width) / 2;
+    var y = (_contentPanel.ClientSize.Height - activePanel.Height) / 2;
+
+    activePanel.Location = new Point(Math.Max(0, x), Math.Max(0, y));
+}
 // ============ EVENT HANDLERS ============
         private async void BtnGoogle_Click(object? sender, EventArgs e)
         {
