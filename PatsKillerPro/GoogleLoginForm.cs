@@ -88,16 +88,16 @@ namespace PatsKillerPro
         // ============ INITIALIZATION ============
         private void InitializeComponent()
         {
-            // Form settings - extra large for high DPI
+            // Form settings - compact professional size
             this.Text = "PatsKiller Pro - Sign In";
-            this.ClientSize = new Size(600, 800);
-            this.MinimumSize = new Size(600, 800);
+            this.ClientSize = new Size(420, 580);
+            this.MinimumSize = new Size(420, 580);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.BackColor = _colorBackground;
             this.Font = new Font("Segoe UI", 10F);
-            this.AutoScaleMode = AutoScaleMode.None;
+            this.AutoScaleMode = AutoScaleMode.Dpi;
             this.DoubleBuffered = true;
 
             // Enable dark title bar on Windows 10/11
@@ -132,15 +132,16 @@ namespace PatsKillerPro
             _headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 90,
-                BackColor = _colorHeader
+                Height = 70,
+                BackColor = _colorHeader,
+                Padding = new Padding(16, 12, 16, 12)
             };
 
             // Logo
             _logoBox = new PictureBox
             {
-                Size = new Size(60, 60),
-                Location = new Point(20, 15),
+                Size = new Size(48, 48),
+                Location = new Point(16, 11),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 BackColor = Color.Transparent
             };
@@ -151,38 +152,24 @@ namespace PatsKillerPro
             _lblTitle = new Label
             {
                 Text = "PatsKiller Pro",
-                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
-                ForeColor = _colorText,
+                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+                ForeColor = _colorRed,
                 AutoSize = true,
-                Location = new Point(90, 15),
+                Location = new Point(72, 22),
                 BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblTitle);
-
-            // Subtitle
-            _lblSubtitle = new Label
-            {
-                Text = "Ford & Lincoln PATS Solution",
-                Font = new Font("Segoe UI", 12F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                Location = new Point(92, 50),
-                BackColor = Color.Transparent
-            };
-            _headerPanel.Controls.Add(_lblSubtitle);
 
             // Token/Status labels (hidden until logged in)
             _lblTokens = new Label { Visible = false, AutoSize = true, BackColor = Color.Transparent };
             _lblStatus = new Label { Visible = false, AutoSize = true, BackColor = Color.Transparent };
             _headerPanel.Controls.Add(_lblTokens);
             _headerPanel.Controls.Add(_lblStatus);
+            
+            // Subtitle in header (optional - hidden for cleaner look)
+            _lblSubtitle = new Label { Visible = false };
 
             this.Controls.Add(_headerPanel);
-        }
-
-        private void PositionHeaderLabels()
-        {
-            // No-op for simplified header
         }
 
         private void CreateContentPanel()
@@ -191,7 +178,7 @@ namespace PatsKillerPro
             {
                 Dock = DockStyle.Fill,
                 BackColor = _colorBackground,
-                Padding = Padding.Empty // No padding
+                Padding = new Padding(24)
             };
             this.Controls.Add(_contentPanel);
         }
@@ -200,7 +187,6 @@ namespace PatsKillerPro
         {
             try
             {
-                // Priority: embedded resource -> loose file in output -> fallback drawn mark
                 var asm = typeof(GoogleLoginForm).Assembly;
                 var resourceCandidates = new[]
                 {
@@ -230,25 +216,20 @@ namespace PatsKillerPro
                 foreach (var p in paths)
                 {
                     if (!File.Exists(p)) continue;
-
-                    // Load without locking the file on disk
                     using var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                     using var img = Image.FromStream(fs);
                     _logoBox.Image = new Bitmap(img);
                     return;
                 }
 
-                _logoBox.Image = CreatePatsKillerLogo(50);
+                _logoBox.Image = CreatePatsKillerLogo(48);
             }
             catch
             {
-                _logoBox.Image = CreatePatsKillerLogo(50);
+                _logoBox.Image = CreatePatsKillerLogo(48);
             }
         }
 
-        /// <summary>
-        /// Creates the PatsKiller logo programmatically (key icon with red accents)
-        /// </summary>
         private Image CreatePatsKillerLogo(int size)
         {
             var bmp = new Bitmap(size, size);
@@ -256,7 +237,6 @@ namespace PatsKillerPro
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 
-                // Background with gradient
                 using (var bgBrush = new LinearGradientBrush(
                     new Point(0, 0), new Point(size, size),
                     Color.FromArgb(26, 26, 46), Color.FromArgb(22, 33, 62)))
@@ -264,29 +244,23 @@ namespace PatsKillerPro
                     g.FillRectangle(bgBrush, 0, 0, size, size);
                 }
                 
-                // Red border
                 using (var pen = new Pen(_colorRed, 2))
                 {
                     g.DrawRectangle(pen, 1, 1, size - 3, size - 3);
                 }
                 
-                // Key icon
                 var keySize = size * 0.6f;
                 var offsetX = (size - keySize) / 2;
                 var offsetY = (size - keySize) / 2;
                 
                 using (var redBrush = new SolidBrush(_colorRed))
                 {
-                    // Key head (circle)
                     g.FillEllipse(redBrush, offsetX, offsetY + 2, keySize * 0.5f, keySize * 0.5f);
-                    // Key shaft
                     g.FillRectangle(redBrush, offsetX + keySize * 0.35f, offsetY + keySize * 0.2f, keySize * 0.6f, keySize * 0.15f);
-                    // Key teeth
                     g.FillRectangle(redBrush, offsetX + keySize * 0.7f, offsetY + keySize * 0.35f, keySize * 0.1f, keySize * 0.15f);
                     g.FillRectangle(redBrush, offsetX + keySize * 0.85f, offsetY + keySize * 0.35f, keySize * 0.1f, keySize * 0.2f);
                 }
                 
-                // Inner circle hole in key head
                 using (var bgBrush = new SolidBrush(Color.FromArgb(26, 26, 46)))
                 {
                     g.FillEllipse(bgBrush, offsetX + keySize * 0.12f, offsetY + keySize * 0.14f, keySize * 0.25f, keySize * 0.25f);
@@ -295,206 +269,234 @@ namespace PatsKillerPro
             return bmp;
         }
 
-        // ============ LOGIN PANEL (Step 1) ============
+        // ============ LOGIN PANEL (Main Login UI) ============
         private void CreateLoginPanel()
         {
             _loginPanel = new Panel
             {
-                Size = new Size(540, 700),
-                BackColor = _colorPanel,
-                Visible = false,
-                AutoScroll = true // Enable scroll if content doesn't fit
+                Size = new Size(372, 450),
+                BackColor = _colorBackground,
+                Visible = false
             };
 
-            // Round corners effect via region
-            _loginPanel.Paint += (s, e) =>
-            {
-                using var path = GetRoundedRectPath(_loginPanel.ClientRectangle, 12);
-                using var pen = new Pen(_colorBorder, 1);
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                e.Graphics.DrawPath(pen, path);
-            };
-
-            var y = 40; // Start position
+            var y = 0;
             var panelW = _loginPanel.Width;
-            var btnW = 460;
-            var padL = (panelW - btnW) / 2;
+            var btnW = panelW;
 
-            // "Welcome Back" title - use AutoSize for proper sizing
+            // "Welcome" title - italic style
             var lblWelcome = new Label
             {
-                Text = "Welcome Back",
-                Font = new Font("Segoe UI", 30F, FontStyle.Bold),
+                Text = "Welcome",
+                Font = new Font("Segoe UI", 32F, FontStyle.Italic),
                 ForeColor = _colorText,
-                AutoSize = false,
-                Size = new Size(panelW - 40, 80), // Taller to fit text
-                Location = new Point(20, y),
-                TextAlign = ContentAlignment.BottomCenter, // Align to bottom of label
+                Size = new Size(panelW, 50),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblWelcome);
-            y += 85;
+            y += 50;
 
             // Subtitle
             var lblSubtitle = new Label
             {
-                Text = "Sign in to access your tokens",
-                Font = new Font("Segoe UI", 14F),
+                Text = "Sign in to access your account",
+                Font = new Font("Segoe UI", 11F),
                 ForeColor = _colorTextDim,
-                Size = new Size(panelW - 40, 35),
-                Location = new Point(20, y),
+                Size = new Size(panelW, 24),
+                Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblSubtitle);
-            y += 55;
+            y += 40;
 
             // ===== GOOGLE SIGN IN BUTTON =====
-            var btnGoogle = new Button
-            {
-                Text = "Continue with Google",
-                Size = new Size(btnW, 60),
-                Location = new Point(padL, y),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = _colorGoogleBtn,
-                ForeColor = Color.FromArgb(50, 50, 50),
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-                Cursor = Cursors.Hand,
-                TextAlign = ContentAlignment.MiddleCenter
-            };
+            var btnGoogle = CreateRoundedButton("Continue with Google", btnW, 48);
+            btnGoogle.Location = new Point(0, y);
+            btnGoogle.BackColor = _colorGoogleBtn;
+            btnGoogle.ForeColor = Color.FromArgb(60, 60, 60);
+            btnGoogle.Font = new Font("Segoe UI Semibold", 12F);
+            btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
             btnGoogle.FlatAppearance.BorderSize = 1;
-            btnGoogle.FlatAppearance.BorderColor = _colorBorder;
-            btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(240, 240, 240);
+            btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
             btnGoogle.Click += BtnGoogle_Click;
             _loginPanel.Controls.Add(btnGoogle);
-            y += 80;
+            y += 68;
 
-            // Divider
+            // Divider with lines
+            var dividerPanel = new Panel
+            {
+                Size = new Size(panelW, 20),
+                Location = new Point(0, y),
+                BackColor = Color.Transparent
+            };
+            dividerPanel.Paint += (s, e) =>
+            {
+                var lineY = 10;
+                var textWidth = 140;
+                var lineColor = Color.FromArgb(80, 80, 80);
+                using var pen = new Pen(lineColor, 1);
+                
+                // Left line
+                e.Graphics.DrawLine(pen, 0, lineY, (panelW - textWidth) / 2 - 10, lineY);
+                // Right line
+                e.Graphics.DrawLine(pen, (panelW + textWidth) / 2 + 10, lineY, panelW, lineY);
+            };
+            
             var lblDivider = new Label
             {
-                Text = "───────  or sign in with email  ───────",
-                Font = new Font("Segoe UI", 11F),
+                Text = "or sign in with email",
+                Font = new Font("Segoe UI", 10F),
                 ForeColor = _colorTextDim,
-                Size = new Size(btnW, 30),
-                Location = new Point(padL, y),
+                Size = new Size(panelW, 20),
+                Location = new Point(0, 0),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            _loginPanel.Controls.Add(lblDivider);
-            y += 45;
+            dividerPanel.Controls.Add(lblDivider);
+            _loginPanel.Controls.Add(dividerPanel);
+            y += 35;
 
-            // Email label
-            var lblEmail = new Label
-            {
-                Text = "Email",
-                Font = new Font("Segoe UI", 12F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                Location = new Point(padL, y),
-                BackColor = Color.Transparent
-            };
-            _loginPanel.Controls.Add(lblEmail);
-            y += 30;
+            // Email field with floating label
+            var emailField = CreateFloatingLabelField("Email", "you@example.com", btnW, false);
+            emailField.Location = new Point(0, y);
+            emailField.Name = "emailField";
+            _loginPanel.Controls.Add(emailField);
+            y += 70;
 
-            // Email input
-            var txtEmail = new TextBox
-            {
-                Name = "txtEmail",
-                Size = new Size(btnW, 45),
-                Location = new Point(padL, y),
-                BackColor = _colorInput,
-                ForeColor = _colorTextDim,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 13F),
-                Text = "you@example.com"
-            };
-            txtEmail.GotFocus += (s, e) => { if (txtEmail.Text == "you@example.com") { txtEmail.Text = ""; txtEmail.ForeColor = _colorText; } };
-            _loginPanel.Controls.Add(txtEmail);
-            y += 60;
+            // Password field with floating label
+            var passwordField = CreateFloatingLabelField("Password", "", btnW, true);
+            passwordField.Location = new Point(0, y);
+            passwordField.Name = "passwordField";
+            _loginPanel.Controls.Add(passwordField);
+            y += 80;
 
-            // Password label
-            var lblPassword = new Label
-            {
-                Text = "Password",
-                Font = new Font("Segoe UI", 12F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                Location = new Point(padL, y),
-                BackColor = Color.Transparent
-            };
-            _loginPanel.Controls.Add(lblPassword);
-            y += 30;
-
-            // Password input
-            var txtPassword = new TextBox
-            {
-                Name = "txtPassword",
-                Size = new Size(btnW, 45),
-                Location = new Point(padL, y),
-                BackColor = _colorInput,
-                ForeColor = _colorText,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 13F),
-                UseSystemPasswordChar = true
-            };
-            _loginPanel.Controls.Add(txtPassword);
-            y += 65;
-
-            // Sign In button
-            var btnSignIn = new Button
-            {
-                Text = "Sign In",
-                Size = new Size(btnW, 58),
-                Location = new Point(padL, y),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = _colorRed,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
+            // Sign In button (red)
+            var btnSignIn = CreateRoundedButton("Sign In", btnW, 48);
+            btnSignIn.Location = new Point(0, y);
+            btnSignIn.BackColor = _colorRed;
+            btnSignIn.ForeColor = Color.White;
+            btnSignIn.Font = new Font("Segoe UI Semibold", 13F);
             btnSignIn.FlatAppearance.BorderSize = 0;
-            btnSignIn.Click += (s, e) => 
-            {
-                MessageBox.Show(
-                    "Email/password login coming soon.\n\nPlease use 'Continue with Google'.",
-                    "Coming Soon",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            };
+            btnSignIn.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 50, 80);
+            btnSignIn.Click += BtnSignIn_Click;
             _loginPanel.Controls.Add(btnSignIn);
 
             _contentPanel.Controls.Add(_loginPanel);
         }
 
-        private Image CreateGoogleIcon(int size)
+        /// <summary>
+        /// Creates a modern floating label input field
+        /// </summary>
+        private Panel CreateFloatingLabelField(string labelText, string placeholder, int width, bool isPassword)
         {
-            var bmp = new Bitmap(size, size);
-            using (var g = Graphics.FromImage(bmp))
+            var container = new Panel
             {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Color.Transparent);
-                
-                // Simplified Google "G" icon
-                var center = size / 2f;
-                var radius = size * 0.4f;
-                
-                // Blue arc (right side)
-                using (var pen = new Pen(Color.FromArgb(66, 133, 244), size * 0.15f))
-                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, -45, 90);
-                
-                // Green arc (bottom right)
-                using (var pen = new Pen(Color.FromArgb(52, 168, 83), size * 0.15f))
-                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, 45, 90);
-                
-                // Yellow arc (bottom left)
-                using (var pen = new Pen(Color.FromArgb(251, 188, 5), size * 0.15f))
-                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, 135, 90);
-                
-                // Red arc (top)
-                using (var pen = new Pen(Color.FromArgb(234, 67, 53), size * 0.15f))
-                    g.DrawArc(pen, center - radius, center - radius, radius * 2, radius * 2, 225, 90);
+                Size = new Size(width, 58),
+                BackColor = Color.Transparent
+            };
+
+            // Border panel (rounded appearance simulated)
+            var borderPanel = new Panel
+            {
+                Size = new Size(width, 50),
+                Location = new Point(0, 8),
+                BackColor = _colorInput
+            };
+            borderPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(_colorBorder, 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, borderPanel.Width - 1, borderPanel.Height - 1);
+            };
+
+            // Floating label
+            var lbl = new Label
+            {
+                Text = labelText,
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = _colorTextDim,
+                AutoSize = true,
+                Location = new Point(10, 0),
+                BackColor = _colorBackground,
+                Padding = new Padding(4, 0, 4, 0)
+            };
+            container.Controls.Add(lbl);
+
+            // Text input
+            var txt = new TextBox
+            {
+                Name = "txt" + labelText.Replace(" ", ""),
+                Size = new Size(width - 24, 28),
+                Location = new Point(12, 11),
+                BackColor = _colorInput,
+                ForeColor = string.IsNullOrEmpty(placeholder) ? _colorText : _colorTextDim,
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Segoe UI", 12F),
+                Text = placeholder,
+                UseSystemPasswordChar = isPassword
+            };
+
+            // Placeholder behavior
+            if (!string.IsNullOrEmpty(placeholder))
+            {
+                txt.GotFocus += (s, e) =>
+                {
+                    if (txt.Text == placeholder)
+                    {
+                        txt.Text = "";
+                        txt.ForeColor = _colorText;
+                    }
+                };
+                txt.LostFocus += (s, e) =>
+                {
+                    if (string.IsNullOrWhiteSpace(txt.Text))
+                    {
+                        txt.Text = placeholder;
+                        txt.ForeColor = _colorTextDim;
+                    }
+                };
             }
-            return bmp;
+
+            borderPanel.Controls.Add(txt);
+            container.Controls.Add(borderPanel);
+
+            return container;
+        }
+
+        /// <summary>
+        /// Creates a button with rounded corners
+        /// </summary>
+        private Button CreateRoundedButton(string text, int width, int height)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                Size = new Size(width, height),
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            
+            // Create rounded region
+            btn.Region = CreateRoundedRegion(width, height, 6);
+            
+            return btn;
+        }
+
+        private Region CreateRoundedRegion(int width, int height, int radius)
+        {
+            var path = new GraphicsPath();
+            var rect = new Rectangle(0, 0, width, height);
+            var diameter = radius * 2;
+            
+            path.AddArc(rect.X, rect.Y, diameter, diameter, 180, 90);
+            path.AddArc(rect.Right - diameter, rect.Y, diameter, diameter, 270, 90);
+            path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(rect.X, rect.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            
+            return new Region(path);
         }
 
         // ============ WAITING PANEL (Step 2) ============
@@ -502,397 +504,199 @@ namespace PatsKillerPro
         {
             _waitingPanel = new Panel
             {
-                Size = new Size(420, 400),
-                BackColor = _colorPanel,
+                Size = new Size(372, 300),
+                BackColor = _colorBackground,
                 Visible = false
             };
 
-            var y = 40;
+            var y = 20;
+            var panelW = _waitingPanel.Width;
 
-            // Logo
-            var logoPic = new PictureBox
+            // Spinner placeholder (animated dots or spinner)
+            var lblSpinner = new Label
             {
-                Size = new Size(100, 100),
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Image = CreatePatsKillerLogo(100),
+                Text = "🔄",
+                Font = new Font("Segoe UI", 48F),
+                Size = new Size(panelW, 80),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = _colorRed,
                 BackColor = Color.Transparent
             };
-            logoPic.Location = new Point((_waitingPanel.Width - 100) / 2, y);
-            _waitingPanel.Controls.Add(logoPic);
-            y += 120;
+            _waitingPanel.Controls.Add(lblSpinner);
+            y += 90;
 
-            // Title
-            var lblTitle = new Label
+            var lblWaiting = new Label
             {
-                Text = "Complete Sign In",
-                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                Text = "Waiting for sign in...",
+                Font = new Font("Segoe UI", 16F),
                 ForeColor = _colorText,
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            lblTitle.Location = new Point((_waitingPanel.Width - lblTitle.PreferredWidth) / 2, y);
-            _waitingPanel.Controls.Add(lblTitle);
-            // spacing after title
-            y += lblTitle.Height + 24;
-
-            // Message
-            var lblMsg = new Label
-            {
-                Text = "A browser window has opened.\nPlease sign in with Google to continue.",
-                Font = new Font("Segoe UI", 10F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
+                Size = new Size(panelW, 35),
+                Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblMsg.Location = new Point((_waitingPanel.Width - lblMsg.PreferredWidth) / 2, y);
-            _waitingPanel.Controls.Add(lblMsg);
-            // spacing after message
-            y += lblMsg.Height + 28;
-
-            // Animated dots container
-            var dotsPanel = new Panel
-            {
-                Size = new Size(80, 20),
-                Location = new Point((_waitingPanel.Width - 80) / 2, y),
-                BackColor = Color.Transparent
-            };
-            var dot1 = new Panel { Size = new Size(14, 14), Location = new Point(5, 3), BackColor = _colorRed };
-            var dot2 = new Panel { Size = new Size(14, 14), Location = new Point(30, 3), BackColor = _colorRed };
-            var dot3 = new Panel { Size = new Size(14, 14), Location = new Point(55, 3), BackColor = _colorRed };
-            
-            // Make dots circular
-            dot1.Paint += (s, e) => { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; e.Graphics.FillEllipse(new SolidBrush(_colorRed), 0, 0, 14, 14); };
-            dot2.Paint += (s, e) => { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; e.Graphics.FillEllipse(new SolidBrush(_colorRed), 0, 0, 14, 14); };
-            dot3.Paint += (s, e) => { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; e.Graphics.FillEllipse(new SolidBrush(_colorRed), 0, 0, 14, 14); };
-            
-            dotsPanel.Controls.AddRange(new Control[] { dot1, dot2, dot3 });
-            _waitingPanel.Controls.Add(dotsPanel);
-
-            // Animation timer
-            var animTimer = new System.Windows.Forms.Timer { Interval = 300 };
-            var animState = 0;
-            animTimer.Tick += (s, e) =>
-            {
-                dot1.BackColor = animState == 0 ? _colorRed : Color.FromArgb(80, _colorRed);
-                dot2.BackColor = animState == 1 ? _colorRed : Color.FromArgb(80, _colorRed);
-                dot3.BackColor = animState == 2 ? _colorRed : Color.FromArgb(80, _colorRed);
-                dot1.Invalidate();
-                dot2.Invalidate();
-                dot3.Invalidate();
-                animState = (animState + 1) % 3;
-            };
-            animTimer.Start();
-            // spacing after animated dots
-            y += dotsPanel.Height + 18;
-
-            // "Waiting for authentication..."
-            var lblWaiting = new Label
-            {
-                Text = "Waiting for authentication...",
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            lblWaiting.Location = new Point((_waitingPanel.Width - lblWaiting.PreferredWidth) / 2, y);
             _waitingPanel.Controls.Add(lblWaiting);
-            y += lblWaiting.Height + 18;
+            y += 40;
 
-            // Reopen Browser button
-            var btnReopen = new Button
+            var lblInfo = new Label
             {
-                Text = "🌐  Reopen Browser",
-                Size = new Size(280, 45),
-                Location = new Point((_waitingPanel.Width - 280) / 2, y),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = _colorInput,
-                ForeColor = _colorText,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            btnReopen.FlatAppearance.BorderColor = _colorBorder;
-            btnReopen.FlatAppearance.BorderSize = 1;
-            btnReopen.Click += BtnReopenBrowser_Click;
-            _waitingPanel.Controls.Add(btnReopen);
-            y += btnReopen.Height + 16;
-
-            // Cancel link
-            var lblCancel = new Label
-            {
-                Text = "Cancel",
-                Font = new Font("Segoe UI", 10F),
+                Text = "Complete sign in in your browser.\nThis window will update automatically.",
+                Font = new Font("Segoe UI", 11F),
                 ForeColor = _colorTextDim,
-                AutoSize = true,
-                Cursor = Cursors.Hand,
+                Size = new Size(panelW, 50),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblCancel.Location = new Point((_waitingPanel.Width - lblCancel.PreferredWidth) / 2, y);
-            lblCancel.Click += (s, e) =>
+            _waitingPanel.Controls.Add(lblInfo);
+            y += 70;
+
+            var btnCancel = CreateRoundedButton("Cancel", 160, 42);
+            btnCancel.Location = new Point((panelW - 160) / 2, y);
+            btnCancel.BackColor = _colorInput;
+            btnCancel.ForeColor = _colorText;
+            btnCancel.Font = new Font("Segoe UI", 11F);
+            btnCancel.FlatAppearance.BorderColor = _colorBorder;
+            btnCancel.FlatAppearance.BorderSize = 1;
+            btnCancel.Click += (s, e) =>
             {
                 _cts?.Cancel();
-                Logger.Info("Login cancelled");
                 ShowLoginState();
             };
-            lblCancel.MouseEnter += (s, e) => lblCancel.ForeColor = _colorText;
-            lblCancel.MouseLeave += (s, e) => lblCancel.ForeColor = _colorTextDim;
-            _waitingPanel.Controls.Add(lblCancel);
+            _waitingPanel.Controls.Add(btnCancel);
 
             _contentPanel.Controls.Add(_waitingPanel);
         }
 
-        // ============ SUCCESS PANEL (Step 3) ============
+        // ============ SUCCESS PANEL ============
         private void CreateSuccessPanel()
         {
             _successPanel = new Panel
             {
-                Size = new Size(420, 420),
-                BackColor = _colorPanel,
+                Size = new Size(372, 320),
+                BackColor = _colorBackground,
                 Visible = false
             };
 
-            var y = 40;
+            var y = 20;
+            var panelW = _successPanel.Width;
 
-            // Success checkmark circle
-            var successIcon = new Panel
+            var lblCheck = new Label
             {
-                Size = new Size(96, 96),
-                Location = new Point((_successPanel.Width - 96) / 2, y),
+                Text = "✓",
+                Font = new Font("Segoe UI", 56F, FontStyle.Bold),
+                ForeColor = _colorGreen,
+                Size = new Size(panelW, 90),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            successIcon.Paint += (s, e) =>
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                
-                // Gradient green circle
-                using (var brush = new LinearGradientBrush(
-                    new Point(0, 0), new Point(96, 96),
-                    Color.FromArgb(76, 175, 80), Color.FromArgb(56, 142, 60)))
-                {
-                    e.Graphics.FillEllipse(brush, 0, 0, 94, 94);
-                }
-                
-                // White checkmark
-                using (var pen = new Pen(Color.White, 6))
-                {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.Round;
-                    e.Graphics.DrawLine(pen, 25, 50, 42, 67);
-                    e.Graphics.DrawLine(pen, 42, 67, 72, 32);
-                }
-            };
-            _successPanel.Controls.Add(successIcon);
-            // spacing after success icon
-            y += successIcon.Height + 20;
+            _successPanel.Controls.Add(lblCheck);
+            y += 100;
 
-            // "Welcome!"
-            var lblWelcome = new Label
+            var lblSuccess = new Label
             {
+                Name = "lblSuccessTitle",
                 Text = "Welcome!",
-                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
                 ForeColor = _colorText,
-                AutoSize = true,
+                Size = new Size(panelW, 40),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblWelcome.Location = new Point((_successPanel.Width - lblWelcome.PreferredWidth) / 2, y);
-            _successPanel.Controls.Add(lblWelcome);
-            y += lblWelcome.Height + 18;
+            _successPanel.Controls.Add(lblSuccess);
+            y += 45;
 
-            // "Signed in as"
-            var lblSignedAs = new Label
-            {
-                Text = "Signed in as",
-                Font = new Font("Segoe UI", 10F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            lblSignedAs.Location = new Point((_successPanel.Width - lblSignedAs.PreferredWidth) / 2, y);
-            _successPanel.Controls.Add(lblSignedAs);
-            y += 25;
-
-            // Email (dynamic)
             var lblEmail = new Label
             {
                 Name = "lblSuccessEmail",
-                Text = "user@example.com",
-                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
-                ForeColor = _colorText,
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            lblEmail.Location = new Point((_successPanel.Width - lblEmail.PreferredWidth) / 2, y);
-            _successPanel.Controls.Add(lblEmail);
-            y += lblEmail.Height + 22;
-
-            // Token count box
-            var tokenBox = new Panel
-            {
-                Size = new Size(340, 60),
-                Location = new Point((_successPanel.Width - 340) / 2, y),
-                BackColor = _colorInput
-            };
-            tokenBox.Paint += (s, e) =>
-            {
-                using var pen = new Pen(_colorBorder, 1);
-                using var path = GetRoundedRectPath(tokenBox.ClientRectangle, 12);
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                e.Graphics.DrawPath(pen, path);
-            };
-
-            var lblTokenLabel = new Label
-            {
-                Text = "Available Tokens",
-                Font = new Font("Segoe UI", 10F),
+                Text = "",
+                Font = new Font("Segoe UI", 12F),
                 ForeColor = _colorTextDim,
-                Location = new Point(20, 20),
-                AutoSize = true,
+                Size = new Size(panelW, 30),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            tokenBox.Controls.Add(lblTokenLabel);
+            _successPanel.Controls.Add(lblEmail);
+            y += 50;
 
-            var lblTokenCount = new Label
-            {
-                Name = "lblSuccessTokens",
-                Text = "0",
-                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
-                ForeColor = _colorGreen,
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            lblTokenCount.Location = new Point(tokenBox.Width - lblTokenCount.PreferredWidth - 25, 15);
-            tokenBox.Controls.Add(lblTokenCount);
-
-            _successPanel.Controls.Add(tokenBox);
-            y += 80;
-
-            // Start Programming button
-            var btnStart = new Button
-            {
-                Text = "Start Programming",
-                Size = new Size(340, 55),
-                Location = new Point((_successPanel.Width - 340) / 2, y),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = _colorRed,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            btnStart.FlatAppearance.BorderSize = 0;
-            btnStart.Click += (s, e) =>
-            {
-                this.DialogResult = DialogResult.OK;
-                this.Close();
-            };
-            _successPanel.Controls.Add(btnStart);
+            var btnContinue = CreateRoundedButton("Continue", 200, 48);
+            btnContinue.Location = new Point((panelW - 200) / 2, y);
+            btnContinue.BackColor = _colorGreen;
+            btnContinue.ForeColor = Color.White;
+            btnContinue.Font = new Font("Segoe UI Semibold", 13F);
+            btnContinue.FlatAppearance.BorderSize = 0;
+            btnContinue.Click += (s, e) => this.DialogResult = DialogResult.OK;
+            _successPanel.Controls.Add(btnContinue);
 
             _contentPanel.Controls.Add(_successPanel);
         }
 
-        // ============ ERROR PANEL (Step 4) ============
+        // ============ ERROR PANEL ============
         private void CreateErrorPanel()
         {
             _errorPanel = new Panel
             {
-                Size = new Size(420, 380),
-                BackColor = _colorPanel,
+                Size = new Size(372, 300),
+                BackColor = _colorBackground,
                 Visible = false
             };
 
-            var y = 40;
+            var y = 20;
+            var panelW = _errorPanel.Width;
 
-            // Error X circle
-            var errorIcon = new Panel
+            var lblIcon = new Label
             {
-                Size = new Size(96, 96),
-                Location = new Point((_errorPanel.Width - 96) / 2, y),
-                BackColor = Color.Transparent
-            };
-            errorIcon.Paint += (s, e) =>
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                
-                // Gradient red circle
-                using (var brush = new LinearGradientBrush(
-                    new Point(0, 0), new Point(96, 96),
-                    Color.FromArgb(244, 67, 54), Color.FromArgb(211, 47, 47)))
-                {
-                    e.Graphics.FillEllipse(brush, 0, 0, 94, 94);
-                }
-                
-                // White X
-                using (var pen = new Pen(Color.White, 6))
-                {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.Round;
-                    e.Graphics.DrawLine(pen, 30, 30, 64, 64);
-                    e.Graphics.DrawLine(pen, 64, 30, 30, 64);
-                }
-            };
-            _errorPanel.Controls.Add(errorIcon);
-            // spacing after icon
-            y += errorIcon.Height + 20;
-
-            // "Sign In Failed"
-            var lblTitle = new Label
-            {
-                Text = "Sign In Failed",
-                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
-                ForeColor = _colorText,
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            lblTitle.Location = new Point((_errorPanel.Width - lblTitle.PreferredWidth) / 2, y);
-            _errorPanel.Controls.Add(lblTitle);
-            y += lblTitle.Height + 18;
-
-            // Error message
-            var lblMsg = new Label
-            {
-                Name = "lblErrorMsg",
-                Text = "Authentication was cancelled or timed out.\nPlease try again.",
-                Font = new Font("Segoe UI", 10F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
+                Text = "⚠",
+                Font = new Font("Segoe UI", 48F),
+                ForeColor = _colorRed,
+                Size = new Size(panelW, 80),
+                Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblMsg.Location = new Point((_errorPanel.Width - lblMsg.PreferredWidth) / 2, y);
-            _errorPanel.Controls.Add(lblMsg);
-            y += lblMsg.Height + 26;
+            _errorPanel.Controls.Add(lblIcon);
+            y += 90;
 
-            // Try Again button
-            var btnRetry = new Button
+            var lblError = new Label
             {
-                Text = "Try Again",
-                Size = new Size(300, 55),
-                Location = new Point((_errorPanel.Width - 300) / 2, y),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = _colorRed,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            btnRetry.FlatAppearance.BorderSize = 0;
-            btnRetry.Click += async (s, e) => await StartGoogleAuthAsync();
-            _errorPanel.Controls.Add(btnRetry);
-            y += btnRetry.Height + 16;
-
-            // Back to Login link
-            var lblBack = new Label
-            {
-                Text = "Back to Login",
-                Font = new Font("Segoe UI", 10F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                Cursor = Cursors.Hand,
+                Name = "lblErrorTitle",
+                Text = "Sign In Failed",
+                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+                ForeColor = _colorText,
+                Size = new Size(panelW, 35),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblBack.Location = new Point((_errorPanel.Width - lblBack.PreferredWidth) / 2, y);
-            lblBack.Click += (s, e) => ShowLoginState();
-            lblBack.MouseEnter += (s, e) => lblBack.ForeColor = _colorText;
-            lblBack.MouseLeave += (s, e) => lblBack.ForeColor = _colorTextDim;
-            _errorPanel.Controls.Add(lblBack);
+            _errorPanel.Controls.Add(lblError);
+            y += 40;
+
+            var lblMessage = new Label
+            {
+                Name = "lblErrorMessage",
+                Text = "",
+                Font = new Font("Segoe UI", 11F),
+                ForeColor = _colorTextDim,
+                Size = new Size(panelW, 50),
+                Location = new Point(0, y),
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.Transparent
+            };
+            _errorPanel.Controls.Add(lblMessage);
+            y += 65;
+
+            var btnRetry = CreateRoundedButton("Try Again", 160, 44);
+            btnRetry.Location = new Point((panelW - 160) / 2, y);
+            btnRetry.BackColor = _colorRed;
+            btnRetry.ForeColor = Color.White;
+            btnRetry.Font = new Font("Segoe UI Semibold", 12F);
+            btnRetry.FlatAppearance.BorderSize = 0;
+            btnRetry.Click += (s, e) => ShowLoginState();
+            _errorPanel.Controls.Add(btnRetry);
 
             _contentPanel.Controls.Add(_errorPanel);
         }
@@ -904,7 +708,7 @@ namespace PatsKillerPro
             _waitingPanel.Visible = false;
             _successPanel.Visible = false;
             _errorPanel.Visible = false;
-            CenterPanel(_loginPanel);
+            CenterActivePanel();
         }
 
         private void ShowWaitingState()
@@ -913,104 +717,55 @@ namespace PatsKillerPro
             _waitingPanel.Visible = true;
             _successPanel.Visible = false;
             _errorPanel.Visible = false;
-            CenterPanel(_waitingPanel);
+            CenterActivePanel();
         }
 
-        private void ShowSuccessState(string email, int tokens)
+        private void ShowSuccessState(string email, int tokenCount)
         {
-            // Update email label
-            foreach (Control c in _successPanel.Controls)
+            var lblEmail = _successPanel.Controls.Find("lblSuccessEmail", true);
+            if (lblEmail.Length > 0)
             {
-                if (c.Name == "lblSuccessEmail")
-                {
-                    c.Text = email;
-                    c.Location = new Point((_successPanel.Width - c.PreferredSize.Width) / 2, c.Location.Y);
-                }
-            }
-            
-            // Update token count
-            foreach (Control c in _successPanel.Controls)
-            {
-                if (c is Panel tokenBox)
-                {
-                    foreach (Control tc in tokenBox.Controls)
-                    {
-                        if (tc.Name == "lblSuccessTokens")
-                        {
-                            tc.Text = tokens.ToString();
-                            tc.Location = new Point(tokenBox.Width - tc.PreferredSize.Width - 25, 15);
-                        }
-                    }
-                }
+                lblEmail[0].Text = email;
             }
 
             _loginPanel.Visible = false;
             _waitingPanel.Visible = false;
             _successPanel.Visible = true;
             _errorPanel.Visible = false;
-            CenterPanel(_successPanel);
-
-            _lblTokens.Text = $"Tokens: {tokens}";
-            _lblStatus.Text = email;
-            PositionHeaderLabels();
-            AutoCloseAfterSuccess();
+            CenterActivePanel();
         }
 
-        private async void AutoCloseAfterSuccess()
+        private void ShowErrorState(string message)
         {
-            // Auto-start the main app: briefly show success state, then close this dialog.
-            try
+            var lblMessage = _errorPanel.Controls.Find("lblErrorMessage", true);
+            if (lblMessage.Length > 0)
             {
-                await Task.Delay(350);
-                if (IsDisposed) return;
-
-                // If the user manually closed it already, don't fight them.
-                if (!Visible) return;
-
-                DialogResult = DialogResult.OK;
-                Close();
-            }
-            catch
-            {
-                // Ignore any race conditions during shutdown.
-            }
-        }
-
-        private void ShowErrorState(string message = "Authentication was cancelled or timed out.\nPlease try again.")
-        {
-            foreach (Control c in _errorPanel.Controls)
-            {
-                if (c.Name == "lblErrorMsg")
-                {
-                    c.Text = message;
-                    c.Location = new Point((_errorPanel.Width - c.PreferredSize.Width) / 2, c.Location.Y);
-                }
+                lblMessage[0].Text = message;
             }
 
             _loginPanel.Visible = false;
             _waitingPanel.Visible = false;
             _successPanel.Visible = false;
             _errorPanel.Visible = true;
-            CenterPanel(_errorPanel);
-        }
-
-        private void CenterPanel(Panel panel)
-        {
-            if (_contentPanel != null && panel != null)
-            {
-                panel.Location = new Point(
-                    Math.Max(0, (_contentPanel.Width - panel.Width) / 2),
-                    Math.Max(0, (_contentPanel.Height - panel.Height) / 2)
-                );
-            }
+            CenterActivePanel();
         }
 
         private void CenterActivePanel()
         {
-            if (_loginPanel?.Visible == true) CenterPanel(_loginPanel);
-            else if (_waitingPanel?.Visible == true) CenterPanel(_waitingPanel);
-            else if (_successPanel?.Visible == true) CenterPanel(_successPanel);
-            else if (_errorPanel?.Visible == true) CenterPanel(_errorPanel);
+            Panel? activePanel = null;
+            if (_loginPanel.Visible) activePanel = _loginPanel;
+            else if (_waitingPanel.Visible) activePanel = _waitingPanel;
+            else if (_successPanel.Visible) activePanel = _successPanel;
+            else if (_errorPanel.Visible) activePanel = _errorPanel;
+
+            if (activePanel != null)
+            {
+                var headerHeight = _headerPanel?.Height ?? 70;
+                var availableHeight = this.ClientSize.Height - headerHeight;
+                var x = (_contentPanel.ClientSize.Width - activePanel.Width) / 2;
+                var y = (availableHeight - activePanel.Height) / 2;
+                activePanel.Location = new Point(Math.Max(0, x), Math.Max(0, y));
+            }
         }
 
         // ============ EVENT HANDLERS ============
@@ -1019,20 +774,16 @@ namespace PatsKillerPro
             await StartGoogleAuthAsync();
         }
 
-        private void BtnReopenBrowser_Click(object? sender, EventArgs e)
+        private void BtnSignIn_Click(object? sender, EventArgs e)
         {
-            if (!string.IsNullOrEmpty(_currentSessionCode))
-            {
-                var url = AUTH_PAGE_URL + _currentSessionCode;
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = url,
-                    UseShellExecute = true
-                });
-            }
+            MessageBox.Show(
+                "Email/password login coming soon.\n\nPlease use 'Continue with Google' for now.",
+                "Coming Soon",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
-        // ============ AUTH FLOW ============
+        // ============ GOOGLE AUTH FLOW ============
         private async Task StartGoogleAuthAsync()
         {
             try
@@ -1040,13 +791,12 @@ namespace PatsKillerPro
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
 
-                Logger.Info("Opening Google login...");
+                Logger.Info("Starting Google OAuth flow...");
 
-                // Create session
                 var session = await CreateSessionAsync();
                 if (session == null)
                 {
-                    ShowErrorState("Could not connect to server.\nPlease check your internet connection.");
+                    ShowErrorState("Failed to start authentication.\nPlease check your connection.");
                     return;
                 }
 
@@ -1060,10 +810,7 @@ namespace PatsKillerPro
                     UseShellExecute = true
                 });
 
-                // Show waiting state
                 ShowWaitingState();
-
-                // Start polling
                 await PollForCompletionAsync(session.SessionCode, _cts.Token);
             }
             catch (Exception ex)
@@ -1124,7 +871,7 @@ namespace PatsKillerPro
         {
             try
             {
-                var timeout = DateTime.UtcNow.AddMinutes(5); // 5 minute timeout
+                var timeout = DateTime.UtcNow.AddMinutes(5);
                 
                 while (!ct.IsCancellationRequested && DateTime.UtcNow < timeout)
                 {
@@ -1154,7 +901,6 @@ namespace PatsKillerPro
                     }
                 }
                 
-                // Timeout
                 if (!ct.IsCancellationRequested)
                 {
                     this.BeginInvoke(new Action(() => ShowErrorState("Authentication timed out.\nPlease try again.")));
@@ -1203,9 +949,6 @@ namespace PatsKillerPro
                     result.Token = root.TryGetProperty("accessToken", out var t) ? t.GetString() : null;
                     result.RefreshToken = root.TryGetProperty("refreshToken", out var r) ? r.GetString() : null;
                     result.Email = root.TryGetProperty("email", out var e) ? e.GetString() : null;
-                    
-                    // Try to get token count (if available)
-                    // TODO: Fetch token count from a separate API endpoint
                     result.TokenCount = 0;
                 }
 
