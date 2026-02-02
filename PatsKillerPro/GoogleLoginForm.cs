@@ -33,19 +33,33 @@ namespace PatsKillerPro
         private Panel _successPanel = null!;
         private Panel _errorPanel = null!;
 
-        // ============ DARK THEME COLORS (Matching Mockup) ============
-        private readonly Color _colorBackground = Color.FromArgb(30, 30, 30);      // #1e1e1e
-        private readonly Color _colorHeader = Color.FromArgb(37, 37, 38);          // #252526
-        private readonly Color _colorPanel = Color.FromArgb(45, 45, 48);           // #2d2d30
-        private readonly Color _colorInput = Color.FromArgb(60, 60, 60);           // #3c3c3c
-        private readonly Color _colorBorder = Color.FromArgb(70, 70, 70);          // #464646
-        private readonly Color _colorText = Color.FromArgb(255, 255, 255);         // White
-        private readonly Color _colorTextDim = Color.FromArgb(150, 150, 150);      // Gray
-        private readonly Color _colorRed = Color.FromArgb(233, 69, 96);            // #e94560 - PatsKiller Red
-        private readonly Color _colorGreen = Color.FromArgb(76, 175, 80);          // #4caf50 - Success Green
-        private readonly Color _colorGoogleBtn = Color.FromArgb(255, 255, 255);    // White for Google button
+        // ============ THEME COLORS (Matching Mockup) ============
+        // Background is a subtle vertical gradient; most controls sit on transparent panels.
+        private readonly Color _colorBackground = ColorTranslator.FromHtml("#111827");     // Top (deep navy)
+        private readonly Color _colorBackground2 = ColorTranslator.FromHtml("#0B1220");    // Bottom (near-black navy)
+
+        // Header is slightly lighter than body
+        private readonly Color _colorHeader = ColorTranslator.FromHtml("#2D3346");
+        private readonly Color _colorHeader2 = ColorTranslator.FromHtml("#242A3B");
+        private readonly Color _colorHeaderBorder = ColorTranslator.FromHtml("#3A4158");
+
+        // Surfaces / inputs
+        private readonly Color _colorPanel = ColorTranslator.FromHtml("#1B2433");
+        private readonly Color _colorInput = ColorTranslator.FromHtml("#1F2937");
+        private readonly Color _colorBorder = ColorTranslator.FromHtml("#374151");
+
+        // Typography
+        private readonly Color _colorText = ColorTranslator.FromHtml("#F3F4F6");
+        private readonly Color _colorTextDim = ColorTranslator.FromHtml("#9CA3AF");
+
+        // Brand / status
+        private readonly Color _colorRed = ColorTranslator.FromHtml("#E94796");            // PatsKiller Pink
+        private readonly Color _colorRedDark = ColorTranslator.FromHtml("#DB2777");        // Button Pink (darker)
+        private readonly Color _colorGreen = ColorTranslator.FromHtml("#22C55E");          // Success Green
+        private readonly Color _colorGoogleBtn = Color.White;                              // Google button surface
 
         // ============ RESULTS ============
+ ============
         public string? AuthToken { get; private set; }
         public string? RefreshToken { get; private set; }
         public string? UserEmail { get; private set; }
@@ -86,19 +100,23 @@ namespace PatsKillerPro
         }
 
         // ============ INITIALIZATION ============
-        private void InitializeComponent()
+                private void InitializeComponent()
         {
-            // Form settings - compact professional size
-            this.Text = "PatsKiller Pro - Sign In";
-            this.ClientSize = new Size(420, 580);
-            this.MinimumSize = new Size(420, 580);
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.BackColor = _colorBackground;
-            this.Font = new Font("Segoe UI", 10F);
-            this.AutoScaleMode = AutoScaleMode.Dpi;
-            this.DoubleBuffered = true;
+            // Form settings
+            Text = "PatsKiller Pro - Sign In";
+            ClientSize = new Size(420, 600);
+            MinimumSize = new Size(420, 600);
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false;
+            BackColor = _colorBackground;
+            Font = new Font("Segoe UI", 10F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            DoubleBuffered = true;
+            ResizeRedraw = true;
+
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            UpdateStyles();
 
             // Enable dark title bar on Windows 10/11
             try
@@ -109,39 +127,70 @@ namespace PatsKillerPro
             }
             catch { }
 
-            // Create content panel first, then header docks on top
-            CreateContentPanel();
+            // IMPORTANT: Dock order matters. Add header first, then fill content.
             CreateHeaderPanel();
-            
+            CreateContentPanel();
+
             CreateLoginPanel();
             CreateWaitingPanel();
             CreateSuccessPanel();
             CreateErrorPanel();
 
-            this.FormClosing += (s, e) => _cts?.Cancel();
-            this.Load += (s, e) => CenterActivePanel();
-            this.Resize += (s, e) => CenterActivePanel();
+            FormClosing += (s, e) => _cts?.Cancel();
+            Load += (s, e) => CenterActivePanel();
+            Resize += (s, e) => CenterActivePanel();
         }
 
-        [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
+[System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            var rect = this.ClientRectangle;
+            if (rect.Width <= 0 || rect.Height <= 0)
+            {
+                base.OnPaintBackground(e);
+                return;
+            }
+
+            using var brush = new LinearGradientBrush(rect, _colorBackground, _colorBackground2, LinearGradientMode.Vertical);
+            e.Graphics.FillRectangle(brush, rect);
+        }
+
+
         // ============ HEADER PANEL ============
+                // ============ HEADER PANEL ============
         private void CreateHeaderPanel()
         {
             _headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 70,
-                BackColor = _colorHeader,
-                Padding = new Padding(16, 12, 16, 12)
+                Height = 86,
+                BackColor = Color.Transparent,
+                Padding = new Padding(18, 14, 18, 14)
+            };
+
+            _headerPanel.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                using var brush = new LinearGradientBrush(
+                    _headerPanel.ClientRectangle,
+                    _colorHeader,
+                    _colorHeader2,
+                    LinearGradientMode.Vertical);
+
+                e.Graphics.FillRectangle(brush, _headerPanel.ClientRectangle);
+
+                using var pen = new Pen(_colorHeaderBorder, 1);
+                e.Graphics.DrawLine(pen, 0, _headerPanel.Height - 1, _headerPanel.Width, _headerPanel.Height - 1);
             };
 
             // Logo
             _logoBox = new PictureBox
             {
-                Size = new Size(48, 48),
-                Location = new Point(16, 11),
+                Size = new Size(54, 54),
+                Location = new Point(18, 16),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 BackColor = Color.Transparent
             };
@@ -152,24 +201,31 @@ namespace PatsKillerPro
             _lblTitle = new Label
             {
                 Text = "PatsKiller Pro",
-                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
                 ForeColor = _colorRed,
                 AutoSize = true,
-                Location = new Point(72, 22),
                 BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblTitle);
+
+            _headerPanel.Layout += (s, e) =>
+            {
+                // Vertically center title next to logo (robust across DPI)
+                var x = _logoBox.Right + 14;
+                var y = (_headerPanel.Height - _lblTitle.Height) / 2;
+                _lblTitle.Location = new Point(x, Math.Max(0, y));
+            };
 
             // Token/Status labels (hidden until logged in)
             _lblTokens = new Label { Visible = false, AutoSize = true, BackColor = Color.Transparent };
             _lblStatus = new Label { Visible = false, AutoSize = true, BackColor = Color.Transparent };
             _headerPanel.Controls.Add(_lblTokens);
             _headerPanel.Controls.Add(_lblStatus);
-            
-            // Subtitle in header (optional - hidden for cleaner look)
+
+            // Subtitle in header (unused in mockup)
             _lblSubtitle = new Label { Visible = false };
 
-            this.Controls.Add(_headerPanel);
+            Controls.Add(_headerPanel);
         }
 
         private void CreateContentPanel()
@@ -177,13 +233,15 @@ namespace PatsKillerPro
             _contentPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = _colorBackground,
-                Padding = new Padding(24)
+                BackColor = Color.Transparent,
+                Padding = new Padding(24, 28, 24, 24)
             };
-            this.Controls.Add(_contentPanel);
+
+            _contentPanel.Resize += (s, e) => CenterActivePanel();
+            Controls.Add(_contentPanel);
         }
 
-        private void LoadLogo()
+private void LoadLogo()
         {
             try
             {
@@ -239,7 +297,7 @@ namespace PatsKillerPro
                 
                 using (var bgBrush = new LinearGradientBrush(
                     new Point(0, 0), new Point(size, size),
-                    Color.FromArgb(26, 26, 46), Color.FromArgb(22, 33, 62)))
+                    _colorBackground, _colorBackground2))
                 {
                     g.FillRectangle(bgBrush, 0, 0, size, size);
                 }
@@ -261,7 +319,7 @@ namespace PatsKillerPro
                     g.FillRectangle(redBrush, offsetX + keySize * 0.85f, offsetY + keySize * 0.35f, keySize * 0.1f, keySize * 0.2f);
                 }
                 
-                using (var bgBrush = new SolidBrush(Color.FromArgb(26, 26, 46)))
+                using (var bgBrush = new SolidBrush(_colorBackground))
                 {
                     g.FillEllipse(bgBrush, offsetX + keySize * 0.12f, offsetY + keySize * 0.14f, keySize * 0.25f, keySize * 0.25f);
                 }
@@ -269,33 +327,70 @@ namespace PatsKillerPro
             return bmp;
         }
 
+        private Image CreateGoogleGIcon(int size)
+        {
+            // Simple vector-ish Google "G" (no external assets)
+            var bmp = new Bitmap(size, size);
+            using var g = Graphics.FromImage(bmp);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Color.Transparent);
+
+            var stroke = Math.Max(2f, size * 0.18f);
+            var inset = stroke / 2f;
+            var rect = new RectangleF(inset, inset, size - stroke, size - stroke);
+
+            using var blue = new Pen(Color.FromArgb(66, 133, 244), stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var red = new Pen(Color.FromArgb(234, 67, 53), stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var yellow = new Pen(Color.FromArgb(251, 188, 5), stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var green = new Pen(Color.FromArgb(52, 168, 83), stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+
+            // Approximate segments of the "G"
+            g.DrawArc(red, rect, 315, 90);
+            g.DrawArc(yellow, rect, 45, 90);
+            g.DrawArc(green, rect, 135, 80);
+            g.DrawArc(blue, rect, 215, 105);
+
+            // Horizontal bar
+            var y = size / 2f;
+            g.DrawLine(blue, size * 0.52f, y, size * 0.86f, y);
+
+            return bmp;
+        }
+
+
         // ============ LOGIN PANEL (Main Login UI) ============
+                // ============ LOGIN PANEL (Main Login UI) ============
         private void CreateLoginPanel()
         {
+            // Size is derived from form width + padding to prevent DPI clipping.
+            var panelW = Math.Max(320, ClientSize.Width - _contentPanel.Padding.Horizontal);
             _loginPanel = new Panel
             {
-                Size = new Size(372, 450),
-                BackColor = _colorBackground,
+                Size = new Size(panelW, 470),
+                BackColor = Color.Transparent,
                 Visible = false
             };
 
-            var y = 0;
-            var panelW = _loginPanel.Width;
+            var y = 8;
             var btnW = panelW;
 
-            // "Welcome" title - italic style
+            // "Welcome" title (script-like)
+            Font welcomeFont;
+            try { welcomeFont = new Font("Segoe Script", 38F, FontStyle.Italic); }
+            catch { welcomeFont = new Font("Segoe UI", 34F, FontStyle.Italic); }
+
             var lblWelcome = new Label
             {
                 Text = "Welcome",
-                Font = new Font("Segoe UI", 32F, FontStyle.Italic),
+                Font = welcomeFont,
                 ForeColor = _colorText,
-                Size = new Size(panelW, 50),
+                Size = new Size(panelW, 64),
                 Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblWelcome);
-            y += 50;
+            y += 66;
 
             // Subtitle
             var lblSubtitle = new Label
@@ -312,74 +407,85 @@ namespace PatsKillerPro
             y += 40;
 
             // ===== GOOGLE SIGN IN BUTTON =====
-            var btnGoogle = CreateRoundedButton("Continue with Google", btnW, 48);
+            var btnGoogle = CreateRoundedButton("Continue with Google", btnW, 52, 10);
             btnGoogle.Location = new Point(0, y);
             btnGoogle.BackColor = _colorGoogleBtn;
-            btnGoogle.ForeColor = Color.FromArgb(60, 60, 60);
+            btnGoogle.ForeColor = Color.FromArgb(55, 65, 81); // Slate
             btnGoogle.Font = new Font("Segoe UI Semibold", 12F);
-            btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
+            btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(210, 210, 210);
             btnGoogle.FlatAppearance.BorderSize = 1;
             btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
+            btnGoogle.Image = CreateGoogleGIcon(22);
+            btnGoogle.ImageAlign = ContentAlignment.MiddleLeft;
+            btnGoogle.TextImageRelation = TextImageRelation.ImageBeforeText;
+            btnGoogle.Padding = new Padding(16, 0, 16, 0);
             btnGoogle.Click += BtnGoogle_Click;
             _loginPanel.Controls.Add(btnGoogle);
-            y += 68;
+            y += 74;
 
             // Divider with lines
             var dividerPanel = new Panel
             {
-                Size = new Size(panelW, 20),
+                Size = new Size(panelW, 22),
                 Location = new Point(0, y),
                 BackColor = Color.Transparent
             };
-            dividerPanel.Paint += (s, e) =>
-            {
-                var lineY = 10;
-                var textWidth = 140;
-                var lineColor = Color.FromArgb(80, 80, 80);
-                using var pen = new Pen(lineColor, 1);
-                
-                // Left line
-                e.Graphics.DrawLine(pen, 0, lineY, (panelW - textWidth) / 2 - 10, lineY);
-                // Right line
-                e.Graphics.DrawLine(pen, (panelW + textWidth) / 2 + 10, lineY, panelW, lineY);
-            };
-            
+
             var lblDivider = new Label
             {
                 Text = "or sign in with email",
                 Font = new Font("Segoe UI", 10F),
                 ForeColor = _colorTextDim,
-                Size = new Size(panelW, 20),
-                Location = new Point(0, 0),
-                TextAlign = ContentAlignment.MiddleCenter,
+                AutoSize = true,
                 BackColor = Color.Transparent
             };
             dividerPanel.Controls.Add(lblDivider);
-            _loginPanel.Controls.Add(dividerPanel);
-            y += 35;
 
-            // Email field with floating label
-            var emailField = CreateFloatingLabelField("Email", "you@example.com", btnW, false);
+            dividerPanel.Layout += (s, e) =>
+            {
+                lblDivider.Location = new Point((dividerPanel.Width - lblDivider.Width) / 2, (dividerPanel.Height - lblDivider.Height) / 2);
+                dividerPanel.Invalidate();
+            };
+
+            dividerPanel.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                var midY = dividerPanel.Height / 2;
+                var gap = 14;
+                var leftEnd = lblDivider.Left - gap;
+                var rightStart = lblDivider.Right + gap;
+
+                using var pen = new Pen(Color.FromArgb(70, 82, 105), 1); // muted blue-gray
+
+                if (leftEnd > 0) e.Graphics.DrawLine(pen, 0, midY, leftEnd, midY);
+                if (rightStart < dividerPanel.Width) e.Graphics.DrawLine(pen, rightStart, midY, dividerPanel.Width, midY);
+            };
+
+            _loginPanel.Controls.Add(dividerPanel);
+            y += 38;
+
+            // Email field
+            var emailField = CreateFloatingLabelField("Email", "you@example.com", btnW, isPassword: false);
             emailField.Location = new Point(0, y);
             emailField.Name = "emailField";
             _loginPanel.Controls.Add(emailField);
-            y += 70;
+            y += 76;
 
-            // Password field with floating label
-            var passwordField = CreateFloatingLabelField("Password", "", btnW, true);
+            // Password field
+            var passwordField = CreateFloatingLabelField("Password", "", btnW, isPassword: true);
             passwordField.Location = new Point(0, y);
             passwordField.Name = "passwordField";
             _loginPanel.Controls.Add(passwordField);
-            y += 80;
+            y += 86;
 
-            // Sign In button (red)
-            var btnSignIn = CreateRoundedButton("Sign In", btnW, 48);
+            // Sign In button (brand pink)
+            var btnSignIn = CreateRoundedButton("Sign In", btnW, 56, 10);
             btnSignIn.Location = new Point(0, y);
-            btnSignIn.BackColor = _colorRed;
+            btnSignIn.BackColor = _colorRedDark;
             btnSignIn.ForeColor = Color.White;
             btnSignIn.Font = new Font("Segoe UI Semibold", 13F);
             btnSignIn.FlatAppearance.BorderSize = 0;
-            btnSignIn.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 50, 80);
+            btnSignIn.FlatAppearance.MouseOverBackColor = _colorRed;
             btnSignIn.Click += BtnSignIn_Click;
             _loginPanel.Controls.Add(btnSignIn);
 
@@ -387,87 +493,136 @@ namespace PatsKillerPro
         }
 
         /// <summary>
-        /// Creates a modern floating label input field
+        /// Creates a modern floating label input field (mockup style)
         /// </summary>
         private Panel CreateFloatingLabelField(string labelText, string placeholder, int width, bool isPassword)
         {
             var container = new Panel
             {
-                Size = new Size(width, 58),
+                Size = new Size(width, 62),
                 BackColor = Color.Transparent
             };
 
-            // Border panel (rounded appearance simulated)
-            var borderPanel = new Panel
-            {
-                Size = new Size(width, 50),
-                Location = new Point(0, 8),
-                BackColor = _colorInput
-            };
-            borderPanel.Paint += (s, e) =>
-            {
-                using var pen = new Pen(_colorBorder, 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, borderPanel.Width - 1, borderPanel.Height - 1);
-            };
+            var radius = 10;
+            var isFocused = false;
 
-            // Floating label
+            // Floating label (sits over the border)
             var lbl = new Label
             {
                 Text = labelText,
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(10, 0),
-                BackColor = _colorBackground,
+                Location = new Point(12, 0),
+                BackColor = _colorBackground, // close enough against the gradient
                 Padding = new Padding(4, 0, 4, 0)
             };
             container.Controls.Add(lbl);
+
+            // Border panel (owner-painted rounded rect)
+            var borderPanel = new Panel
+            {
+                Size = new Size(width, 54),
+                Location = new Point(0, 10),
+                BackColor = Color.Transparent
+            };
+
+            borderPanel.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                var rect = new Rectangle(0, 0, borderPanel.Width - 1, borderPanel.Height - 1);
+                using var path = CreateRoundedRectPath(rect, radius);
+
+                using var fill = new SolidBrush(_colorInput);
+                e.Graphics.FillPath(fill, path);
+
+                var borderColor = isFocused ? _colorRed : _colorBorder;
+                using var pen = new Pen(borderColor, 1);
+                e.Graphics.DrawPath(pen, path);
+            };
 
             // Text input
             var txt = new TextBox
             {
                 Name = "txt" + labelText.Replace(" ", ""),
-                Size = new Size(width - 24, 28),
-                Location = new Point(12, 11),
-                BackColor = _colorInput,
-                ForeColor = string.IsNullOrEmpty(placeholder) ? _colorText : _colorTextDim,
                 BorderStyle = BorderStyle.None,
-                Font = new Font("Segoe UI", 12F),
-                Text = placeholder,
+                BackColor = _colorInput,
+                ForeColor = _colorText,
+                Font = new Font("Segoe UI", 12.5F),
+                Location = new Point(16, 18),
+                Size = new Size(width - 16 - 16 - 44, 24),
+                PlaceholderText = placeholder,
                 UseSystemPasswordChar = isPassword
             };
 
-            // Placeholder behavior
-            if (!string.IsNullOrEmpty(placeholder))
+            txt.Enter += (s, e) => { isFocused = true; borderPanel.Invalidate(); };
+            txt.Leave += (s, e) => { isFocused = false; borderPanel.Invalidate(); };
+
+            borderPanel.Click += (s, e) => txt.Focus();
+            container.Click += (s, e) => txt.Focus();
+            lbl.Click += (s, e) => txt.Focus();
+
+            // Right-side action button (mockup "..." pill)
+            var btnAction = new Button
             {
-                txt.GotFocus += (s, e) =>
+                Size = new Size(34, 34),
+                Location = new Point(width - 16 - 34, 10),
+                Text = "⋯",
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                BackColor = _colorRedDark,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            btnAction.FlatAppearance.BorderSize = 0;
+            btnAction.Region = CreateRoundedRegion(btnAction.Width, btnAction.Height, 8);
+
+            if (isPassword)
+            {
+                var shown = false;
+                btnAction.Click += (s, e) =>
                 {
-                    if (txt.Text == placeholder)
-                    {
-                        txt.Text = "";
-                        txt.ForeColor = _colorText;
-                    }
+                    shown = !shown;
+                    txt.UseSystemPasswordChar = !shown;
+                    txt.Focus();
+                    txt.SelectionStart = txt.TextLength;
                 };
-                txt.LostFocus += (s, e) =>
+            }
+            else
+            {
+                btnAction.Click += (s, e) =>
                 {
-                    if (string.IsNullOrWhiteSpace(txt.Text))
+                    // Practical utility: click toggles clear / paste
+                    if (!string.IsNullOrWhiteSpace(txt.Text))
                     {
-                        txt.Text = placeholder;
-                        txt.ForeColor = _colorTextDim;
+                        txt.Clear();
                     }
+                    else if (Clipboard.ContainsText())
+                    {
+                        txt.Text = Clipboard.GetText();
+                        txt.SelectionStart = txt.TextLength;
+                    }
+
+                    txt.Focus();
                 };
             }
 
             borderPanel.Controls.Add(txt);
+            borderPanel.Controls.Add(btnAction);
             container.Controls.Add(borderPanel);
 
             return container;
         }
 
         /// <summary>
-        /// Creates a button with rounded corners
+        /// Creates a button with rounded corners (mockup style)
         /// </summary>
         private Button CreateRoundedButton(string text, int width, int height)
+            => CreateRoundedButton(text, width, height, 10);
+
+        private Button CreateRoundedButton(string text, int width, int height, int radius)
         {
             var btn = new Button
             {
@@ -475,37 +630,68 @@ namespace PatsKillerPro
                 Size = new Size(width, height),
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
-                TextAlign = ContentAlignment.MiddleCenter
+                TextAlign = ContentAlignment.MiddleCenter,
+                UseVisualStyleBackColor = false
             };
-            
-            // Create rounded region
-            btn.Region = CreateRoundedRegion(width, height, 6);
-            
+
+            btn.Region = CreateRoundedRegion(width, height, radius);
+
+            // Keep region correct if DPI changes / control is resized
+            btn.Resize += (s, e) =>
+            {
+                if (btn.Width > 0 && btn.Height > 0)
+                    btn.Region = CreateRoundedRegion(btn.Width, btn.Height, radius);
+            };
+
             return btn;
         }
 
         private Region CreateRoundedRegion(int width, int height, int radius)
         {
-            var path = new GraphicsPath();
             var rect = new Rectangle(0, 0, width, height);
-            var diameter = radius * 2;
-            
-            path.AddArc(rect.X, rect.Y, diameter, diameter, 180, 90);
-            path.AddArc(rect.Right - diameter, rect.Y, diameter, diameter, 270, 90);
-            path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
-            path.AddArc(rect.X, rect.Bottom - diameter, diameter, diameter, 90, 90);
-            path.CloseFigure();
-            
+            var path = CreateRoundedRectPath(rect, radius);
             return new Region(path);
         }
 
-        // ============ WAITING PANEL (Step 2) ============
+        private GraphicsPath CreateRoundedRectPath(Rectangle rect, int radius)
+        {
+            var path = new GraphicsPath();
+            if (radius <= 0)
+            {
+                path.AddRectangle(rect);
+                path.CloseFigure();
+                return path;
+            }
+
+            var diameter = radius * 2;
+            var arcRect = new Rectangle(rect.Location, new Size(diameter, diameter));
+
+            // Top-left
+            path.AddArc(arcRect, 180, 90);
+
+            // Top-right
+            arcRect.X = rect.Right - diameter;
+            path.AddArc(arcRect, 270, 90);
+
+            // Bottom-right
+            arcRect.Y = rect.Bottom - diameter;
+            path.AddArc(arcRect, 0, 90);
+
+            // Bottom-left
+            arcRect.X = rect.Left;
+            path.AddArc(arcRect, 90, 90);
+
+            path.CloseFigure();
+            return path;
+        }
+
+// ============ WAITING PANEL (Step 2) ============
         private void CreateWaitingPanel()
         {
             _waitingPanel = new Panel
             {
                 Size = new Size(372, 300),
-                BackColor = _colorBackground,
+                BackColor = Color.Transparent,
                 Visible = false
             };
 
@@ -575,7 +761,7 @@ namespace PatsKillerPro
             _successPanel = new Panel
             {
                 Size = new Size(372, 320),
-                BackColor = _colorBackground,
+                BackColor = Color.Transparent,
                 Visible = false
             };
 
@@ -641,7 +827,7 @@ namespace PatsKillerPro
             _errorPanel = new Panel
             {
                 Size = new Size(372, 300),
-                BackColor = _colorBackground,
+                BackColor = Color.Transparent,
                 Visible = false
             };
 
@@ -750,25 +936,25 @@ namespace PatsKillerPro
             CenterActivePanel();
         }
 
-        private void CenterActivePanel()
+                private void CenterActivePanel()
         {
+            if (_contentPanel == null) return;
+
             Panel? activePanel = null;
             if (_loginPanel.Visible) activePanel = _loginPanel;
             else if (_waitingPanel.Visible) activePanel = _waitingPanel;
             else if (_successPanel.Visible) activePanel = _successPanel;
             else if (_errorPanel.Visible) activePanel = _errorPanel;
 
-            if (activePanel != null)
-            {
-                var headerHeight = _headerPanel?.Height ?? 70;
-                var availableHeight = this.ClientSize.Height - headerHeight;
-                var x = (_contentPanel.ClientSize.Width - activePanel.Width) / 2;
-                var y = (availableHeight - activePanel.Height) / 2;
-                activePanel.Location = new Point(Math.Max(0, x), Math.Max(0, y));
-            }
+            if (activePanel == null) return;
+
+            var x = (_contentPanel.ClientSize.Width - activePanel.Width) / 2;
+            var y = (_contentPanel.ClientSize.Height - activePanel.Height) / 2;
+
+            activePanel.Location = new Point(Math.Max(0, x), Math.Max(0, y));
         }
 
-        // ============ EVENT HANDLERS ============
+// ============ EVENT HANDLERS ============
         private async void BtnGoogle_Click(object? sender, EventArgs e)
         {
             await StartGoogleAuthAsync();
