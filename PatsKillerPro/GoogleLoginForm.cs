@@ -88,16 +88,16 @@ namespace PatsKillerPro
         // ============ INITIALIZATION ============
         private void InitializeComponent()
         {
-            // Form settings - large size for login dialog
+            // Form settings - extra large for high DPI
             this.Text = "PatsKiller Pro - Sign In";
-            this.ClientSize = new Size(550, 700);
-            this.MinimumSize = new Size(550, 700);
+            this.ClientSize = new Size(600, 800);
+            this.MinimumSize = new Size(600, 800);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.BackColor = _colorBackground;
             this.Font = new Font("Segoe UI", 10F);
-            this.AutoScaleMode = AutoScaleMode.None; // Disable auto-scaling to prevent shrinking
+            this.AutoScaleMode = AutoScaleMode.None;
             this.DoubleBuffered = true;
 
             // Enable dark title bar on Windows 10/11
@@ -132,15 +132,15 @@ namespace PatsKillerPro
             _headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 80,
+                Height = 90,
                 BackColor = _colorHeader
             };
 
             // Logo
             _logoBox = new PictureBox
             {
-                Size = new Size(55, 55),
-                Location = new Point(18, 12),
+                Size = new Size(60, 60),
+                Location = new Point(20, 15),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 BackColor = Color.Transparent
             };
@@ -151,10 +151,10 @@ namespace PatsKillerPro
             _lblTitle = new Label
             {
                 Text = "PatsKiller Pro",
-                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
                 ForeColor = _colorText,
                 AutoSize = true,
-                Location = new Point(82, 14),
+                Location = new Point(90, 15),
                 BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblTitle);
@@ -163,10 +163,10 @@ namespace PatsKillerPro
             _lblSubtitle = new Label
             {
                 Text = "Ford & Lincoln PATS Solution",
-                Font = new Font("Segoe UI", 11F),
+                Font = new Font("Segoe UI", 12F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(84, 46),
+                Location = new Point(92, 50),
                 BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblSubtitle);
@@ -300,9 +300,10 @@ namespace PatsKillerPro
         {
             _loginPanel = new Panel
             {
-                Size = new Size(500, 580),
+                Size = new Size(540, 680),
                 BackColor = _colorPanel,
-                Visible = false
+                Visible = false,
+                AutoScroll = true // Enable scroll if content doesn't fit
             };
 
             // Round corners effect via region
@@ -314,49 +315,49 @@ namespace PatsKillerPro
                 e.Graphics.DrawPath(pen, path);
             };
 
-            var y = 50; // More top padding
+            var y = 60; // Extra top padding
             var panelW = _loginPanel.Width;
-            var btnW = 420;
+            var btnW = 460;
             var padL = (panelW - btnW) / 2;
 
-            // "Welcome Back" title (no logo - already in header)
+            // "Welcome Back" title
             var lblWelcome = new Label
             {
                 Text = "Welcome Back",
-                Font = new Font("Segoe UI", 28F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 32F, FontStyle.Bold),
                 ForeColor = _colorText,
-                Size = new Size(panelW - 20, 55),
-                Location = new Point(10, y),
+                Size = new Size(panelW - 40, 65),
+                Location = new Point(20, y),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblWelcome);
-            y += 60;
+            y += 75;
 
             // Subtitle
             var lblSubtitle = new Label
             {
                 Text = "Sign in to access your tokens",
-                Font = new Font("Segoe UI", 13F),
+                Font = new Font("Segoe UI", 14F),
                 ForeColor = _colorTextDim,
-                Size = new Size(panelW - 20, 35),
-                Location = new Point(10, y),
+                Size = new Size(panelW - 40, 40),
+                Location = new Point(20, y),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblSubtitle);
-            y += 50;
+            y += 60;
 
             // ===== GOOGLE SIGN IN BUTTON =====
             var btnGoogle = new Button
             {
                 Text = "Continue with Google",
-                Size = new Size(btnW, 58),
+                Size = new Size(btnW, 65),
                 Location = new Point(padL, y),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorGoogleBtn,
                 ForeColor = Color.FromArgb(50, 50, 50),
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 15F, FontStyle.Bold),
                 Cursor = Cursors.Hand,
                 TextAlign = ContentAlignment.MiddleCenter
             };
@@ -365,89 +366,89 @@ namespace PatsKillerPro
             btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(240, 240, 240);
             btnGoogle.Click += BtnGoogle_Click;
             _loginPanel.Controls.Add(btnGoogle);
-            y += 75;
+            y += 85;
 
             // Divider
             var lblDivider = new Label
             {
                 Text = "───────  or sign in with email  ───────",
-                Font = new Font("Segoe UI", 11F),
+                Font = new Font("Segoe UI", 12F),
                 ForeColor = _colorTextDim,
-                Size = new Size(btnW, 30),
+                Size = new Size(btnW, 35),
                 Location = new Point(padL, y),
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblDivider);
-            y += 45;
+            y += 50;
 
             // Email label
             var lblEmail = new Label
             {
                 Text = "Email",
-                Font = new Font("Segoe UI", 12F),
+                Font = new Font("Segoe UI", 13F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
                 Location = new Point(padL, y),
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblEmail);
-            y += 30;
+            y += 35;
 
             // Email input
             var txtEmail = new TextBox
             {
                 Name = "txtEmail",
-                Size = new Size(btnW, 42),
+                Size = new Size(btnW, 48),
                 Location = new Point(padL, y),
                 BackColor = _colorInput,
                 ForeColor = _colorTextDim,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 13F),
+                Font = new Font("Segoe UI", 14F),
                 Text = "you@example.com"
             };
             txtEmail.GotFocus += (s, e) => { if (txtEmail.Text == "you@example.com") { txtEmail.Text = ""; txtEmail.ForeColor = _colorText; } };
             _loginPanel.Controls.Add(txtEmail);
-            y += 55;
+            y += 65;
 
             // Password label
             var lblPassword = new Label
             {
                 Text = "Password",
-                Font = new Font("Segoe UI", 12F),
+                Font = new Font("Segoe UI", 13F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
                 Location = new Point(padL, y),
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblPassword);
-            y += 30;
+            y += 35;
 
             // Password input
             var txtPassword = new TextBox
             {
                 Name = "txtPassword",
-                Size = new Size(btnW, 42),
+                Size = new Size(btnW, 48),
                 Location = new Point(padL, y),
                 BackColor = _colorInput,
                 ForeColor = _colorText,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 13F),
+                Font = new Font("Segoe UI", 14F),
                 UseSystemPasswordChar = true
             };
             _loginPanel.Controls.Add(txtPassword);
-            y += 60;
+            y += 70;
 
             // Sign In button
             var btnSignIn = new Button
             {
                 Text = "Sign In",
-                Size = new Size(btnW, 55),
+                Size = new Size(btnW, 60),
                 Location = new Point(padL, y),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorRed,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 15F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
             btnSignIn.FlatAppearance.BorderSize = 0;
