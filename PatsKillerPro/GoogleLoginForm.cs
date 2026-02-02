@@ -76,8 +76,10 @@ private Panel _waitingPanel = null!;
         private readonly Color _colorBorder = ColorTranslator.FromHtml("#374151");
 
         // Typography
-        private readonly Color _colorText = ColorTranslator.FromHtml("#F3F4F6");
-        private readonly Color _colorTextDim = ColorTranslator.FromHtml("#9CA3AF");
+        private readonly Color _colorText = ColorTranslator.FromHtml("#F8FAFC");
+        private readonly Color _colorTextDim = ColorTranslator.FromHtml("#CBD5E1");     // secondary text
+        private readonly Color _colorTextMuted = ColorTranslator.FromHtml("#94A3B8");   // tertiary text
+        private readonly Color _colorLabelText = ColorTranslator.FromHtml("#D1D5DB");   // field labels
 
         // Brand / status
         private readonly Color _colorRed = ColorTranslator.FromHtml("#E94796");            // PatsKiller Pink
@@ -194,6 +196,7 @@ private Panel _waitingPanel = null!;
                 Dock = DockStyle.Top,
                 Height = 86,
                 BackColor = Color.Transparent,
+                UseCompatibleTextRendering = true,
                 Padding = new Padding(18, 14, 18, 14)
             };
 
@@ -233,6 +236,7 @@ private Panel _waitingPanel = null!;
                 AutoSize = false,
                 AutoEllipsis = true,
                 BackColor = Color.Transparent,
+                UseCompatibleTextRendering = true,
                 TextAlign = ContentAlignment.MiddleLeft
             };
             _headerPanel.Controls.Add(_lblTitle);
@@ -448,9 +452,11 @@ private void LoadLogo()
             {
                 Name = "lblWelcome",
                 Text = "Welcome",
+                Font = new Font("Segoe UI", 44F, FontStyle.Italic),
                 ForeColor = _colorText,
                 BackColor = Color.Transparent,
                 AutoSize = false,
+                UseCompatibleTextRendering = true,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Margin = new Padding(0, 6, 0, 0)
             };
@@ -460,12 +466,13 @@ private void LoadLogo()
             {
                 Name = "lblLoginSubtitle",
                 Text = "Sign in to access your account",
-                Font = new Font("Segoe UI", 11F),
+                Font = new Font("Segoe UI", 11.5F),
                 ForeColor = _colorTextDim,
                 BackColor = Color.Transparent,
                 AutoSize = false,
+                UseCompatibleTextRendering = true,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Margin = new Padding(0, 0, 0, 16)
+                Margin = new Padding(0, 2, 0, 18)
             };
 
             // ===== Google Button =====
@@ -539,11 +546,12 @@ private void LoadLogo()
             return new Label
             {
                 Text = text,
-                Font = new Font("Segoe UI", 10F),
-                ForeColor = _colorTextDim,
+                Font = new Font("Segoe UI", 10.5F),
+                ForeColor = _colorLabelText,
                 BackColor = Color.Transparent,
                 AutoSize = false,
                 Height = 18,
+                UseCompatibleTextRendering = true,
                 TextAlign = ContentAlignment.MiddleLeft
             };
         }
@@ -559,10 +567,11 @@ private void LoadLogo()
             var lbl = new Label
             {
                 Text = "or sign in with email",
-                Font = new Font("Segoe UI", 10F),
-                ForeColor = _colorTextDim,
+                Font = new Font("Segoe UI", 10.5F),
+                ForeColor = _colorTextMuted,
                 AutoSize = true,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                UseCompatibleTextRendering = true
             };
             row.Controls.Add(lbl);
 
@@ -580,7 +589,7 @@ private void LoadLogo()
                 var leftEnd = lbl.Left - gap;
                 var rightStart = lbl.Right + gap;
 
-                using var pen = new Pen(Color.FromArgb(70, 82, 105), 1);
+                using var pen = new Pen(Color.FromArgb(110, 82, 105), 1);
                 if (leftEnd > 0) e.Graphics.DrawLine(pen, 0, midY, leftEnd, midY);
                 if (rightStart < row.Width) e.Graphics.DrawLine(pen, rightStart, midY, row.Width, midY);
             };
@@ -821,7 +830,14 @@ private void LoadLogo()
             var subtitle = _loginStack.Controls["lblLoginSubtitle"] as Label;
             if (subtitle != null)
             {
-                subtitle.Height = 24;
+                // Measure to avoid the "text hiding behind button" look on some DPI / font metrics.
+                var sz = TextRenderer.MeasureText(
+                    subtitle.Text,
+                    subtitle.Font,
+                    new Size(w, int.MaxValue),
+                    TextFormatFlags.WordBreak | TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+
+                subtitle.Height = Math.Max(28, sz.Height + 2);
             }
 
             // Buttons sizing
@@ -983,7 +999,7 @@ private void LoadLogo()
             {
                 Text = "Complete sign in in your browser.\nThis window will update automatically.",
                 Font = new Font("Segoe UI", 11F),
-                ForeColor = _colorTextDim,
+                ForeColor = _colorLabelText,
                 Size = new Size(panelW, 50),
                 Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -1054,7 +1070,7 @@ private void LoadLogo()
                 Name = "lblSuccessEmail",
                 Text = "",
                 Font = new Font("Segoe UI", 12F),
-                ForeColor = _colorTextDim,
+                ForeColor = _colorLabelText,
                 Size = new Size(panelW, 30),
                 Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -1120,7 +1136,7 @@ private void LoadLogo()
                 Name = "lblErrorMessage",
                 Text = "",
                 Font = new Font("Segoe UI", 11F),
-                ForeColor = _colorTextDim,
+                ForeColor = _colorLabelText,
                 Size = new Size(panelW, 50),
                 Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
