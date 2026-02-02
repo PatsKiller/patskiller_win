@@ -8,7 +8,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using PatsKillerPro.Utils;
 
 namespace PatsKillerPro
 {
@@ -29,7 +28,8 @@ namespace PatsKillerPro
         
         // Content panels for different states
         private Panel _loginPanel = null!;
-        private Panel _waitingPanel = null!;
+                private FlowLayoutPanel _loginStack = null!;
+private Panel _waitingPanel = null!;
         private Panel _successPanel = null!;
         private Panel _errorPanel = null!;
 
@@ -136,7 +136,8 @@ namespace PatsKillerPro
             CreateErrorPanel();
 
             FormClosing += (s, e) => _cts?.Cancel();
-            Load += (s, e) => CenterActivePanel();
+            Load += (s, e) => { EnforceDefaultWindowSize(); UpdateResponsiveLayout(); CenterActivePanel(); };
+            Shown += (s, e) => { EnforceDefaultWindowSize(); UpdateResponsiveLayout(); CenterActivePanel(); };
             Resize += (s, e) => CenterActivePanel();
         }
 
@@ -235,12 +236,42 @@ namespace PatsKillerPro
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.Transparent,
-                Padding = new Padding(24, 28, 24, 24)
+                Padding = new Padding(24, 22, 24, 24),
+                AutoScroll = true
             };
 
-            _contentPanel.Resize += (s, e) => CenterActivePanel();
+            _contentPanel.Resize += (s, e) =>
+            {
+                UpdateResponsiveLayout();
+                CenterActivePanel();
+            };
+
             Controls.Add(_contentPanel);
         }
+
+        private readonly Size _desiredClientSize = new Size(460, 660);
+
+        private void EnforceDefaultWindowSize()
+        {
+            try
+            {
+                // Some apps restore window size from settings; enforce a clean minimum so the mockup layout doesn't clip.
+                if (ClientSize.Width < _desiredClientSize.Width || ClientSize.Height < _desiredClientSize.Height)
+                {
+                    ClientSize = _desiredClientSize;
+                }
+
+                // Keep the form non-resizable unless you explicitly change it.
+                FormBorderStyle = FormBorderStyle.FixedSingle;
+                MaximizeBox = false;
+                MinimizeBox = true;
+
+                // Also enforce MinimumSize in case something overrides it.
+                MinimumSize = new Size(_desiredClientSize.Width, _desiredClientSize.Height);
+            }
+            catch { /* no-op */ }
+        }
+
 
 private void LoadLogo()
         {
@@ -360,65 +391,62 @@ private void LoadLogo()
 
 
         // ============ LOGIN PANEL (Main Login UI) ============
-                // ============ LOGIN PANEL (Main Login UI) ============
+
+        // ============ LOGIN PANEL (Main Login UI) ============
         private void CreateLoginPanel()
         {
-            // Size is derived from form width + padding to prevent DPI clipping.
-            var panelW = Math.Max(320, ClientSize.Width - _contentPanel.Padding.Horizontal);
             _loginPanel = new Panel
             {
-                Size = new Size(panelW, 520),
                 BackColor = Color.Transparent,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Visible = false
             };
 
-            var y = 8;
-            var btnW = panelW;
+            _loginStack = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
 
-            // "Welcome" title (script-like)
-            Font welcomeFont;
-            try { welcomeFont = new Font("Segoe Script", 38F, FontStyle.Italic); }
-            catch { welcomeFont = new Font("Segoe UI", 34F, FontStyle.Italic); }
+            _loginPanel.Controls.Add(_loginStack);
 
-            var welcomeSize = TextRenderer.MeasureText("Welcome", welcomeFont);
-            var welcomeH = Math.Max(80, welcomeSize.Height + 18);
-
+            // ===== Welcome =====
             var lblWelcome = new Label
             {
+                Name = "lblWelcome",
                 Text = "Welcome",
-                Font = welcomeFont,
                 ForeColor = _colorText,
-                Size = new Size(panelW, welcomeH),
-                Location = new Point(0, y),
-                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent,
-                Padding = new Padding(0, 8, 0, 0),
-                UseCompatibleTextRendering = true
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Margin = new Padding(0, 6, 0, 0)
             };
-            _loginPanel.Controls.Add(lblWelcome);
-            y += welcomeH + 6;
 
-            // Subtitle
+            // ===== Subtitle =====
             var lblSubtitle = new Label
             {
+                Name = "lblLoginSubtitle",
                 Text = "Sign in to access your account",
                 Font = new Font("Segoe UI", 11F),
                 ForeColor = _colorTextDim,
-                Size = new Size(panelW, 24),
-                Location = new Point(0, y),
+                BackColor = Color.Transparent,
+                AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                BackColor = Color.Transparent
+                Margin = new Padding(0, 0, 0, 16)
             };
-            _loginPanel.Controls.Add(lblSubtitle);
-            y += 40;
 
-            // ===== GOOGLE SIGN IN BUTTON =====
-            var btnGoogle = CreateRoundedButton("Continue with Google", btnW, 52, 10);
-            btnGoogle.Location = new Point(0, y);
+            // ===== Google Button =====
+            var btnGoogle = CreateRoundedButton("Continue with Google", 10, 52, 10);
+            btnGoogle.Name = "btnGoogle";
             btnGoogle.BackColor = _colorGoogleBtn;
-            btnGoogle.ForeColor = Color.FromArgb(55, 65, 81); // Slate
+            btnGoogle.ForeColor = Color.FromArgb(55, 65, 81);
             btnGoogle.Font = new Font("Segoe UI Semibold", 11.5F);
-            btnGoogle.TextAlign = ContentAlignment.MiddleCenter;
             btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(210, 210, 210);
             btnGoogle.FlatAppearance.BorderSize = 1;
             btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
@@ -426,20 +454,82 @@ private void LoadLogo()
             btnGoogle.ImageAlign = ContentAlignment.MiddleLeft;
             btnGoogle.TextImageRelation = TextImageRelation.ImageBeforeText;
             btnGoogle.Padding = new Padding(18, 0, 18, 0);
-            FitButtonText(btnGoogle, 9.5F);
+            btnGoogle.Margin = new Padding(0, 0, 0, 16);
             btnGoogle.Click += BtnGoogle_Click;
-            _loginPanel.Controls.Add(btnGoogle);
-            y += 74;
 
-            // Divider with lines
-            var dividerPanel = new Panel
+            // ===== Divider =====
+            var divider = CreateDividerRow();
+            divider.Name = "dividerRow";
+            divider.Margin = new Padding(0, 0, 0, 12);
+
+            // ===== Email Label + Box =====
+            var lblEmail = CreateFieldLabel("Email");
+            lblEmail.Name = "lblEmail";
+            lblEmail.Margin = new Padding(0, 0, 0, 6);
+
+            var emailBox = CreateInputBox("you@example.com", isPassword: false);
+            emailBox.Name = "emailBox";
+            emailBox.Margin = new Padding(0, 0, 0, 14);
+
+            // ===== Password Label + Box =====
+            var lblPassword = CreateFieldLabel("Password");
+            lblPassword.Name = "lblPassword";
+            lblPassword.Margin = new Padding(0, 0, 0, 6);
+
+            var passwordBox = CreateInputBox("", isPassword: true);
+            passwordBox.Name = "passwordBox";
+            passwordBox.Margin = new Padding(0, 0, 0, 18);
+
+            // ===== Sign In =====
+            var btnSignIn = CreateRoundedButton("Sign In", 10, 56, 10);
+            btnSignIn.Name = "btnSignIn";
+            btnSignIn.BackColor = _colorRedDark;
+            btnSignIn.ForeColor = Color.White;
+            btnSignIn.Font = new Font("Segoe UI Semibold", 13F);
+            btnSignIn.FlatAppearance.BorderSize = 0;
+            btnSignIn.FlatAppearance.MouseOverBackColor = _colorRed;
+            btnSignIn.Margin = new Padding(0, 0, 0, 0);
+            btnSignIn.Click += BtnSignIn_Click;
+
+            _loginStack.Controls.Add(lblWelcome);
+            _loginStack.Controls.Add(lblSubtitle);
+            _loginStack.Controls.Add(btnGoogle);
+            _loginStack.Controls.Add(divider);
+            _loginStack.Controls.Add(lblEmail);
+            _loginStack.Controls.Add(emailBox);
+            _loginStack.Controls.Add(lblPassword);
+            _loginStack.Controls.Add(passwordBox);
+            _loginStack.Controls.Add(btnSignIn);
+
+            _contentPanel.Controls.Add(_loginPanel);
+
+            // Initial sizing pass
+            UpdateResponsiveLayout();
+        }
+
+        private Label CreateFieldLabel(string text)
+        {
+            return new Label
             {
-                Size = new Size(panelW, 22),
-                Location = new Point(0, y),
-                BackColor = Color.Transparent
+                Text = text,
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = _colorTextDim,
+                BackColor = Color.Transparent,
+                AutoSize = false,
+                Height = 18,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+        }
+
+        private Panel CreateDividerRow()
+        {
+            var row = new Panel
+            {
+                BackColor = Color.Transparent,
+                Height = 26
             };
 
-            var lblDivider = new Label
+            var lbl = new Label
             {
                 Text = "or sign in with email",
                 Font = new Font("Segoe UI", 10F),
@@ -447,91 +537,49 @@ private void LoadLogo()
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            dividerPanel.Controls.Add(lblDivider);
+            row.Controls.Add(lbl);
 
-            dividerPanel.Layout += (s, e) =>
+            row.Resize += (s, e) =>
             {
-                lblDivider.Location = new Point((dividerPanel.Width - lblDivider.Width) / 2, (dividerPanel.Height - lblDivider.Height) / 2);
-                dividerPanel.Invalidate();
+                lbl.Location = new Point((row.Width - lbl.Width) / 2, (row.Height - lbl.Height) / 2);
+                row.Invalidate();
             };
 
-            dividerPanel.Paint += (s, e) =>
+            row.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                var midY = dividerPanel.Height / 2;
+                var midY = row.Height / 2;
                 var gap = 14;
-                var leftEnd = lblDivider.Left - gap;
-                var rightStart = lblDivider.Right + gap;
+                var leftEnd = lbl.Left - gap;
+                var rightStart = lbl.Right + gap;
 
-                using var pen = new Pen(Color.FromArgb(70, 82, 105), 1); // muted blue-gray
-
+                using var pen = new Pen(Color.FromArgb(70, 82, 105), 1);
                 if (leftEnd > 0) e.Graphics.DrawLine(pen, 0, midY, leftEnd, midY);
-                if (rightStart < dividerPanel.Width) e.Graphics.DrawLine(pen, rightStart, midY, dividerPanel.Width, midY);
+                if (rightStart < row.Width) e.Graphics.DrawLine(pen, rightStart, midY, row.Width, midY);
             };
 
-            _loginPanel.Controls.Add(dividerPanel);
-            y += 38;
-
-            // Email field
-            var emailField = CreateFloatingLabelField("Email", "you@example.com", btnW, isPassword: false);
-            emailField.Location = new Point(0, y);
-            emailField.Name = "emailField";
-            _loginPanel.Controls.Add(emailField);
-            y += 76;
-
-            // Password field
-            var passwordField = CreateFloatingLabelField("Password", "", btnW, isPassword: true);
-            passwordField.Location = new Point(0, y);
-            passwordField.Name = "passwordField";
-            _loginPanel.Controls.Add(passwordField);
-            y += 86;
-
-            // Sign In button (brand pink)
-            var btnSignIn = CreateRoundedButton("Sign In", btnW, 56, 10);
-            btnSignIn.Location = new Point(0, y);
-            btnSignIn.BackColor = _colorRedDark;
-            btnSignIn.ForeColor = Color.White;
-            btnSignIn.Font = new Font("Segoe UI Semibold", 13F);
-            btnSignIn.FlatAppearance.BorderSize = 0;
-            btnSignIn.FlatAppearance.MouseOverBackColor = _colorRed;
-            btnSignIn.Click += BtnSignIn_Click;
-            _loginPanel.Controls.Add(btnSignIn);
-
-            _contentPanel.Controls.Add(_loginPanel);
+            return row;
         }
+
         /// <summary>
-        /// Creates a modern floating label input field (mockup style)
+        /// Input box matching mockup: label is above, box is a rounded slate surface with a pink action pill.
         /// </summary>
-        private Panel CreateFloatingLabelField(string labelText, string placeholder, int width, bool isPassword)
+        private Panel CreateInputBox(string placeholder, bool isPassword)
         {
             var container = new Panel
             {
-                Size = new Size(width, 62),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Height = 54
             };
 
-            var radius = 10;
+            const int radius = 10;
+            const int pillSize = 34;
             var isFocused = false;
 
-            // Floating label (sits over the border)
-            var lbl = new Label
-            {
-                Text = labelText,
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                Location = new Point(12, 0),
-                BackColor = _colorBackground, // close enough against the gradient
-                Padding = new Padding(4, 0, 4, 0)
-            };
-            container.Controls.Add(lbl);
-
-            // Border panel (owner-painted rounded rect)
             var borderPanel = new Panel
             {
-                Size = new Size(width, 54),
-                Location = new Point(0, 10),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Dock = DockStyle.Fill
             };
 
             borderPanel.Paint += (s, e) =>
@@ -549,19 +597,12 @@ private void LoadLogo()
                 e.Graphics.DrawPath(pen, path);
             };
 
-            // Right-side dots pill (mockup "..." action)
-            const int dotSize = 28;
-
-            // Text input
             var txt = new TextBox
             {
-                Name = "txt" + labelText.Replace(" ", ""),
                 BorderStyle = BorderStyle.None,
                 BackColor = _colorInput,
                 ForeColor = _colorText,
                 Font = new Font("Segoe UI", 12.5F),
-                Location = new Point(16, 18),
-                Size = new Size(Math.Max(10, width - 16 - 16 - dotSize - 14), 24),
                 PlaceholderText = placeholder,
                 UseSystemPasswordChar = isPassword
             };
@@ -569,39 +610,34 @@ private void LoadLogo()
             txt.Enter += (s, e) => { isFocused = true; borderPanel.Invalidate(); };
             txt.Leave += (s, e) => { isFocused = false; borderPanel.Invalidate(); };
 
-            var btnAction = new Button
+            var btnPill = new Button
             {
-                Size = new Size(dotSize, dotSize),
-                Location = new Point(width - 16 - dotSize, (borderPanel.Height - dotSize) / 2),
+                Size = new Size(pillSize, pillSize),
                 Text = "",
                 BackColor = _colorRedDark,
-                ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 TabStop = false
             };
-            btnAction.FlatAppearance.BorderSize = 0;
-            btnAction.Region = CreateRoundedRegion(btnAction.Width, btnAction.Height, 10);
+            btnPill.FlatAppearance.BorderSize = 0;
+            btnPill.Region = CreateRoundedRegion(pillSize, pillSize, 10);
 
-            btnAction.MouseEnter += (s, e) => { btnAction.BackColor = _colorRed; btnAction.Invalidate(); };
-            btnAction.MouseLeave += (s, e) => { btnAction.BackColor = _colorRedDark; btnAction.Invalidate(); };
+            btnPill.MouseEnter += (s, e) => { btnPill.BackColor = _colorRed; btnPill.Invalidate(); };
+            btnPill.MouseLeave += (s, e) => { btnPill.BackColor = _colorRedDark; btnPill.Invalidate(); };
 
-            btnAction.Paint += (s, e) =>
+            btnPill.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-
-                // Ensure a clean fill (WinForms can skip painting when Region is set)
-                using var path = CreateRoundedRectPath(new Rectangle(0, 0, dotSize - 1, dotSize - 1), 10);
-                using var bg = new SolidBrush(btnAction.BackColor);
+                using var path = CreateRoundedRectPath(new Rectangle(0, 0, pillSize - 1, pillSize - 1), 10);
+                using var bg = new SolidBrush(btnPill.BackColor);
                 e.Graphics.FillPath(bg, path);
 
-                // Draw 3 centered dots
                 using var dotBrush = new SolidBrush(Color.White);
                 const int r = 2;
                 const int gap = 6;
                 int totalW = (r * 2 * 3) + (gap * 2);
-                int startX = (dotSize - totalW) / 2;
-                int cy = dotSize / 2;
+                int startX = (pillSize - totalW) / 2;
+                int cy = pillSize / 2;
 
                 for (int i = 0; i < 3; i++)
                 {
@@ -613,7 +649,7 @@ private void LoadLogo()
             if (isPassword)
             {
                 var shown = false;
-                btnAction.Click += (s, e) =>
+                btnPill.Click += (s, e) =>
                 {
                     shown = !shown;
                     txt.UseSystemPasswordChar = !shown;
@@ -623,33 +659,164 @@ private void LoadLogo()
             }
             else
             {
-                btnAction.Click += (s, e) =>
+                btnPill.Click += (s, e) =>
                 {
-                    // Practical utility: click toggles clear / paste
-                    if (!string.IsNullOrWhiteSpace(txt.Text))
-                    {
-                        txt.Clear();
-                    }
+                    if (!string.IsNullOrWhiteSpace(txt.Text)) txt.Clear();
                     else if (Clipboard.ContainsText())
                     {
                         txt.Text = Clipboard.GetText();
                         txt.SelectionStart = txt.TextLength;
                     }
-
                     txt.Focus();
                 };
             }
 
+            // Layout inside the border panel
             borderPanel.Controls.Add(txt);
-            borderPanel.Controls.Add(btnAction);
+            borderPanel.Controls.Add(btnPill);
+
+            borderPanel.Layout += (s, e) =>
+            {
+                var innerPadL = 16;
+                var innerPadR = 16;
+
+                btnPill.Location = new Point(borderPanel.Width - innerPadR - pillSize, (borderPanel.Height - pillSize) / 2);
+                txt.Location = new Point(innerPadL, (borderPanel.Height - txt.PreferredHeight) / 2);
+                txt.Width = Math.Max(10, btnPill.Left - innerPadL - 12);
+                txt.Height = txt.PreferredHeight;
+            };
 
             borderPanel.Click += (s, e) => txt.Focus();
             container.Click += (s, e) => txt.Focus();
-            lbl.Click += (s, e) => txt.Focus();
 
             container.Controls.Add(borderPanel);
             return container;
         }
+
+        private int GetContentWidth()
+        {
+            if (_contentPanel == null) return Math.Max(320, ClientSize.Width - 48);
+            var available = _contentPanel.ClientSize.Width - _contentPanel.Padding.Horizontal;
+            return Math.Max(320, Math.Min(420, available));
+        }
+
+        private void UpdateHeaderTitleFont()
+        {
+            if (_lblTitle == null || _headerPanel == null) return;
+
+            var x = _logoBox != null ? _logoBox.Right + 14 : 18;
+            var w = Math.Max(10, _headerPanel.ClientSize.Width - x - 18);
+
+            // Fit title to available space rather than truncating.
+            var baseSize = 20.5f;
+            var minSize = 14f;
+            var fontFamily = _lblTitle.Font.FontFamily;
+            var style = FontStyle.Bold;
+
+            for (float s = baseSize; s >= minSize; s -= 0.5f)
+            {
+                using var f = new Font(fontFamily, s, style);
+                var measured = TextRenderer.MeasureText(_lblTitle.Text, f);
+                if (measured.Width <= w)
+                {
+                    _lblTitle.Font = new Font(fontFamily, s, style);
+                    break;
+                }
+            }
+        }
+
+        private void FitWelcomeFont(Label lbl, int width)
+        {
+            if (lbl == null) return;
+
+            // Prefer Segoe Script for the mockup vibe; fall back safely.
+            string[] families = { "Segoe Script", "Segoe Print", "Segoe UI" };
+            float start = 44f;
+            float min = 30f;
+
+            FontFamily fam = lbl.Font.FontFamily;
+            foreach (var name in families)
+            {
+                try { fam = new FontFamily(name); break; }
+                catch { /* try next */ }
+            }
+
+            var style = FontStyle.Italic;
+            for (float s = start; s >= min; s -= 0.5f)
+            {
+                using var f = new Font(fam, s, style);
+                var measured = TextRenderer.MeasureText(lbl.Text, f);
+                if (measured.Width <= width - 10)
+                {
+                    lbl.Font = new Font(fam, s, style);
+                    break;
+                }
+            }
+
+            // Ensure enough height to avoid baseline clipping.
+            lbl.Height = Math.Max(96, (int)(lbl.Font.GetHeight() * 2.05f) + 14);
+        }
+
+        private void UpdateResponsiveLayout()
+        {
+            if (_contentPanel == null) return;
+
+            // Enforce window size & chrome (protect against external overrides).
+            EnforceDefaultWindowSize();
+
+            // Header fitting
+            UpdateHeaderTitleFont();
+
+            // Login stack sizing
+            if (_loginStack == null || _loginPanel == null) return;
+
+            var w = GetContentWidth();
+
+            _loginPanel.SuspendLayout();
+            _loginStack.SuspendLayout();
+
+            _loginPanel.Width = w;
+            _loginStack.Width = w;
+
+            foreach (Control c in _loginStack.Controls)
+            {
+                c.Width = w;
+                if (c.Name == "dividerRow") c.Height = 26;
+            }
+
+            // Welcome + subtitle explicit sizing
+            var welcome = _loginStack.Controls["lblWelcome"] as Label;
+            if (welcome != null)
+            {
+                FitWelcomeFont(welcome, w);
+            }
+
+            var subtitle = _loginStack.Controls["lblLoginSubtitle"] as Label;
+            if (subtitle != null)
+            {
+                subtitle.Height = 24;
+            }
+
+            // Buttons sizing
+            var btnGoogle = _loginStack.Controls["btnGoogle"] as Button;
+            if (btnGoogle != null)
+            {
+                btnGoogle.Height = 52;
+                btnGoogle.Region = CreateRoundedRegion(btnGoogle.Width, btnGoogle.Height, 10);
+                FitButtonText(btnGoogle, 9.5f);
+            }
+
+            var btnSignIn = _loginStack.Controls["btnSignIn"] as Button;
+            if (btnSignIn != null)
+            {
+                btnSignIn.Height = 56;
+                btnSignIn.Region = CreateRoundedRegion(btnSignIn.Width, btnSignIn.Height, 10);
+            }
+
+            _loginStack.ResumeLayout(true);
+            _loginPanel.ResumeLayout(true);
+        }
+
 
         /// <summary>
         /// Creates a button with rounded corners (mockup style)
@@ -999,12 +1166,15 @@ private void LoadLogo()
         }
 
 
+
 private void CenterActivePanel()
 {
     // During InitializeComponent(), the content panel can raise Resize/Layout
     // before the state panels are created. Guard against that.
     if (_contentPanel == null) return;
     if (_loginPanel == null || _waitingPanel == null || _successPanel == null || _errorPanel == null) return;
+
+    UpdateResponsiveLayout();
 
     Panel? activePanel = null;
 
@@ -1015,11 +1185,19 @@ private void CenterActivePanel()
 
     if (activePanel == null) return;
 
-    var x = (_contentPanel.ClientSize.Width - activePanel.Width) / 2;
-    var y = (_contentPanel.ClientSize.Height - activePanel.Height) / 2;
+    var clientW = _contentPanel.ClientSize.Width;
+    var clientH = _contentPanel.ClientSize.Height;
+
+    var x = (clientW - activePanel.Width) / 2;
+    var y = (clientH - activePanel.Height) / 2;
+
+    // If content is taller than the viewport, align to top and let AutoScroll do the rest.
+    if (activePanel.Height > clientH) y = 0;
+    if (activePanel.Width > clientW) x = 0;
 
     activePanel.Location = new Point(Math.Max(0, x), Math.Max(0, y));
 }
+
 
 private void BeginAutoCloseOk(int delayMs = 900)
 {
