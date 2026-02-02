@@ -196,7 +196,6 @@ private Panel _waitingPanel = null!;
                 Dock = DockStyle.Top,
                 Height = 86,
                 BackColor = Color.Transparent,
-                UseCompatibleTextRendering = true,
                 Padding = new Padding(18, 14, 18, 14)
             };
 
