@@ -897,6 +897,21 @@ namespace PatsKillerPro
             _btnLogout.Visible = false;
         }
         private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = true; SwitchTab(0); AutoStartOnce(); }
+        
+        /// <summary>
+        /// Centers the login card inside the login panel.
+        /// </summary>
+        private void CenterLoginPanel()
+        {
+            if (_loginPanel == null || _loginPanel.Controls.Count == 0) return;
+            var card = _loginPanel.Controls[0];
+            if (card == null) return;
+            card.Location = new Point(
+                (_loginPanel.Width - card.Width) / 2,
+                (_loginPanel.Height - card.Height) / 2 - 30
+            );
+        }
+        
         private void SwitchTab(int i) { _activeTab = i; _btnTab1.BackColor = i == 0 ? ACCENT : BTN_BG; _btnTab2.BackColor = i == 1 ? ACCENT : BTN_BG; _btnTab3.BackColor = i == 2 ? ACCENT : BTN_BG; _patsTab.Visible = i == 0; _diagTab.Visible = i == 1; _freeTab.Visible = i == 2; }
         #endregion
 
