@@ -777,32 +777,154 @@ namespace PatsKillerPro
         private void BuildLogin()
         {
             _loginPanel = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false };
-            var card = new Panel { Size = new Size(450, 520), BackColor = CARD };
-            card.Paint += (s, e) => { using var p = new Pen(BORDER, 2); e.Graphics.DrawRectangle(p, 1, 1, 447, 517); };
+            
+            // DPI-scaled card dimensions
+            int cardW = Dpi(480);
+            int cardH = Dpi(560);
+            
+            var card = new Panel 
+            { 
+                Size = new Size(cardW, cardH), 
+                BackColor = CARD,
+                Padding = DpiPad(20, 20, 20, 20)
+            };
+            card.Paint += (s, e) => { using var p = new Pen(BORDER, 2); e.Graphics.DrawRectangle(p, 1, 1, card.Width - 3, card.Height - 3); };
 
-            int cy = 40;
-            card.Controls.Add(new Label { Text = "Welcome to PatsKiller Pro", Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = TEXT, Size = new Size(430, 40), Location = new Point(10, cy), TextAlign = ContentAlignment.MiddleCenter }); cy += 45;
-            card.Controls.Add(new Label { Text = "Sign in to access your tokens", Font = new Font("Segoe UI", 11), ForeColor = TEXT_MUTED, Size = new Size(430, 25), Location = new Point(10, cy), TextAlign = ContentAlignment.MiddleCenter }); cy += 50;
+            int cy = Dpi(35);
+            int btnW = Dpi(400);
+            int padL = (cardW - btnW) / 2;
+            
+            // Title
+            var lblTitle = new Label 
+            { 
+                Text = "Welcome to PatsKiller Pro", 
+                Font = new Font("Segoe UI", 22, FontStyle.Bold), 
+                ForeColor = TEXT, 
+                Size = new Size(cardW - Dpi(20), Dpi(45)), 
+                Location = new Point(Dpi(10), cy), 
+                TextAlign = ContentAlignment.MiddleCenter 
+            };
+            card.Controls.Add(lblTitle); 
+            cy += Dpi(50);
+            
+            // Subtitle
+            var lblSub = new Label 
+            { 
+                Text = "Sign in to access your tokens", 
+                Font = new Font("Segoe UI", 12), 
+                ForeColor = TEXT_MUTED, 
+                Size = new Size(cardW - Dpi(20), Dpi(28)), 
+                Location = new Point(Dpi(10), cy), 
+                TextAlign = ContentAlignment.MiddleCenter 
+            };
+            card.Controls.Add(lblSub); 
+            cy += Dpi(55);
 
-            var btnG = new Button { Text = "Continue with Google", Size = new Size(370, 52), Location = new Point(40, cy), FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Color.FromArgb(50, 50, 50), Font = new Font("Segoe UI", 12, FontStyle.Bold), Cursor = Cursors.Hand };
+            // Google button
+            var btnG = new Button 
+            { 
+                Text = "Continue with Google", 
+                Size = new Size(btnW, Dpi(56)), 
+                Location = new Point(padL, cy), 
+                FlatStyle = FlatStyle.Flat, 
+                BackColor = Color.White, 
+                ForeColor = Color.FromArgb(50, 50, 50), 
+                Font = new Font("Segoe UI", 13, FontStyle.Bold), 
+                Cursor = Cursors.Hand 
+            };
             btnG.FlatAppearance.BorderColor = BORDER;
             btnG.Click += BtnGoogle_Click;
-            card.Controls.Add(btnG); cy += 70;
+            card.Controls.Add(btnG); 
+            cy += Dpi(75);
 
-            card.Controls.Add(new Label { Text = "───────  or sign in with email  ───────", Font = new Font("Segoe UI", 10), ForeColor = TEXT_MUTED, Size = new Size(370, 22), Location = new Point(40, cy), TextAlign = ContentAlignment.MiddleCenter }); cy += 38;
-            card.Controls.Add(new Label { Text = "Email", Font = new Font("Segoe UI", 10), ForeColor = TEXT_DIM, Location = new Point(40, cy), AutoSize = true }); cy += 25;
-            _txtEmail = MakeTextBox(370); _txtEmail.Location = new Point(40, cy); card.Controls.Add(_txtEmail); cy += 52;
-            card.Controls.Add(new Label { Text = "Password", Font = new Font("Segoe UI", 10), ForeColor = TEXT_DIM, Location = new Point(40, cy), AutoSize = true }); cy += 25;
-            _txtPassword = MakeTextBox(370); _txtPassword.Location = new Point(40, cy); _txtPassword.UseSystemPasswordChar = true; _txtPassword.KeyPress += (s, e) => { if (e.KeyChar == 13) DoLogin(); }; card.Controls.Add(_txtPassword); cy += 58;
+            // Divider
+            var lblDiv = new Label 
+            { 
+                Text = "───────  or sign in with email  ───────", 
+                Font = new Font("Segoe UI", 10), 
+                ForeColor = TEXT_MUTED, 
+                Size = new Size(btnW, Dpi(25)), 
+                Location = new Point(padL, cy), 
+                TextAlign = ContentAlignment.MiddleCenter 
+            };
+            card.Controls.Add(lblDiv); 
+            cy += Dpi(40);
+            
+            // Email label
+            var lblEmail = new Label 
+            { 
+                Text = "Email", 
+                Font = new Font("Segoe UI", 11), 
+                ForeColor = TEXT_DIM, 
+                Location = new Point(padL, cy), 
+                AutoSize = true 
+            };
+            card.Controls.Add(lblEmail); 
+            cy += Dpi(28);
+            
+            // Email textbox
+            _txtEmail = MakeTextBox(btnW); 
+            _txtEmail.Location = new Point(padL, cy); 
+            _txtEmail.Font = new Font("Segoe UI", 12);
+            _txtEmail.Height = Dpi(36);
+            card.Controls.Add(_txtEmail); 
+            cy += Dpi(55);
+            
+            // Password label
+            var lblPass = new Label 
+            { 
+                Text = "Password", 
+                Font = new Font("Segoe UI", 11), 
+                ForeColor = TEXT_DIM, 
+                Location = new Point(padL, cy), 
+                AutoSize = true 
+            };
+            card.Controls.Add(lblPass); 
+            cy += Dpi(28);
+            
+            // Password textbox
+            _txtPassword = MakeTextBox(btnW); 
+            _txtPassword.Location = new Point(padL, cy); 
+            _txtPassword.Font = new Font("Segoe UI", 12);
+            _txtPassword.Height = Dpi(36);
+            _txtPassword.UseSystemPasswordChar = true; 
+            _txtPassword.KeyPress += (s, e) => { if (e.KeyChar == 13) DoLogin(); }; 
+            card.Controls.Add(_txtPassword); 
+            cy += Dpi(62);
 
-            var btnL = new Button { Text = "Sign In", Size = new Size(370, 52), Location = new Point(40, cy), FlatStyle = FlatStyle.Flat, BackColor = Color.Transparent, ForeColor = TEXT, Font = new Font("Segoe UI", 13, FontStyle.Bold), Cursor = Cursors.Hand };
-            btnL.FlatAppearance.BorderColor = BORDER;
+            // Sign In button
+            var btnL = new Button 
+            { 
+                Text = "Sign In", 
+                Size = new Size(btnW, Dpi(56)), 
+                Location = new Point(padL, cy), 
+                FlatStyle = FlatStyle.Flat, 
+                BackColor = ACCENT, 
+                ForeColor = Color.White, 
+                Font = new Font("Segoe UI", 14, FontStyle.Bold), 
+                Cursor = Cursors.Hand 
+            };
+            btnL.FlatAppearance.BorderColor = ACCENT;
+            btnL.FlatAppearance.BorderSize = 0;
             btnL.Click += (s, e) => DoLogin();
             card.Controls.Add(btnL);
 
             _loginPanel.Controls.Add(card);
-            _loginPanel.Resize += (s, e) => card.Location = new Point((_loginPanel.Width - 450) / 2, (_loginPanel.Height - 520) / 2 - 30);
-            // _loginPanel is added in BuildUI after all other docked controls to ensure it sits on top
+            _loginPanel.Resize += (s, e) => CenterLoginPanel();
+        }
+
+        /// <summary>
+        /// Centers the login card inside the login panel.
+        /// </summary>
+        private void CenterLoginPanel()
+        {
+            if (_loginPanel == null || _loginPanel.Controls.Count == 0) return;
+            var card = _loginPanel.Controls[0];
+            if (card == null) return;
+            card.Location = new Point(
+                Math.Max(0, (_loginPanel.Width - card.Width) / 2),
+                Math.Max(0, (_loginPanel.Height - card.Height) / 2 - Dpi(20))
+            );
         }
 
         #region Helpers
@@ -897,20 +1019,6 @@ namespace PatsKillerPro
             _btnLogout.Visible = false;
         }
         private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = true; SwitchTab(0); AutoStartOnce(); }
-        
-        /// <summary>
-        /// Centers the login card inside the login panel.
-        /// </summary>
-        private void CenterLoginPanel()
-        {
-            if (_loginPanel == null || _loginPanel.Controls.Count == 0) return;
-            var card = _loginPanel.Controls[0];
-            if (card == null) return;
-            card.Location = new Point(
-                (_loginPanel.Width - card.Width) / 2,
-                (_loginPanel.Height - card.Height) / 2 - 30
-            );
-        }
         
         private void SwitchTab(int i) { _activeTab = i; _btnTab1.BackColor = i == 0 ? ACCENT : BTN_BG; _btnTab2.BackColor = i == 1 ? ACCENT : BTN_BG; _btnTab3.BackColor = i == 2 ? ACCENT : BTN_BG; _patsTab.Visible = i == 0; _diagTab.Visible = i == 1; _freeTab.Visible = i == 2; }
         #endregion
