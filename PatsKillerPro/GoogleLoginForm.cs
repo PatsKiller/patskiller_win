@@ -1,7 +1,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -11,522 +10,363 @@ using System.Windows.Forms;
 
 namespace PatsKillerPro
 {
-    /// <summary>
-    /// Polished OAuth login form.
-    /// Fixes: Text clipping, input styling, responsiveness, and visual hierarchy.
-    /// </summary>
     public class GoogleLoginForm : Form
     {
-        // ============ LOCAL LOGGER ============
-        private static class Logger
-        {
-            public static void Info(string message) => Write("INFO", message);
-            public static void Error(string message, Exception ex) => Write("ERROR", $"{message}\n{ex}");
-            private static void Write(string level, string message)
-            {
-                try { System.Diagnostics.Trace.WriteLine($"[{DateTime.Now:HH:mm:ss}] [{level}] {message}"); } catch { }
-            }
-        }
-
-        // ============ UI CONTROLS ============
-        private Panel _headerPanel = null!;
-        private Panel _contentPanel = null!;
-        private PictureBox _logoBox = null!;
-        private Label _lblTitle = null!;
-
-        // Panels
-        private Panel _loginPanel = null!;
-        private FlowLayoutPanel _loginStack = null!;
-        private Panel _waitingPanel = null!;
-        private Panel _successPanel = null!;
-        private Panel _errorPanel = null!;
-
-        // ============ THEME COLORS ============
-        private readonly Color _colBgTop = ColorTranslator.FromHtml("#111827");
-        private readonly Color _colBgBot = ColorTranslator.FromHtml("#0B1220");
-        private readonly Color _colHeader = ColorTranslator.FromHtml("#1F2937");
-        private readonly Color _colHeaderBorder = ColorTranslator.FromHtml("#374151");
-        
-        // Input & Surfaces
-        private readonly Color _colInputBg = ColorTranslator.FromHtml("#161E2E"); // Darker input bg
-        private readonly Color _colInputBorder = ColorTranslator.FromHtml("#374151");
-        private readonly Color _colInputActive = ColorTranslator.FromHtml("#E94796"); // Pink highlight
-
-        // Text
-        private readonly Color _colTextMain = ColorTranslator.FromHtml("#F9FAFB");
-        private readonly Color _colTextDim = ColorTranslator.FromHtml("#9CA3AF");
-        private readonly Color _colTextLabel = ColorTranslator.FromHtml("#D1D5DB");
-
-        // Brand
-        private readonly Color _colAccent = ColorTranslator.FromHtml("#E94796"); // Brand Pink
+        // ============ COLOR PALETTE (Mockup Exact) ============
+        private readonly Color _colBackground = ColorTranslator.FromHtml("#0F172A"); // Dark Navy
+        private readonly Color _colInputSurface = ColorTranslator.FromHtml("#1E293B"); // Slightly lighter slate
+        private readonly Color _colInputBorder = ColorTranslator.FromHtml("#334155"); // Border slate
+        private readonly Color _colAccent = ColorTranslator.FromHtml("#EC4899"); // Hot Pink
         private readonly Color _colAccentHover = ColorTranslator.FromHtml("#DB2777");
-        private readonly Color _colSuccess = ColorTranslator.FromHtml("#10B981");
-        private readonly Color _colGoogleSurface = Color.White;
+        private readonly Color _colTextWhite = ColorTranslator.FromHtml("#F8FAFC");
+        private readonly Color _colTextGray = ColorTranslator.FromHtml("#94A3B8");
+        private readonly Color _colGoogleBg = Color.White;
 
-        // ============ DATA ============
-        public string? AuthToken { get; private set; }
-        public string? RefreshToken { get; private set; }
-        public string? UserEmail { get; private set; }
-        public int TokenCount { get; private set; }
-
-        private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
-        // Split key to prevent build errors
-        private const string SUPABASE_KEY_PART1 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0";
-        private const string SUPABASE_KEY_PART2 = ".iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
-        private const string AUTH_PAGE_URL = "https://patskiller.com/desktop-auth?session=";
-
+        // ============ STATE ============
         private CancellationTokenSource? _cts;
-        private readonly HttpClient _httpClient = new HttpClient();
-        private readonly string _machineId;
+        private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
+        private const string API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0.iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
+        private const string AUTH_URL = "https://patskiller.com/desktop-auth?session=";
+        private readonly HttpClient _http = new HttpClient();
+
+        // ============ UI ELEMENTS ============
+        private Panel _contentContainer;
 
         public GoogleLoginForm()
         {
-            _machineId = GetMachineId();
-            InitializeComponent();
-            ShowLoginState();
+            // Form Setup
+            this.DoubleBuffered = true;
+            this.FormBorderStyle = FormBorderStyle.None; // Custom chrome
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Size = new Size(400, 600);
+            this.BackColor = _colBackground;
+            this.Text = "PatsKiller Pro";
+
+            // Enable drag to move
+            this.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(Handle, 0xA1, 0x2, 0); } };
+
+            InitializeUI();
         }
 
-        private static string GetMachineId()
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool ReleaseCapture();
+
+        private void InitializeUI()
         {
-            try { return Environment.MachineName; } catch { return "UnknownPC"; }
-        }
+            // 1. HEADER
+            var header = CreateHeader();
+            this.Controls.Add(header);
 
-        private void InitializeComponent()
-        {
-            // Window Setup
-            Text = "PatsKiller Pro";
-            ClientSize = new Size(420, 680); // Slightly narrower/taller for modern mobile-like feel
-            MinimumSize = new Size(400, 600);
-            StartPosition = FormStartPosition.CenterScreen;
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            BackColor = _colBgTop;
-            Font = new Font("Segoe UI", 10F);
-            DoubleBuffered = true;
-
-            // Dark Mode Title Bar
-            try { int val = 1; DwmSetWindowAttribute(Handle, 20, ref val, 4); } catch { }
-
-            // Layout
-            CreateHeaderPanel();
-            CreateContentPanel();
-            CreateLoginPanel();
-            CreateWaitingPanel();
-            CreateSuccessPanel();
-            CreateErrorPanel();
-
-            // Events
-            FormClosing += (s, e) => _cts?.Cancel();
-            Resize += (s, e) => { UpdateResponsiveLayout(); CenterActivePanel(); };
-            Shown += (s, e) => { UpdateResponsiveLayout(); CenterActivePanel(); };
-        }
-
-        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            using var brush = new LinearGradientBrush(ClientRectangle, _colBgTop, _colBgBot, LinearGradientMode.Vertical);
-            e.Graphics.FillRectangle(brush, ClientRectangle);
-        }
-
-        // ============ HEADER ============
-        private void CreateHeaderPanel()
-        {
-            _headerPanel = new Panel
+            // 2. CONTENT CONTAINER (Centers the login form)
+            _contentContainer = new Panel
             {
-                Dock = DockStyle.Top,
-                Height = 80,
+                Size = new Size(340, 500), // Width of the actual form content
                 BackColor = Color.Transparent,
-                Padding = new Padding(20, 0, 20, 0)
+                Anchor = AnchorStyles.None
             };
+            _contentContainer.Location = new Point((this.Width - _contentContainer.Width) / 2, 80);
+            this.Controls.Add(_contentContainer);
 
-            // Custom Paint for Border
-            _headerPanel.Paint += (s, e) =>
-            {
-                using var p = new Pen(_colHeaderBorder);
-                e.Graphics.DrawLine(p, 0, _headerPanel.Height - 1, _headerPanel.Width, _headerPanel.Height - 1);
-            };
-
-            // Logo
-            _logoBox = new PictureBox
-            {
-                Size = new Size(48, 48),
-                Location = new Point(20, 16), // Vertically centered (80-48)/2 = 16
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Image = CreateBrandLogo(48)
-            };
-            _headerPanel.Controls.Add(_logoBox);
-
-            // Title
-            _lblTitle = new Label
-            {
-                Text = "PatsKiller Pro",
-                ForeColor = _colAccent,
-                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            _headerPanel.Controls.Add(_lblTitle);
-
-            // Responsive Header Layout
-            _headerPanel.Resize += (s, e) =>
-            {
-                // Align title next to logo
-                int x = _logoBox.Right + 12;
-                int availW = _headerPanel.Width - x - 10;
-                
-                _lblTitle.Location = new Point(x, (_headerPanel.Height - _lblTitle.Height) / 2);
-                
-                // Scale font if text is too long (prevents clipping)
-                float fontSize = 18f;
-                while (TextRenderer.MeasureText(_lblTitle.Text, _lblTitle.Font).Width > availW && fontSize > 12f)
-                {
-                    fontSize -= 1f;
-                    _lblTitle.Font = new Font("Segoe UI", fontSize, FontStyle.Bold);
-                }
-            };
-
-            Controls.Add(_headerPanel);
+            // 3. BUILD FORM
+            BuildLoginForm();
         }
 
-        // ============ CONTENT AREA ============
-        private void CreateContentPanel()
+        private void BuildLoginForm()
         {
-            _contentPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.Transparent,
-                Padding = new Padding(0), // Padding handled by internal panels
-                AutoScroll = false
-            };
-            Controls.Add(_contentPanel);
-        }
+            int y = 0;
 
-        // ============ LOGIN UI ============
-        private void CreateLoginPanel()
-        {
-            _loginPanel = new Panel { Visible = false, AutoSize = true };
-            _loginStack = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                Margin = new Padding(0)
-            };
-            _loginPanel.Controls.Add(_loginStack);
-
-            // 1. Welcome Text
+            // Welcome
             var lblWelcome = new Label
             {
-                Name = "lblWelcome",
                 Text = "Welcome",
-                Font = new Font("Segoe UI", 36F, FontStyle.Italic), // Large but handled by resize logic
-                ForeColor = _colTextMain,
-                AutoSize = true,
+                Font = new Font("Segoe UI", 32F, FontStyle.Italic),
+                ForeColor = _colTextWhite,
+                AutoSize = false,
+                Size = new Size(_contentContainer.Width, 60),
                 TextAlign = ContentAlignment.MiddleCenter,
-                Margin = new Padding(0, 0, 0, 0)
+                Location = new Point(0, y)
             };
+            _contentContainer.Controls.Add(lblWelcome);
+            y += 60;
 
-            // 2. Subtitle
+            // Subtitle
             var lblSub = new Label
             {
-                Name = "lblSub",
                 Text = "Sign in to access your account",
-                Font = new Font("Segoe UI", 11F),
-                ForeColor = _colTextDim,
-                AutoSize = true,
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = _colTextGray,
+                AutoSize = false,
+                Size = new Size(_contentContainer.Width, 30),
                 TextAlign = ContentAlignment.MiddleCenter,
-                Margin = new Padding(0, 5, 0, 30) // Spacing below subtitle
+                Location = new Point(0, y)
             };
+            _contentContainer.Controls.Add(lblSub);
+            y += 45;
 
-            // 3. Google Button
-            var btnGoogle = CreateGoogleButton();
-            btnGoogle.Margin = new Padding(0, 0, 0, 20);
+            // Google Button
+            var btnGoogle = new Button
+            {
+                Text = "Continue with Google",
+                Font = new Font("Segoe UI Semibold", 11F),
+                ForeColor = Color.FromArgb(55, 65, 81),
+                BackColor = _colGoogleBg,
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(_contentContainer.Width, 50),
+                Location = new Point(0, y),
+                Cursor = Cursors.Hand,
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = DrawGoogleG(20) // Custom GDI+ Icon
+            };
+            btnGoogle.FlatAppearance.BorderSize = 0;
+            btnGoogle.Region = GetRoundedRegion(btnGoogle.ClientRectangle, 8);
+            btnGoogle.Click += (s, e) => StartGoogleAuth();
+            _contentContainer.Controls.Add(btnGoogle);
+            y += 70;
 
-            // 4. Divider
-            var divider = CreateDivider();
-            divider.Margin = new Padding(0, 0, 0, 20);
+            // Divider
+            var pnlDivider = new Panel { Size = new Size(_contentContainer.Width, 20), Location = new Point(0, y) };
+            pnlDivider.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                var txt = "or sign in with email";
+                var font = new Font("Segoe UI", 9F);
+                var size = g.MeasureString(txt, font);
+                var midH = pnlDivider.Height / 2;
+                var midW = pnlDivider.Width / 2;
+                
+                using var brush = new SolidBrush(_colTextGray); // Text color
+                using var pen = new Pen(Color.FromArgb(60, 255, 255, 255)); // Line color
 
-            // 5. Inputs
-            var lblEmail = CreateLabel("Email Address");
-            var txtEmail = CreateInput("name@example.com", false);
-            
-            var lblPass = CreateLabel("Password");
-            var txtPass = CreateInput("••••••••", true);
+                g.DrawString(txt, font, brush, midW - size.Width / 2, midH - size.Height / 2);
+                g.DrawLine(pen, 0, midH, midW - size.Width / 2 - 10, midH);
+                g.DrawLine(pen, midW + size.Width / 2 + 10, midH, pnlDivider.Width, midH);
+            };
+            _contentContainer.Controls.Add(pnlDivider);
+            y += 35;
 
-            // 6. Sign In Button
-            var btnSign = CreateButton("Sign In", _colAccent, _colAccentHover);
-            btnSign.Click += (s, e) => MessageBox.Show("Please use 'Continue with Google'.", "Info");
+            // Email Input (Custom Control)
+            var inputEmail = CreateLabeledInput("Email", "you@example.com", false);
+            inputEmail.Location = new Point(0, y);
+            _contentContainer.Controls.Add(inputEmail);
+            y += 75;
 
-            // Add to Stack
-            _loginStack.Controls.AddRange(new Control[] {
-                lblWelcome, lblSub, btnGoogle, divider, 
-                lblEmail, txtEmail, lblPass, txtPass, btnSign
-            });
+            // Password Input
+            var inputPass = CreateLabeledInput("Password", "", true);
+            inputPass.Location = new Point(0, y);
+            _contentContainer.Controls.Add(inputPass);
+            y += 85;
 
-            _contentPanel.Controls.Add(_loginPanel);
+            // Sign In Button
+            var btnSign = new Button
+            {
+                Text = "Sign In",
+                Font = new Font("Segoe UI Semibold", 12F),
+                ForeColor = Color.White,
+                BackColor = _colAccent,
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(_contentContainer.Width, 50),
+                Location = new Point(0, y),
+                Cursor = Cursors.Hand
+            };
+            btnSign.FlatAppearance.BorderSize = 0;
+            btnSign.Region = GetRoundedRegion(btnSign.ClientRectangle, 8);
+            btnSign.Click += (s, e) => MessageBox.Show("Please use Google Sign In for now.", "Beta");
+            _contentContainer.Controls.Add(btnSign);
         }
 
-        private Control CreateInput(string placeholder, bool isPassword)
+        // ============ CUSTOM INPUT CONTROL ============
+        // This simulates the "Label intersecting the border" look from the mockup
+        private Panel CreateLabeledInput(string labelText, string placeholder, bool isPassword)
         {
-            int height = 50;
-            var pnl = new Panel { Height = height, BackColor = Color.Transparent, Margin = new Padding(0, 5, 0, 20) };
-            
-            // Background & Border Paint
-            bool focused = false;
-            pnl.Paint += (s, e) =>
+            var pnl = new Panel { Size = new Size(_contentContainer.Width, 60), BackColor = Color.Transparent };
+
+            // 1. The Border Container (Sits lower)
+            var borderPnl = new Panel
+            {
+                Size = new Size(pnl.Width, 50),
+                Location = new Point(0, 10), // Push down to make room for label overlap
+                BackColor = Color.Transparent
+            };
+
+            // Custom Paint for Border and Background
+            borderPnl.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                var rect = new Rectangle(0, 0, pnl.Width - 1, pnl.Height - 1);
-                using var path = GetRoundedPath(rect, 8);
-                using var brush = new SolidBrush(_colInputBg);
-                using var pen = new Pen(focused ? _colAccent : _colInputBorder, focused ? 1.5f : 1f);
-                
+                var r = new Rectangle(0, 0, borderPnl.Width - 1, borderPnl.Height - 1);
+                using var path = GetRoundedPath(r, 8);
+                using var brush = new SolidBrush(_colInputSurface);
+                using var pen = new Pen(_colInputBorder, 1);
                 e.Graphics.FillPath(brush, path);
                 e.Graphics.DrawPath(pen, path);
             };
+            pnl.Controls.Add(borderPnl);
 
-            // Text Box
+            // 2. The Label (Sits on top, creating the "cutout" effect)
+            var lbl = new Label
+            {
+                Text = labelText,
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = _colTextGray,
+                BackColor = _colBackground, // IMPORTANT: Matches form background to "mask" the border
+                AutoSize = true,
+                Location = new Point(12, 0) // Overlaps the top border of borderPnl
+            };
+            // Ensure label is drawn after (on top of) the border panel logic
+            // Note: In WinForms, z-ordering is tricky. We place this IN the main panel, not the border panel.
+            pnl.Controls.Add(lbl);
+            lbl.BringToFront();
+
+            // 3. The TextBox
             var txt = new TextBox
             {
+                Text = isPassword ? "" : placeholder,
+                PlaceholderText = isPassword ? "" : placeholder, // For newer .NET
                 BorderStyle = BorderStyle.None,
-                BackColor = _colInputBg,
-                ForeColor = _colTextMain,
+                BackColor = _colInputSurface,
+                ForeColor = _colTextWhite,
                 Font = new Font("Segoe UI", 11F),
-                PlaceholderText = placeholder,
-                UseSystemPasswordChar = isPassword,
-                Location = new Point(15, 13), // Vertically centered
-                Width = pnl.Width - 60
+                Location = new Point(15, 14),
+                Width = borderPnl.Width - 60,
+                UseSystemPasswordChar = isPassword
             };
-
-            // Action Icon (Eye or Arrow)
-            var btnIcon = new PictureBox
-            {
-                Size = new Size(30, 30),
-                Cursor = Cursors.Hand,
-                BackColor = Color.Transparent,
-                SizeMode = PictureBoxSizeMode.CenterImage
-            };
+            // Clear placeholder on focus for older .NET simulation
+            if (!isPassword) {
+                txt.Enter += (s, e) => { if (txt.Text == placeholder) { txt.Text = ""; txt.ForeColor = _colTextWhite; } };
+                txt.Leave += (s, e) => { if (txt.Text == "") { txt.Text = placeholder; txt.ForeColor = Color.Gray; } else { txt.ForeColor = _colTextWhite; } };
+                if (txt.Text == placeholder) txt.ForeColor = Color.Gray;
+            }
             
-            // Draw clean vector icons instead of blobs
-            btnIcon.Paint += (s, e) =>
+            borderPnl.Controls.Add(txt);
+
+            // 4. The Pink Icon (Three dots)
+            var iconBox = new PictureBox
+            {
+                Size = new Size(24, 24),
+                Location = new Point(borderPnl.Width - 36, 13),
+                BackColor = Color.Transparent,
+                Image = DrawPinkDots(24)
+            };
+            borderPnl.Controls.Add(iconBox);
+
+            return pnl;
+        }
+
+        // ============ HEADER CONTROL ============
+        private Panel CreateHeader()
+        {
+            var p = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = Color.Transparent, Padding = new Padding(20, 0, 20, 0) };
+
+            // Logo Box
+            var logo = new PictureBox
+            {
+                Size = new Size(36, 36),
+                Location = new Point(20, 12),
+                Image = DrawBrandLogo(36)
+            };
+            p.Controls.Add(logo);
+
+            // Title
+            var title = new Label
+            {
+                Text = "PatsKiller Pro",
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                ForeColor = _colAccent,
+                AutoSize = true,
+                Location = new Point(65, 15)
+            };
+            p.Controls.Add(title);
+
+            // Window Controls (Fake macOS style dots for the aesthetic)
+            var pnlControls = new Panel { Size = new Size(60, 20), Location = new Point(p.Width - 80, 20), Anchor = AnchorStyles.Right | AnchorStyles.Top };
+            pnlControls.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                // Draw rounded pink background
-                using var path = GetRoundedPath(new Rectangle(0,0,29,29), 8);
-                using var brush = new SolidBrush(_colAccent);
-                e.Graphics.FillPath(brush, path);
-
-                // Draw Icon (White)
-                using var pen = new Pen(Color.White, 2f);
-                if (isPassword)
-                {
-                    // Eye Icon
-                    e.Graphics.DrawEllipse(pen, 8, 10, 14, 10);
-                    e.Graphics.FillEllipse(Brushes.White, 13, 13, 4, 4);
-                }
-                else
-                {
-                    // Arrow Icon
-                    e.Graphics.DrawLine(pen, 10, 15, 20, 15);
-                    e.Graphics.DrawLine(pen, 16, 11, 20, 15);
-                    e.Graphics.DrawLine(pen, 16, 19, 20, 15);
-                }
-            };
-
-            // Logic
-            txt.Enter += (s, e) => { focused = true; pnl.Invalidate(); };
-            txt.Leave += (s, e) => { focused = false; pnl.Invalidate(); };
-            
-            btnIcon.Click += (s, e) =>
-            {
-                if (isPassword) { txt.UseSystemPasswordChar = !txt.UseSystemPasswordChar; txt.Focus(); }
-                else { txt.Text = ""; txt.Focus(); }
-            };
-
-            // Layout inside panel
-            pnl.Controls.Add(btnIcon);
-            pnl.Controls.Add(txt);
-            
-            pnl.Resize += (s, e) =>
-            {
-                btnIcon.Location = new Point(pnl.Width - 40, 10);
-                txt.Width = pnl.Width - 55;
-            };
-            
-            // Propagate clicks to focus text
-            pnl.Click += (s,e) => txt.Focus();
-
-            return pnl;
-        }
-
-        private Button CreateButton(string text, Color bg, Color hover)
-        {
-            var btn = new Button
-            {
-                Text = text,
-                Height = 50,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = bg,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI Semibold", 12F),
-                Cursor = Cursors.Hand,
-                Margin = new Padding(0)
-            };
-            btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.MouseOverBackColor = hover;
-            
-            // Rounded Corners
-            btn.Paint += (s, e) =>
-            {
-                using var path = GetRoundedPath(new Rectangle(0, 0, btn.Width, btn.Height), 8);
-                btn.Region = new Region(path);
-            };
-            
-            return btn;
-        }
-
-        private Button CreateGoogleButton()
-        {
-            var btn = new Button
-            {
-                Text = "  Continue with Google",
-                Height = 50,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = _colGoogleSurface,
-                ForeColor = Color.FromArgb(60, 64, 67),
-                Font = new Font("Segoe UI Semibold", 11F),
-                Cursor = Cursors.Hand,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                ImageAlign = ContentAlignment.MiddleRight,
-                Image = CreateGoogleLogo(24),
-                Margin = new Padding(0)
-            };
-            btn.FlatAppearance.BorderSize = 0;
-            
-            // Custom Border Paint
-            btn.Paint += (s, e) =>
-            {
-                var g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                var rect = new Rectangle(0, 0, btn.Width - 1, btn.Height - 1);
-                using var path = GetRoundedPath(rect, 8);
+                using var b1 = new SolidBrush(ColorTranslator.FromHtml("#334155")); // Greyed out for style
+                e.Graphics.FillEllipse(b1, 0, 0, 12, 12);
+                e.Graphics.FillEllipse(b1, 20, 0, 12, 12);
                 
-                // Draw Border
-                using var pen = new Pen(Color.FromArgb(218, 220, 224), 1);
-                g.DrawPath(pen, path);
-                
-                // Clip region
-                btn.Region = new Region(path);
+                // Active Close Button (Red-ish on hover logic could go here, keeping simple for now)
+                using var bClose = new SolidBrush(ColorTranslator.FromHtml("#334155"));
+                e.Graphics.FillEllipse(bClose, 40, 0, 12, 12);
             };
             
-            btn.Click += async (s, e) => await StartGoogleAuthAsync();
-            return btn;
-        }
+            // Actual Click Handler for Close
+            var btnClose = new Label { Text = "", Size = new Size(60, 20), Location = pnlControls.Location, Anchor = AnchorStyles.Right | AnchorStyles.Top, Cursor = Cursors.Hand };
+            btnClose.Click += (s, e) => Application.Exit();
+            p.Controls.Add(pnlControls);
+            p.Controls.Add(btnClose);
+            btnClose.BringToFront();
 
-        private Panel CreateDivider()
-        {
-            var pnl = new Panel { Height = 20, BackColor = Color.Transparent };
-            var lbl = new Label 
-            { 
-                Text = "or sign in with email", 
-                ForeColor = _colTextDim, 
-                AutoSize = true, 
-                Font = new Font("Segoe UI", 9F)
-            };
-            pnl.Controls.Add(lbl);
-            
-            pnl.Paint += (s, e) =>
-            {
-                int y = pnl.Height / 2;
-                int textW = lbl.Width + 20;
-                int lineW = (pnl.Width - textW) / 2;
-                using var pen = new Pen(Color.FromArgb(60, 255, 255, 255), 1);
-                
-                e.Graphics.DrawLine(pen, 0, y, lineW, y);
-                e.Graphics.DrawLine(pen, pnl.Width - lineW, y, pnl.Width, y);
-            };
-            
-            pnl.Resize += (s, e) => lbl.Location = new Point((pnl.Width - lbl.Width)/2, (pnl.Height - lbl.Height)/2);
-            return pnl;
-        }
-
-        private Label CreateLabel(string text)
-        {
-            return new Label
-            {
-                Text = text,
-                ForeColor = _colTextLabel,
-                Font = new Font("Segoe UI", 9.5F),
-                AutoSize = true,
-                Margin = new Padding(0, 0, 0, 0)
-            };
-        }
-
-        // ============ LAYOUT LOGIC (Crucial for Fix) ============
-        private void UpdateResponsiveLayout()
-        {
-            if (_contentPanel == null || _loginPanel == null) return;
-
-            // Calculate width: Container width minus generous padding (e.g. 40px on each side)
-            int pad = 40;
-            int targetW = _contentPanel.Width - (pad * 2);
-            targetW = Math.Max(280, Math.Min(400, targetW)); // Clamp width
-
-            _loginPanel.SuspendLayout();
-            _loginStack.SuspendLayout();
-
-            // Apply width to container
-            _loginPanel.Width = targetW;
-            _loginStack.Width = targetW;
-
-            // Apply width to ALL children
-            foreach (Control c in _loginStack.Controls)
-            {
-                c.Width = targetW;
-                
-                // Center Labels specifically
-                if (c is Label lbl)
-                {
-                    lbl.AutoSize = false; 
-                    lbl.Width = targetW;
-                    
-                    // Measure height required for text wrapping
-                    Size sz = TextRenderer.MeasureText(lbl.Text, lbl.Font, new Size(targetW, 1000), TextFormatFlags.WordBreak);
-                    lbl.Height = sz.Height + 10;
-                }
-            }
-
-            _loginStack.ResumeLayout();
-            _loginPanel.ResumeLayout();
-        }
-
-        private void CenterActivePanel()
-        {
-            if (_contentPanel == null) return;
-            Panel? active = null;
-            if (_loginPanel?.Visible == true) active = _loginPanel;
-            else if (_waitingPanel?.Visible == true) active = _waitingPanel;
-            else if (_successPanel?.Visible == true) active = _successPanel;
-            else if (_errorPanel?.Visible == true) active = _errorPanel;
-
-            if (active != null)
-            {
-                active.Location = new Point(
-                    (_contentPanel.Width - active.Width) / 2,
-                    Math.Max(20, (_contentPanel.Height - active.Height) / 2)
-                );
-            }
+            return p;
         }
 
         // ============ GRAPHICS HELPERS ============
-        private GraphicsPath GetRoundedPath(Rectangle rect, int r)
+
+        private Bitmap DrawBrandLogo(int size)
+        {
+            var bmp = new Bitmap(size, size);
+            using var g = Graphics.FromImage(bmp);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            // Pink Border Box
+            using var pen = new Pen(_colAccent, 2);
+            g.DrawRectangle(pen, 1, 1, size - 3, size - 3);
+
+            // Key Icon
+            using var brush = new SolidBrush(_colAccent);
+            g.FillEllipse(brush, 6, 12, 10, 10); // Head
+            g.FillRectangle(brush, 14, 15, 14, 4); // Shaft
+            g.FillRectangle(brush, 22, 19, 4, 5); // Tooth
+            return bmp;
+        }
+
+        private Bitmap DrawPinkDots(int size)
+        {
+            var bmp = new Bitmap(size, size);
+            using var g = Graphics.FromImage(bmp);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            // Pink Background
+            using var brush = new SolidBrush(_colAccent);
+            g.FillPath(brush, GetRoundedPath(new Rectangle(0, 0, size, size), 4));
+
+            // 3 White Dots
+            using var white = new SolidBrush(Color.White);
+            int y = size / 2 - 2;
+            g.FillEllipse(white, 4, y, 4, 4);
+            g.FillEllipse(white, 10, y, 4, 4);
+            g.FillEllipse(white, 16, y, 4, 4);
+
+            return bmp;
+        }
+
+        private Bitmap DrawGoogleG(int size)
+        {
+            // Simple G logo approximation
+            var bmp = new Bitmap(size, size);
+            using var g = Graphics.FromImage(bmp);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            
+            var rect = new Rectangle(1, 1, size-2, size-2);
+            using var penR = new Pen(Color.Red, 2);
+            using var penB = new Pen(Color.Blue, 2);
+            using var penG = new Pen(Color.Green, 2);
+            using var penY = new Pen(Color.Yellow, 2);
+
+            g.DrawArc(penR, rect, 180, 90);
+            g.DrawArc(penG, rect, 90, 90);
+            g.DrawArc(penY, rect, 45, 45); // Simplified
+            g.DrawArc(penB, rect, 270, 90);
+            return bmp;
+        }
+
+        private GraphicsPath GetRoundedPath(Rectangle rect, int radius)
         {
             var path = new GraphicsPath();
-            int d = r * 2;
+            int d = radius * 2;
             path.AddArc(rect.X, rect.Y, d, d, 180, 90);
             path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
             path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
@@ -535,144 +375,53 @@ namespace PatsKillerPro
             return path;
         }
 
-        private Image CreateBrandLogo(int s)
-        {
-            var bmp = new Bitmap(s, s);
-            using var g = Graphics.FromImage(bmp);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            
-            // Background
-            using var brush = new LinearGradientBrush(new Point(0,0), new Point(s,s), _colBgTop, _colBgBot);
-            g.FillEllipse(brush, 0, 0, s, s);
-            using var pen = new Pen(_colAccent, 2);
-            g.DrawEllipse(pen, 1, 1, s-3, s-3);
-            
-            // Key Icon
-            using var iconBrush = new SolidBrush(_colAccent);
-            int cx = s/2, cy = s/2;
-            g.FillEllipse(iconBrush, cx-8, cy-8, 10, 10); // Head
-            g.FillRectangle(iconBrush, cx-2, cy-2, 14, 4); // Shaft
-            g.FillRectangle(iconBrush, cx+6, cy+2, 2, 4); // Teeth
-            
-            return bmp;
-        }
+        private Region GetRoundedRegion(Rectangle rect, int radius) => new Region(GetRoundedPath(rect, radius));
 
-        private Image CreateGoogleLogo(int s)
+        // ============ AUTH LOGIC ============
+        private async void StartGoogleAuth()
         {
-            var bmp = new Bitmap(s, s);
-            using var g = Graphics.FromImage(bmp);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            
-            float stroke = s * 0.15f;
-            var rect = new RectangleF(stroke, stroke, s - stroke*2, s - stroke*2);
-            
-            using var r = new Pen(Color.FromArgb(234, 67, 53), stroke);
-            using var y = new Pen(Color.FromArgb(251, 188, 5), stroke);
-            using var gr = new Pen(Color.FromArgb(52, 168, 83), stroke);
-            using var b = new Pen(Color.FromArgb(66, 133, 244), stroke);
-
-            g.DrawArc(r, rect, 190, 100);
-            g.DrawArc(y, rect, 40, 100);
-            g.DrawArc(gr, rect, 130, 60);
-            g.DrawArc(b, rect, 220, 100); // Rough approximation of G
-            g.DrawLine(b, s/2, s/2, s-stroke, s/2);
-            
-            return bmp;
-        }
-
-        // ============ AUTH STATES (Waiting/Success/Error) ============
-        // Simplified for brevity, follows same centering logic
-        private void CreateWaitingPanel() 
-        {
-            _waitingPanel = CreateStatePanel("🔄", "Waiting...", "Check your browser to continue.", false);
-            _waitingPanel.Controls[3].Click += (s, e) => { _cts?.Cancel(); ShowLoginState(); };
-        }
-        private void CreateSuccessPanel() 
-        {
-            _successPanel = CreateStatePanel("✓", "Success!", "You are now signed in.", true);
-            _successPanel.Controls[3].Text = "Continue";
-            _successPanel.Controls[3].Click += (s, e) => { DialogResult = DialogResult.OK; Close(); };
-        }
-        private void CreateErrorPanel() 
-        {
-            _errorPanel = CreateStatePanel("⚠", "Error", "Sign in failed.", false);
-            _errorPanel.Controls[3].Text = "Try Again";
-            _errorPanel.Controls[3].Click += (s, e) => ShowLoginState();
-        }
-
-        private Panel CreateStatePanel(string icon, string title, string sub, bool success)
-        {
-            var pnl = new Panel { Size = new Size(300, 300), BackColor = Color.Transparent, Visible = false };
-            var lblIcon = new Label { Text = icon, Font = new Font("Segoe UI", 48F), ForeColor = success ? _colSuccess : _colAccent, AutoSize = false, Size = new Size(300, 80), TextAlign = ContentAlignment.MiddleCenter, Location = new Point(0, 20) };
-            var lblTitle = new Label { Text = title, Font = new Font("Segoe UI", 16F, FontStyle.Bold), ForeColor = _colTextMain, AutoSize = false, Size = new Size(300, 40), TextAlign = ContentAlignment.MiddleCenter, Location = new Point(0, 110) };
-            var lblSub = new Label { Text = sub, Font = new Font("Segoe UI", 11F), ForeColor = _colTextDim, AutoSize = false, Size = new Size(300, 40), TextAlign = ContentAlignment.MiddleCenter, Location = new Point(0, 150) };
-            var btn = CreateButton("Cancel", _colHeader, _colHeaderBorder);
-            btn.Width = 160; btn.Height = 40; btn.Location = new Point(70, 220);
-
-            pnl.Controls.AddRange(new Control[] { lblIcon, lblTitle, lblSub, btn });
-            _contentPanel.Controls.Add(pnl);
-            return pnl;
-        }
-
-        // ============ LOGIC ============
-        private void ShowLoginState() { HideAll(); _loginPanel.Visible = true; CenterActivePanel(); }
-        private void HideAll() { _loginPanel.Visible = _waitingPanel.Visible = _successPanel.Visible = _errorPanel.Visible = false; }
-
-        private async Task StartGoogleAuthAsync()
-        {
-            _cts?.Cancel(); _cts = new CancellationTokenSource();
-            HideAll(); _waitingPanel.Visible = true; CenterActivePanel();
-            
-            try
-            {
-                var session = await CreateSessionAsync();
-                if (session == null) throw new Exception("API Error");
-                
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = AUTH_PAGE_URL + session.SessionCode, UseShellExecute = true });
-                await PollSessionAsync(session.SessionCode, _cts.Token);
-            }
-            catch { HideAll(); _errorPanel.Visible = true; CenterActivePanel(); }
-        }
-
-        private async Task<SessionInfo?> CreateSessionAsync()
-        {
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
             try
             {
                 var req = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/create-desktop-auth-session");
-                req.Headers.Add("apikey", SUPABASE_KEY_PART1 + SUPABASE_KEY_PART2);
-                req.Content = new StringContent(JsonSerializer.Serialize(new { machineId = _machineId }), Encoding.UTF8, "application/json");
-                var res = await _httpClient.SendAsync(req);
-                if (!res.IsSuccessStatusCode) return null;
-                
-                var json = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-                return new SessionInfo { SessionCode = json.RootElement.GetProperty("sessionCode").GetString() ?? "" };
+                req.Headers.Add("apikey", API_KEY);
+                req.Content = new StringContent(JsonSerializer.Serialize(new { machineId = Environment.MachineName }), Encoding.UTF8, "application/json");
+
+                var res = await _http.SendAsync(req);
+                if (res.IsSuccessStatusCode)
+                {
+                    var json = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+                    var code = json.RootElement.GetProperty("sessionCode").GetString();
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = AUTH_URL + code, UseShellExecute = true });
+                    PollSession(code, _cts.Token);
+                }
             }
-            catch { return null; }
+            catch { MessageBox.Show("Connection Error"); }
         }
 
-        private async Task PollSessionAsync(string code, CancellationToken ct)
+        private async void PollSession(string code, CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(2000, ct);
-                var req = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/check-desktop-auth-session");
-                req.Headers.Add("apikey", SUPABASE_KEY_PART1 + SUPABASE_KEY_PART2);
-                req.Content = new StringContent(JsonSerializer.Serialize(new { sessionCode = code, machineId = _machineId }), Encoding.UTF8, "application/json");
-                
-                var res = await _httpClient.SendAsync(req, ct);
-                if (!res.IsSuccessStatusCode) continue;
-
-                var json = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
-                if (json.GetProperty("status").GetString() == "complete")
-                {
-                    UserEmail = json.GetProperty("email").GetString();
-                    AuthToken = json.GetProperty("accessToken").GetString();
-                    HideAll(); _successPanel.Visible = true; CenterActivePanel();
-                    return;
-                }
+                await Task.Delay(2000);
+                try {
+                    var req = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/check-desktop-auth-session");
+                    req.Headers.Add("apikey", API_KEY);
+                    req.Content = new StringContent(JsonSerializer.Serialize(new { sessionCode = code, machineId = Environment.MachineName }), Encoding.UTF8, "application/json");
+                    
+                    var res = await _http.SendAsync(req);
+                    if (!res.IsSuccessStatusCode) continue;
+                    
+                    var json = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
+                    if (json.GetProperty("status").GetString() == "complete") {
+                        MessageBox.Show("Success! Logged in as " + json.GetProperty("email").GetString());
+                        this.DialogResult = DialogResult.OK;
+                        this.Close();
+                        return;
+                    }
+                } catch { }
             }
         }
-
-        private class SessionInfo { public string SessionCode { get; set; } = ""; }
     }
 }
