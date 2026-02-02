@@ -12,12 +12,19 @@ namespace PatsKillerPro
 {
     public class GoogleLoginForm : Form
     {
+        // ============ PUBLIC PROPERTIES (Restored for MainForm) ============
+        public string? AuthToken { get; private set; }
+        public string? RefreshToken { get; private set; }
+        public string? UserEmail { get; private set; }
+        
+        // This is optional if your MainForm uses it, otherwise defaults to 0
+        public int TokenCount { get; private set; } = 0; 
+
         // ============ COLOR PALETTE (Mockup Exact) ============
         private readonly Color _colBackground = ColorTranslator.FromHtml("#0F172A"); // Dark Navy
         private readonly Color _colInputSurface = ColorTranslator.FromHtml("#1E293B"); // Slightly lighter slate
         private readonly Color _colInputBorder = ColorTranslator.FromHtml("#334155"); // Border slate
         private readonly Color _colAccent = ColorTranslator.FromHtml("#EC4899"); // Hot Pink
-        private readonly Color _colAccentHover = ColorTranslator.FromHtml("#DB2777");
         private readonly Color _colTextWhite = ColorTranslator.FromHtml("#F8FAFC");
         private readonly Color _colTextGray = ColorTranslator.FromHtml("#94A3B8");
         private readonly Color _colGoogleBg = Color.White;
@@ -30,7 +37,8 @@ namespace PatsKillerPro
         private readonly HttpClient _http = new HttpClient();
 
         // ============ UI ELEMENTS ============
-        private Panel _contentContainer;
+        // Initialized in InitializeUI called by Constructor
+        private Panel _contentContainer = null!; 
 
         public GoogleLoginForm()
         {
@@ -232,7 +240,8 @@ namespace PatsKillerPro
                 Width = borderPnl.Width - 60,
                 UseSystemPasswordChar = isPassword
             };
-            // Clear placeholder on focus for older .NET simulation
+            
+            // Clear placeholder on focus for older .NET simulation (optional polish)
             if (!isPassword) {
                 txt.Enter += (s, e) => { if (txt.Text == placeholder) { txt.Text = ""; txt.ForeColor = _colTextWhite; } };
                 txt.Leave += (s, e) => { if (txt.Text == "") { txt.Text = placeholder; txt.ForeColor = Color.Gray; } else { txt.ForeColor = _colTextWhite; } };
@@ -288,7 +297,6 @@ namespace PatsKillerPro
                 e.Graphics.FillEllipse(b1, 0, 0, 12, 12);
                 e.Graphics.FillEllipse(b1, 20, 0, 12, 12);
                 
-                // Active Close Button (Red-ish on hover logic could go here, keeping simple for now)
                 using var bClose = new SolidBrush(ColorTranslator.FromHtml("#334155"));
                 e.Graphics.FillEllipse(bClose, 40, 0, 12, 12);
             };
@@ -393,6 +401,9 @@ namespace PatsKillerPro
                 {
                     var json = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
                     var code = json.RootElement.GetProperty("sessionCode").GetString();
+                    
+                    if (string.IsNullOrEmpty(code)) return; // Null check to prevent crash
+
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = AUTH_URL + code, UseShellExecute = true });
                     PollSession(code, _cts.Token);
                 }
@@ -402,6 +413,9 @@ namespace PatsKillerPro
 
         private async void PollSession(string code, CancellationToken ct)
         {
+            // Safeguard against null code
+            if (string.IsNullOrEmpty(code)) return;
+
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(2000);
@@ -410,12 +424,18 @@ namespace PatsKillerPro
                     req.Headers.Add("apikey", API_KEY);
                     req.Content = new StringContent(JsonSerializer.Serialize(new { sessionCode = code, machineId = Environment.MachineName }), Encoding.UTF8, "application/json");
                     
-                    var res = await _http.SendAsync(req);
+                    var res = await _http.SendAsync(req, ct); // Use cancellation token here
                     if (!res.IsSuccessStatusCode) continue;
                     
                     var json = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
                     if (json.GetProperty("status").GetString() == "complete") {
-                        MessageBox.Show("Success! Logged in as " + json.GetProperty("email").GetString());
+                        
+                        // Capture properties for MainForm
+                        this.UserEmail = json.TryGetProperty("email", out var e) ? e.GetString() : null;
+                        this.AuthToken = json.TryGetProperty("accessToken", out var t) ? t.GetString() : null;
+                        this.RefreshToken = json.TryGetProperty("refreshToken", out var r) ? r.GetString() : null;
+
+                        MessageBox.Show("Success! Logged in as " + this.UserEmail);
                         this.DialogResult = DialogResult.OK;
                         this.Close();
                         return;
