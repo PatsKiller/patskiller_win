@@ -59,7 +59,6 @@ namespace PatsKillerPro
         private readonly Color _colorGoogleBtn = Color.White;                              // Google button surface
 
         // ============ RESULTS ============
- ============
         public string? AuthToken { get; private set; }
         public string? RefreshToken { get; private set; }
         public string? UserEmail { get; private set; }
