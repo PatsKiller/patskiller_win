@@ -17,6 +17,33 @@ namespace PatsKillerPro
     /// </summary>
     public class GoogleLoginForm : Form
     {
+
+		// ============ LOCAL LOGGER (BUILD-SAFE) ============
+		// The main PatsKiller codebase may define its own logging helper. CI failed
+		// because this form referenced a Logger type that wasn't available in scope.
+		// Keep this nested logger so the form is self-contained and always compiles.
+		private static class Logger
+		{
+			public static void Info(string message) => Write("INFO", message, null);
+			public static void Debug(string message) => Write("DEBUG", message, null);
+			public static void Warning(string message) => Write("WARN", message, null);
+			public static void Error(string message) => Write("ERROR", message, null);
+			public static void Error(string message, Exception ex) => Write("ERROR", message, ex);
+
+			private static void Write(string level, string message, Exception? ex)
+			{
+				try
+				{
+					var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{level}] {message}";
+					if (ex != null) line += $"\n{ex}";
+					System.Diagnostics.Trace.WriteLine(line);
+				}
+				catch
+				{
+					// Never let logging kill the UX.
+				}
+			}
+		}
         // ============ UI CONTROLS ============
         private Panel _headerPanel = null!;
         private Panel _contentPanel = null!;
