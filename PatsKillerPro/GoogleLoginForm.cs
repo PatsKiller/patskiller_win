@@ -88,15 +88,14 @@ namespace PatsKillerPro
         // ============ INITIALIZATION ============
         private void InitializeComponent()
         {
-            // Form settings
-            this.Text = "PatsKiller Pro 2026 (Ford & Lincoln PATS Solution)";
-            this.Size = new Size(560, 620);
-            this.MinimumSize = new Size(560, 620);
-            this.StartPosition = FormStartPosition.CenterParent;
+            // Form settings - compact size for login dialog
+            this.Text = "PatsKiller Pro - Sign In";
+            this.Size = new Size(480, 580);
+            this.MinimumSize = new Size(450, 550);
+            this.MaximumSize = new Size(600, 700);
+            this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.ShowInTaskbar = false;
             this.BackColor = _colorBackground;
             this.Font = new Font("Segoe UI", 9F);
             this.AutoScaleMode = AutoScaleMode.Dpi;
@@ -111,20 +110,18 @@ namespace PatsKillerPro
             }
             catch { }
 
-            CreateHeaderPanel();
+            // Create content panel first, then header docks on top
             CreateContentPanel();
+            CreateHeaderPanel();
+            
             CreateLoginPanel();
             CreateWaitingPanel();
             CreateSuccessPanel();
             CreateErrorPanel();
 
             this.FormClosing += (s, e) => _cts?.Cancel();
-            this.Load += (s, e) => PositionHeaderLabels();
-            this.Resize += (s, e) => 
-            {
-                PositionHeaderLabels();
-                CenterActivePanel();
-            };
+            this.Load += (s, e) => CenterActivePanel();
+            this.Resize += (s, e) => CenterActivePanel();
         }
 
         [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
@@ -136,16 +133,15 @@ namespace PatsKillerPro
             _headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 80,
-                BackColor = _colorHeader,
-                Padding = new Padding(20, 15, 20, 15)
+                Height = 60,
+                BackColor = _colorHeader
             };
 
             // Logo
             _logoBox = new PictureBox
             {
-                Size = new Size(50, 50),
-                Location = new Point(20, 15),
+                Size = new Size(40, 40),
+                Location = new Point(15, 10),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 BackColor = Color.Transparent
             };
@@ -156,10 +152,10 @@ namespace PatsKillerPro
             _lblTitle = new Label
             {
                 Text = "PatsKiller Pro",
-                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
                 ForeColor = _colorText,
                 AutoSize = true,
-                Location = new Point(80, 15),
+                Location = new Point(60, 10),
                 BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblTitle);
@@ -168,36 +164,18 @@ namespace PatsKillerPro
             _lblSubtitle = new Label
             {
                 Text = "Ford & Lincoln PATS Solution",
-                Font = new Font("Segoe UI", 9F),
+                Font = new Font("Segoe UI", 8F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(82, 45),
+                Location = new Point(62, 32),
                 BackColor = Color.Transparent
             };
             _headerPanel.Controls.Add(_lblSubtitle);
 
-            // Tokens display (right side)
-            _lblTokens = new Label
-            {
-                Text = "",
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                ForeColor = _colorGreen,
-                AutoSize = true,
-                Visible = false,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                BackColor = Color.Transparent
-            };
+            // Token/Status labels (hidden until logged in)
+            _lblTokens = new Label { Visible = false, AutoSize = true, BackColor = Color.Transparent };
+            _lblStatus = new Label { Visible = false, AutoSize = true, BackColor = Color.Transparent };
             _headerPanel.Controls.Add(_lblTokens);
-
-            _lblStatus = new Label
-            {
-                Text = "Not logged in",
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                BackColor = Color.Transparent
-            };
             _headerPanel.Controls.Add(_lblStatus);
 
             this.Controls.Add(_headerPanel);
@@ -205,11 +183,7 @@ namespace PatsKillerPro
 
         private void PositionHeaderLabels()
         {
-            if (_lblTokens != null && _lblStatus != null && _headerPanel != null)
-            {
-                _lblTokens.Location = new Point(_headerPanel.Width - _lblTokens.Width - 20, 18);
-                _lblStatus.Location = new Point(_headerPanel.Width - _lblStatus.Width - 20, 45);
-            }
+            // No-op for simplified header
         }
 
         private void CreateContentPanel()
@@ -327,7 +301,7 @@ namespace PatsKillerPro
         {
             _loginPanel = new Panel
             {
-                Size = new Size(460, 560),
+                Size = new Size(400, 420),
                 BackColor = _colorPanel,
                 Visible = false
             };
@@ -335,38 +309,30 @@ namespace PatsKillerPro
             // Round corners effect via region
             _loginPanel.Paint += (s, e) =>
             {
-                using var path = GetRoundedRectPath(_loginPanel.ClientRectangle, 16);
+                using var path = GetRoundedRectPath(_loginPanel.ClientRectangle, 12);
                 using var pen = new Pen(_colorBorder, 1);
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 e.Graphics.DrawPath(pen, path);
             };
 
             var y = 30;
+            var panelW = _loginPanel.Width;
+            var btnW = 340;
+            var padL = (panelW - btnW) / 2;
 
-            // Logo centered
-            var logoPic = new PictureBox
-            {
-                Size = new Size(100, 100),
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Image = CreatePatsKillerLogo(100),
-                BackColor = Color.Transparent
-            };
-            logoPic.Location = new Point((_loginPanel.Width - 100) / 2, y);
-            _loginPanel.Controls.Add(logoPic);
-            y += logoPic.Height + 15;
-
-            // "Welcome Back" title
+            // "Welcome Back" title (no logo - already in header)
             var lblWelcome = new Label
             {
                 Text = "Welcome Back",
-                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
                 ForeColor = _colorText,
-                AutoSize = true,
+                Size = new Size(panelW - 20, 40),
+                Location = new Point(10, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblWelcome.Location = new Point((_loginPanel.Width - lblWelcome.PreferredWidth) / 2, y);
             _loginPanel.Controls.Add(lblWelcome);
-            y += lblWelcome.Height + 8;
+            y += 45;
 
             // Subtitle
             var lblSubtitle = new Label
@@ -374,51 +340,47 @@ namespace PatsKillerPro
                 Text = "Sign in to access your tokens",
                 Font = new Font("Segoe UI", 10F),
                 ForeColor = _colorTextDim,
-                AutoSize = true,
+                Size = new Size(panelW - 20, 25),
+                Location = new Point(10, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblSubtitle.Location = new Point((_loginPanel.Width - lblSubtitle.PreferredWidth) / 2, y);
             _loginPanel.Controls.Add(lblSubtitle);
-            y += lblSubtitle.Height + 18;
+            y += 35;
 
-            // ===== GOOGLE SIGN IN BUTTON (Primary) =====
+            // ===== GOOGLE SIGN IN BUTTON =====
             var btnGoogle = new Button
             {
-                Text = "     Continue with Google",
-                Size = new Size(360, 50),
-                Location = new Point((_loginPanel.Width - 360) / 2, y),
+                Text = "Continue with Google",
+                Size = new Size(btnW, 48),
+                Location = new Point(padL, y),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorGoogleBtn,
-                ForeColor = Color.FromArgb(60, 60, 60),
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(50, 50, 50),
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                TextAlign = ContentAlignment.MiddleCenter,
-                ImageAlign = ContentAlignment.MiddleLeft
+                TextAlign = ContentAlignment.MiddleCenter
             };
-            btnGoogle.FlatAppearance.BorderSize = 0;
-            btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
-            
-            // Add Google icon
-            btnGoogle.Image = CreateGoogleIcon(24);
-            btnGoogle.TextImageRelation = TextImageRelation.ImageBeforeText;
-            btnGoogle.Padding = new Padding(15, 0, 0, 0);
-            
+            btnGoogle.FlatAppearance.BorderSize = 1;
+            btnGoogle.FlatAppearance.BorderColor = _colorBorder;
+            btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(240, 240, 240);
             btnGoogle.Click += BtnGoogle_Click;
             _loginPanel.Controls.Add(btnGoogle);
-            y += btnGoogle.Height + 16;
+            y += 60;
 
-            // Divider "or sign in with email"
+            // Divider
             var lblDivider = new Label
             {
-                Text = "───────────  or sign in with email  ───────────",
-                Font = new Font("Segoe UI", 8F),
+                Text = "─────  or sign in with email  ─────",
+                Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
-                AutoSize = true,
+                Size = new Size(btnW, 22),
+                Location = new Point(padL, y),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
-            lblDivider.Location = new Point((_loginPanel.Width - lblDivider.PreferredWidth) / 2, y);
             _loginPanel.Controls.Add(lblDivider);
-            y += lblDivider.Height + 18;
+            y += 30;
 
             // Email label
             var lblEmail = new Label
@@ -427,28 +389,27 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(30, y),
+                Location = new Point(padL, y),
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblEmail);
-            y += lblEmail.Height + 6;
+            y += 22;
 
             // Email input
             var txtEmail = new TextBox
             {
-                Size = new Size(360, 40),
-                Location = new Point(30, y),
+                Name = "txtEmail",
+                Size = new Size(btnW, 32),
+                Location = new Point(padL, y),
                 BackColor = _colorInput,
-                ForeColor = _colorText,
+                ForeColor = _colorTextDim,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 11F)
+                Font = new Font("Segoe UI", 11F),
+                Text = "you@example.com"
             };
-            txtEmail.GotFocus += (s, e) => { if (txtEmail.Text == "you@example.com") txtEmail.Text = ""; };
-            txtEmail.Text = "you@example.com";
-            txtEmail.ForeColor = _colorTextDim;
-            txtEmail.GotFocus += (s, e) => txtEmail.ForeColor = _colorText;
+            txtEmail.GotFocus += (s, e) => { if (txtEmail.Text == "you@example.com") { txtEmail.Text = ""; txtEmail.ForeColor = _colorText; } };
             _loginPanel.Controls.Add(txtEmail);
-            y += txtEmail.Height + 16;
+            y += 40;
 
             // Password label
             var lblPassword = new Label
@@ -457,17 +418,18 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = _colorTextDim,
                 AutoSize = true,
-                Location = new Point(30, y),
+                Location = new Point(padL, y),
                 BackColor = Color.Transparent
             };
             _loginPanel.Controls.Add(lblPassword);
-            y += lblPassword.Height + 6;
+            y += 22;
 
             // Password input
             var txtPassword = new TextBox
             {
-                Size = new Size(360, 40),
-                Location = new Point(30, y),
+                Name = "txtPassword",
+                Size = new Size(btnW, 32),
+                Location = new Point(padL, y),
                 BackColor = _colorInput,
                 ForeColor = _colorText,
                 BorderStyle = BorderStyle.FixedSingle,
@@ -475,54 +437,30 @@ namespace PatsKillerPro
                 UseSystemPasswordChar = true
             };
             _loginPanel.Controls.Add(txtPassword);
-            y += txtPassword.Height + 18;
+            y += 45;
 
-            // Sign In button (email/password)
+            // Sign In button
             var btnSignIn = new Button
             {
                 Text = "Sign In",
-                Size = new Size(360, 45),
-                Location = new Point(30, y),
+                Size = new Size(btnW, 44),
+                Location = new Point(padL, y),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _colorRed,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
             btnSignIn.FlatAppearance.BorderSize = 0;
             btnSignIn.Click += (s, e) => 
             {
                 MessageBox.Show(
-                    "Email/password login is not yet implemented.\n\nPlease use 'Continue with Google' or register at patskiller.com",
+                    "Email/password login coming soon.\n\nPlease use 'Continue with Google'.",
                     "Coming Soon",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             };
             _loginPanel.Controls.Add(btnSignIn);
-            y += btnSignIn.Height + 16;
-
-            // Register link
-            var lblRegister = new Label
-            {
-                Text = "Don't have an account? Register at patskiller.com",
-                Font = new Font("Segoe UI", 9F),
-                ForeColor = _colorTextDim,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                Cursor = Cursors.Hand
-            };
-            lblRegister.Location = new Point((_loginPanel.Width - lblRegister.PreferredWidth) / 2, y);
-            lblRegister.Click += (s, e) =>
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "https://patskiller.com/register",
-                    UseShellExecute = true
-                });
-            };
-            lblRegister.MouseEnter += (s, e) => lblRegister.ForeColor = _colorRed;
-            lblRegister.MouseLeave += (s, e) => lblRegister.ForeColor = _colorTextDim;
-            _loginPanel.Controls.Add(lblRegister);
 
             _contentPanel.Controls.Add(_loginPanel);
         }
