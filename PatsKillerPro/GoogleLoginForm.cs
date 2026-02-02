@@ -25,15 +25,18 @@ namespace PatsKillerPro
         private readonly Color _colAccent = ColorTranslator.FromHtml("#EC4899");     // Brand Pink
         private readonly Color _colTextMain = ColorTranslator.FromHtml("#F8FAFC");   // White text
         private readonly Color _colTextMuted = ColorTranslator.FromHtml("#94A3B8");  // Gray text
+        
+        // Fonts
         private readonly Font _fontTitle = new Font("Segoe UI", 32F, FontStyle.Italic | FontStyle.Regular, GraphicsUnit.Pixel);
         private readonly Font _fontSub = new Font("Segoe UI", 14F, FontStyle.Regular, GraphicsUnit.Pixel);
         private readonly Font _fontInput = new Font("Segoe UI", 16F, FontStyle.Regular, GraphicsUnit.Pixel);
         private readonly Font _fontLabel = new Font("Segoe UI", 12F, FontStyle.Regular, GraphicsUnit.Pixel);
+        private readonly Font _fontBtnGoogle = new Font("Segoe UI Semibold", 15F, FontStyle.Regular, GraphicsUnit.Pixel);
+        private readonly Font _fontBtnSign = new Font("Segoe UI Semibold", 16F, FontStyle.Regular, GraphicsUnit.Pixel);
 
         // ============ API CONSTANTS ============
         private CancellationTokenSource? _cts;
         private const string SUPABASE_URL = "https://kmpnplpijuzzbftsjacx.supabase.co";
-        // Split to avoid build errors with long strings
         private const string API_KEY_PART1 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0";
         private const string API_KEY_PART2 = ".iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
         private const string AUTH_URL = "https://patskiller.com/desktop-auth?session=";
@@ -44,8 +47,8 @@ namespace PatsKillerPro
 
         public GoogleLoginForm()
         {
-            // 1. Form Configuration (LOCKED SIZE to prevent layout breaking)
-            this.AutoScaleMode = AutoScaleMode.None; // Prevent system scaling from crushing UI
+            // 1. Form Configuration
+            this.AutoScaleMode = AutoScaleMode.None; // Prevent DPI scaling from breaking layout
             this.DoubleBuffered = true;
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -90,12 +93,11 @@ namespace PatsKillerPro
             this.Controls.Add(header);
 
             // -- Main Content Container --
-            // We use a fixed width container centered in the form
             int contentWidth = 320;
             _mainContainer = new Panel 
             { 
-                Size = new Size(contentWidth, 480), 
-                Location = new Point((this.Width - contentWidth) / 2, 80), // 80px from top
+                Size = new Size(contentWidth, 500), 
+                Location = new Point((this.Width - contentWidth) / 2, 80),
                 BackColor = Color.Transparent 
             };
             this.Controls.Add(_mainContainer);
@@ -136,29 +138,51 @@ namespace PatsKillerPro
             _mainContainer.Controls.Add(lblSub);
             y += 45; // Spacing
 
-            // 3. Google Button
+            // 3. Google Button (CUSTOM PAINT for perfect alignment)
             var btnGoogle = new Button
             {
-                Text = "Continue with Google",
-                Font = new Font("Segoe UI Semibold", 10F),
-                ForeColor = Color.FromArgb(55, 65, 81),
+                Text = "", // Drawing text manually to fix overlap issues
                 BackColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Size = new Size(width, 45),
                 Location = new Point(0, y),
-                Cursor = Cursors.Hand,
-                Image = DrawGoogleG(18),
-                ImageAlign = ContentAlignment.MiddleLeft,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Padding = new Padding(15, 0, 0, 0) // Shift content right
+                Cursor = Cursors.Hand
             };
             btnGoogle.FlatAppearance.BorderSize = 0;
-            // Round corners
+            
+            // Pre-generate the logo to save resources on redraw
+            var googleIcon = DrawGoogleG(24);
+
             btnGoogle.Paint += (s, e) => {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+                // Rounded Corners
                 using var path = GetRoundedPath(new Rectangle(0, 0, btnGoogle.Width, btnGoogle.Height), 6);
                 btnGoogle.Region = new Region(path);
+                
+                // Draw Background
+                using var bgBrush = new SolidBrush(Color.White);
+                g.FillPath(bgBrush, path);
+
+                // Draw Icon (Fixed Left Position)
+                g.DrawImage(googleIcon, 16, (btnGoogle.Height - 24) / 2);
+
+                // Draw Text (Centered)
+                string text = "Continue with Google";
+                SizeF textSize = g.MeasureString(text, _fontBtnGoogle);
+                
+                float textX = (btnGoogle.Width - textSize.Width) / 2;
+                float textY = (btnGoogle.Height - textSize.Height) / 2;
+                
+                // Prevent overlap if button is too small
+                if (textX < 45) textX = 45; 
+
+                using var textBrush = new SolidBrush(Color.FromArgb(55, 65, 81));
+                g.DrawString(text, _fontBtnGoogle, textBrush, textX, textY);
             };
+            
             btnGoogle.Click += (s, e) => StartGoogleAuth();
             _mainContainer.Controls.Add(btnGoogle);
             y += 65;
@@ -198,9 +222,7 @@ namespace PatsKillerPro
             // 7. Sign In Button
             var btnSign = new Button
             {
-                Text = "Sign In",
-                Font = new Font("Segoe UI Semibold", 11F),
-                ForeColor = Color.White,
+                Text = "", // Draw Manually for smoother font rendering
                 BackColor = _colAccent,
                 FlatStyle = FlatStyle.Flat,
                 Size = new Size(width, 45),
@@ -212,15 +234,20 @@ namespace PatsKillerPro
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var path = GetRoundedPath(new Rectangle(0, 0, btnSign.Width, btnSign.Height), 6);
                 btnSign.Region = new Region(path);
+                
+                using var bg = new SolidBrush(_colAccent);
+                e.Graphics.FillPath(bg, path);
+
+                // Centered Text
+                string txt = "Sign In";
+                SizeF sz = e.Graphics.MeasureString(txt, _fontBtnSign);
+                using var br = new SolidBrush(Color.White);
+                e.Graphics.DrawString(txt, _fontBtnSign, br, (btnSign.Width - sz.Width)/2, (btnSign.Height - sz.Height)/2);
             };
             btnSign.Click += (s, e) => MessageBox.Show("Please use Google Sign In.");
             _mainContainer.Controls.Add(btnSign);
         }
 
-        /// <summary>
-        /// Creates the specific "Floating Label" input style from the mockup.
-        /// The label sits ON TOP of the border, masking it.
-        /// </summary>
         private Panel CreateFloatingLabelInput(string label, string placeholder, bool isPassword)
         {
             int h = 55;
@@ -228,29 +255,26 @@ namespace PatsKillerPro
             
             var container = new Panel { Size = new Size(w, h), BackColor = Color.Transparent };
             
-            // The Label
-            // We place it at (12, 0). It needs to overlap the border drawn below.
+            // Label overlaps the border
             var lbl = new Label 
             { 
                 Text = label, 
                 Font = _fontLabel, 
                 ForeColor = _colTextMuted, 
-                BackColor = _colBackground, // MATCH FORM BG to hide the border line behind it
+                BackColor = _colBackground, 
                 AutoSize = true,
                 Location = new Point(12, 0)
             };
             
-            // The Input Box Container (drawn below label)
             var boxPnl = new Panel 
             { 
                 Size = new Size(w, 45), 
-                Location = new Point(0, 8), // Shift down so top border hits middle of label
+                Location = new Point(0, 8), 
                 BackColor = Color.Transparent 
             };
 
             boxPnl.Paint += (s, e) => {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                // Draw Rounded Border
                 using var pen = new Pen(_colBorder, 1);
                 using var brush = new SolidBrush(_colSurface);
                 var rect = new Rectangle(0, 0, boxPnl.Width - 1, boxPnl.Height - 1);
@@ -260,7 +284,6 @@ namespace PatsKillerPro
                 e.Graphics.DrawPath(pen, path);
             };
 
-            // TextBox
             var txt = new TextBox
             {
                 Text = isPassword ? "" : placeholder,
@@ -273,7 +296,6 @@ namespace PatsKillerPro
                 UseSystemPasswordChar = isPassword
             };
 
-            // Custom Icon (Pink Dots)
             var icon = new PictureBox
             {
                 Size = new Size(24, 24),
@@ -282,11 +304,10 @@ namespace PatsKillerPro
                 BackColor = Color.Transparent
             };
 
-            // Assemble
             boxPnl.Controls.Add(txt);
             boxPnl.Controls.Add(icon);
-            container.Controls.Add(boxPnl); // Add box first
-            container.Controls.Add(lbl);    // Add label second (z-index higher) so it covers the border
+            container.Controls.Add(boxPnl);
+            container.Controls.Add(lbl);
             lbl.BringToFront();
 
             return container;
@@ -312,10 +333,8 @@ namespace PatsKillerPro
             var b = new Bitmap(s, s);
             using var g = Graphics.FromImage(b);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            // Pink Bg
             using var br = new SolidBrush(_colAccent);
             g.FillPath(br, GetRoundedPath(new Rectangle(0,0,s,s), 4));
-            // Dots
             using var w = new SolidBrush(Color.White);
             g.FillEllipse(w, 5, 10, 3, 3);
             g.FillEllipse(w, 10, 10, 3, 3);
@@ -329,11 +348,14 @@ namespace PatsKillerPro
             using var g = Graphics.FromImage(b);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var r = new Rectangle(0, 0, s, s);
-            using var pR = new Pen(Color.Red, 2);
-            using var pB = new Pen(Color.Blue, 2);
-            using var pG = new Pen(Color.Green, 2);
-            using var pY = new Pen(Color.Yellow, 2);
-            g.DrawArc(pR, 2, 2, s-4, s-4, 180, 90);
+            using var pR = new Pen(Color.FromArgb(234, 67, 53), 2.5f);
+            using var pB = new Pen(Color.FromArgb(66, 133, 244), 2.5f);
+            using var pG = new Pen(Color.FromArgb(52, 168, 83), 2.5f);
+            using var pY = new Pen(Color.FromArgb(251, 188, 5), 2.5f);
+            
+            // Draw standard G arcs
+            g.DrawArc(pR, 2, 2, s-4, s-4, 180, 100);
+            g.DrawArc(pY, 2, 2, s-4, s-4, 40, 50);
             g.DrawArc(pG, 2, 2, s-4, s-4, 90, 90);
             g.DrawArc(pB, 2, 2, s-4, s-4, 270, 90);
             return b;
