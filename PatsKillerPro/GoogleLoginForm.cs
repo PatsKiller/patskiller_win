@@ -103,8 +103,8 @@ namespace PatsKillerPro
         {
             // Form settings
             Text = "PatsKiller Pro - Sign In";
-            ClientSize = new Size(420, 600);
-            MinimumSize = new Size(420, 600);
+            ClientSize = new Size(460, 660);
+            MinimumSize = new Size(460, 660);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
@@ -200,19 +200,21 @@ namespace PatsKillerPro
             _lblTitle = new Label
             {
                 Text = "PatsKiller Pro",
-                Font = new Font("Segoe UI", 22F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 20.5F, FontStyle.Bold),
                 ForeColor = _colorRed,
-                AutoSize = true,
-                BackColor = Color.Transparent
+                AutoSize = false,
+                AutoEllipsis = true,
+                BackColor = Color.Transparent,
+                TextAlign = ContentAlignment.MiddleLeft
             };
             _headerPanel.Controls.Add(_lblTitle);
 
             _headerPanel.Layout += (s, e) =>
             {
-                // Vertically center title next to logo (robust across DPI)
+                // Keep title inside the header (prevents clipping on smaller widths / higher DPI)
                 var x = _logoBox.Right + 14;
-                var y = (_headerPanel.Height - _lblTitle.Height) / 2;
-                _lblTitle.Location = new Point(x, Math.Max(0, y));
+                var w = Math.Max(10, _headerPanel.ClientSize.Width - x - 18);
+                _lblTitle.Bounds = new Rectangle(x, 0, w, _headerPanel.Height);
             };
 
             // Token/Status labels (hidden until logged in)
@@ -365,7 +367,7 @@ private void LoadLogo()
             var panelW = Math.Max(320, ClientSize.Width - _contentPanel.Padding.Horizontal);
             _loginPanel = new Panel
             {
-                Size = new Size(panelW, 470),
+                Size = new Size(panelW, 520),
                 BackColor = Color.Transparent,
                 Visible = false
             };
@@ -378,18 +380,23 @@ private void LoadLogo()
             try { welcomeFont = new Font("Segoe Script", 38F, FontStyle.Italic); }
             catch { welcomeFont = new Font("Segoe UI", 34F, FontStyle.Italic); }
 
+            var welcomeSize = TextRenderer.MeasureText("Welcome", welcomeFont);
+            var welcomeH = Math.Max(80, welcomeSize.Height + 18);
+
             var lblWelcome = new Label
             {
                 Text = "Welcome",
                 Font = welcomeFont,
                 ForeColor = _colorText,
-                Size = new Size(panelW, 64),
+                Size = new Size(panelW, welcomeH),
                 Location = new Point(0, y),
                 TextAlign = ContentAlignment.MiddleCenter,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Padding = new Padding(0, 8, 0, 0),
+                UseCompatibleTextRendering = true
             };
             _loginPanel.Controls.Add(lblWelcome);
-            y += 66;
+            y += welcomeH + 6;
 
             // Subtitle
             var lblSubtitle = new Label
@@ -410,14 +417,16 @@ private void LoadLogo()
             btnGoogle.Location = new Point(0, y);
             btnGoogle.BackColor = _colorGoogleBtn;
             btnGoogle.ForeColor = Color.FromArgb(55, 65, 81); // Slate
-            btnGoogle.Font = new Font("Segoe UI Semibold", 12F);
+            btnGoogle.Font = new Font("Segoe UI Semibold", 11.5F);
+            btnGoogle.TextAlign = ContentAlignment.MiddleCenter;
             btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(210, 210, 210);
             btnGoogle.FlatAppearance.BorderSize = 1;
             btnGoogle.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
-            btnGoogle.Image = CreateGoogleGIcon(22);
+            btnGoogle.Image = CreateGoogleGIcon(20);
             btnGoogle.ImageAlign = ContentAlignment.MiddleLeft;
             btnGoogle.TextImageRelation = TextImageRelation.ImageBeforeText;
-            btnGoogle.Padding = new Padding(16, 0, 16, 0);
+            btnGoogle.Padding = new Padding(18, 0, 18, 0);
+            FitButtonText(btnGoogle, 9.5F);
             btnGoogle.Click += BtnGoogle_Click;
             _loginPanel.Controls.Add(btnGoogle);
             y += 74;
@@ -490,7 +499,6 @@ private void LoadLogo()
 
             _contentPanel.Controls.Add(_loginPanel);
         }
-
         /// <summary>
         /// Creates a modern floating label input field (mockup style)
         /// </summary>
@@ -541,6 +549,9 @@ private void LoadLogo()
                 e.Graphics.DrawPath(pen, path);
             };
 
+            // Right-side dots pill (mockup "..." action)
+            const int dotSize = 28;
+
             // Text input
             var txt = new TextBox
             {
@@ -550,7 +561,7 @@ private void LoadLogo()
                 ForeColor = _colorText,
                 Font = new Font("Segoe UI", 12.5F),
                 Location = new Point(16, 18),
-                Size = new Size(width - 16 - 16 - 44, 24),
+                Size = new Size(Math.Max(10, width - 16 - 16 - dotSize - 14), 24),
                 PlaceholderText = placeholder,
                 UseSystemPasswordChar = isPassword
             };
@@ -558,17 +569,11 @@ private void LoadLogo()
             txt.Enter += (s, e) => { isFocused = true; borderPanel.Invalidate(); };
             txt.Leave += (s, e) => { isFocused = false; borderPanel.Invalidate(); };
 
-            borderPanel.Click += (s, e) => txt.Focus();
-            container.Click += (s, e) => txt.Focus();
-            lbl.Click += (s, e) => txt.Focus();
-
-            // Right-side action button (mockup "..." pill)
             var btnAction = new Button
             {
-                Size = new Size(34, 34),
-                Location = new Point(width - 16 - 34, 10),
-                Text = "⋯",
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Size = new Size(dotSize, dotSize),
+                Location = new Point(width - 16 - dotSize, (borderPanel.Height - dotSize) / 2),
+                Text = "",
                 BackColor = _colorRedDark,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -576,7 +581,34 @@ private void LoadLogo()
                 TabStop = false
             };
             btnAction.FlatAppearance.BorderSize = 0;
-            btnAction.Region = CreateRoundedRegion(btnAction.Width, btnAction.Height, 8);
+            btnAction.Region = CreateRoundedRegion(btnAction.Width, btnAction.Height, 10);
+
+            btnAction.MouseEnter += (s, e) => { btnAction.BackColor = _colorRed; btnAction.Invalidate(); };
+            btnAction.MouseLeave += (s, e) => { btnAction.BackColor = _colorRedDark; btnAction.Invalidate(); };
+
+            btnAction.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                // Ensure a clean fill (WinForms can skip painting when Region is set)
+                using var path = CreateRoundedRectPath(new Rectangle(0, 0, dotSize - 1, dotSize - 1), 10);
+                using var bg = new SolidBrush(btnAction.BackColor);
+                e.Graphics.FillPath(bg, path);
+
+                // Draw 3 centered dots
+                using var dotBrush = new SolidBrush(Color.White);
+                const int r = 2;
+                const int gap = 6;
+                int totalW = (r * 2 * 3) + (gap * 2);
+                int startX = (dotSize - totalW) / 2;
+                int cy = dotSize / 2;
+
+                for (int i = 0; i < 3; i++)
+                {
+                    int cx = startX + (i * ((r * 2) + gap)) + r;
+                    e.Graphics.FillEllipse(dotBrush, cx - r, cy - r, r * 2, r * 2);
+                }
+            };
 
             if (isPassword)
             {
@@ -610,8 +642,12 @@ private void LoadLogo()
 
             borderPanel.Controls.Add(txt);
             borderPanel.Controls.Add(btnAction);
-            container.Controls.Add(borderPanel);
 
+            borderPanel.Click += (s, e) => txt.Focus();
+            container.Click += (s, e) => txt.Focus();
+            lbl.Click += (s, e) => txt.Focus();
+
+            container.Controls.Add(borderPanel);
             return container;
         }
 
@@ -643,6 +679,31 @@ private void LoadLogo()
             };
 
             return btn;
+        }
+
+        /// <summary>
+        /// Shrinks button font (within reason) to prevent text clipping on high DPI / narrow widths.
+        /// </summary>
+        private void FitButtonText(Button btn, float minSize)
+        {
+            if (btn == null) return;
+
+            // Available text width after padding + image.
+            int imgW = btn.Image?.Width ?? 0;
+            int pad = btn.Padding.Left + btn.Padding.Right;
+            int extra = imgW > 0 ? (imgW + 10) : 0;
+            int available = Math.Max(10, btn.Width - pad - extra);
+
+            // If already fits, keep it.
+            var font = btn.Font;
+            while (font.Size > minSize)
+            {
+                var sz = TextRenderer.MeasureText(btn.Text, font);
+                if (sz.Width <= available) break;
+
+                font = new Font(font.FontFamily, font.Size - 0.5f, font.Style);
+                btn.Font = font;
+            }
         }
 
         private Region CreateRoundedRegion(int width, int height, int radius)
@@ -814,7 +875,7 @@ private void LoadLogo()
             btnContinue.ForeColor = Color.White;
             btnContinue.Font = new Font("Segoe UI Semibold", 13F);
             btnContinue.FlatAppearance.BorderSize = 0;
-            btnContinue.Click += (s, e) => this.DialogResult = DialogResult.OK;
+            btnContinue.Click += (s, e) => { this.DialogResult = DialogResult.OK; this.Close(); };
             _successPanel.Controls.Add(btnContinue);
 
             _contentPanel.Controls.Add(_successPanel);
@@ -918,6 +979,8 @@ private void LoadLogo()
             _successPanel.Visible = true;
             _errorPanel.Visible = false;
             CenterActivePanel();
+        
+            BeginAutoCloseOk();
         }
 
         private void ShowErrorState(string message)
@@ -956,6 +1019,27 @@ private void CenterActivePanel()
     var y = (_contentPanel.ClientSize.Height - activePanel.Height) / 2;
 
     activePanel.Location = new Point(Math.Max(0, x), Math.Max(0, y));
+}
+
+private void BeginAutoCloseOk(int delayMs = 900)
+{
+    // When shown via ShowDialog(), setting DialogResult will end the modal loop.
+    // We also call Close() to be explicit and to handle non-modal testing.
+    var t = new System.Windows.Forms.Timer { Interval = Math.Max(250, delayMs) };
+    t.Tick += (s, e) =>
+    {
+        t.Stop();
+        t.Dispose();
+
+        if (IsDisposed) return;
+        try
+        {
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+        catch { /* no-op */ }
+    };
+    t.Start();
 }
 // ============ EVENT HANDLERS ============
         private async void BtnGoogle_Click(object? sender, EventArgs e)
