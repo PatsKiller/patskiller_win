@@ -19,7 +19,8 @@
     <StartupObject>PatsKillerPro.Program</StartupObject>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PlatformTarget>AnyCPU</PlatformTarget>
-    <Deterministic>false</Deterministic>
+    <!-- Deterministic builds improve supply-chain integrity and make it easier to verify binaries -->
+    <Deterministic>true</Deterministic>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

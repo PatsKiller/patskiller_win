@@ -65,6 +65,85 @@ namespace PatsKillerPro.Utils
             }
         }
 
+        // -------- Sensitive keys (never persist to settings.json) --------
+
+        private static bool IsSensitiveKey(string key)
+        {
+            // Tokens are secrets and must not live on disk in plaintext.
+            return string.Equals(key, "auth_token", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "refresh_token", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetSensitiveString(string key)
+        {
+            // 1) Try Credential Manager first
+            try
+            {
+                var v = SecureStorage.LoadSecret(key);
+                if (!string.IsNullOrEmpty(v)) return v;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"SecureStorage read failed for '{key}': {ex.Message}");
+            }
+
+            // 2) If an old plaintext value exists in settings.json, migrate it to Credential Manager.
+            lock (_lock)
+            {
+                if (_settings.TryGetValue(key, out var value))
+                {
+                    var raw = value.ValueKind == JsonValueKind.String ? (value.GetString() ?? string.Empty) : value.ToString();
+                    if (!string.IsNullOrEmpty(raw))
+                    {
+                        try
+                        {
+                            SecureStorage.SaveSecret(key, raw);
+                            _settings.Remove(key);
+                            Save(); // remove plaintext token from disk
+                            Logger.Info($"Migrated '{key}' from settings.json to Windows Credential Manager.");
+                        }
+                        catch (Exception ex)
+                        {
+                            // If migration fails, return the value so the app still works, but DO NOT write it back.
+                            Logger.Warning($"SecureStorage migration failed for '{key}': {ex.Message}");
+                        }
+                    }
+                    return raw;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static void SetSensitiveString(string key, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                try { SecureStorage.DeleteSecret(key); } catch { /* best effort */ }
+                lock (_lock) { _settings.Remove(key); }
+                Save();
+                return;
+            }
+
+            try
+            {
+                SecureStorage.SaveSecret(key, value);
+            }
+            catch (Exception ex)
+            {
+                // Hard-fail is safer than silently dropping back to plaintext.
+                Logger.Error($"SecureStorage write failed for '{key}': {ex.Message}", ex);
+                throw;
+            }
+
+            lock (_lock)
+            {
+                // Ensure we never persist it to settings.json
+                _settings.Remove(key);
+            }
+            Save();
+        }
+
         public static void Save()
         {
             lock (_lock)
@@ -103,6 +182,13 @@ namespace PatsKillerPro.Utils
         public static string GetString(string key, string defaultValue = "")
         {
             Load();
+
+            if (IsSensitiveKey(key))
+            {
+                var secret = GetSensitiveString(key);
+                return string.IsNullOrEmpty(secret) ? defaultValue : secret;
+            }
+
             lock (_lock)
             {
                 if (_settings.TryGetValue(key, out var value))
@@ -116,6 +202,13 @@ namespace PatsKillerPro.Utils
         public static void SetString(string key, string value)
         {
             Load();
+
+            if (IsSensitiveKey(key))
+            {
+                SetSensitiveString(key, value);
+                return;
+            }
+
             lock (_lock)
             {
                 using var doc = JsonDocument.Parse($"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"");
@@ -184,6 +277,12 @@ namespace PatsKillerPro.Utils
         public static void Remove(string key)
         {
             Load();
+
+            if (IsSensitiveKey(key))
+            {
+                try { SecureStorage.DeleteSecret(key); } catch { /* best effort */ }
+            }
+
             lock (_lock)
             {
                 _settings.Remove(key);
@@ -193,6 +292,13 @@ namespace PatsKillerPro.Utils
         public static bool Contains(string key)
         {
             Load();
+
+            if (IsSensitiveKey(key))
+            {
+                try { return !string.IsNullOrEmpty(SecureStorage.LoadSecret(key)); }
+                catch { return false; }
+            }
+
             lock (_lock)
             {
                 return _settings.ContainsKey(key);
@@ -203,6 +309,13 @@ namespace PatsKillerPro.Utils
         {
             lock (_lock)
             {
+                try
+                {
+                    SecureStorage.DeleteSecret("auth_token");
+                    SecureStorage.DeleteSecret("refresh_token");
+                }
+                catch { /* best effort */ }
+
                 _settings.Clear();
                 Save();
             }

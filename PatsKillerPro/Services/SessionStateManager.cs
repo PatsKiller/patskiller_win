@@ -26,7 +26,7 @@ namespace PatsKillerPro.Services
             public string? VIN { get; set; }
             public string? Platform { get; set; }
             public string? Outcode { get; set; }
-            public string? Incode { get; set; }
+            // SECURITY: Incodes are effectively passwords. Do not persist them to disk.
             public int KeyCount { get; set; }
             public bool IsBcmUnlocked { get; set; }
             public bool IsGatewayUnlocked { get; set; }
@@ -62,7 +62,7 @@ namespace PatsKillerPro.Services
         public void UpdateCodes(string? outcode, string? incode)
         {
             if (!string.IsNullOrEmpty(outcode)) _currentState.Outcode = outcode;
-            if (!string.IsNullOrEmpty(incode)) _currentState.Incode = incode;
+            // Intentionally ignore incode for persistence.
             Save();
         }
 
@@ -151,8 +151,9 @@ namespace PatsKillerPro.Services
         /// </summary>
         public bool HasRecoverableSession()
         {
-            return !string.IsNullOrEmpty(_currentState.VIN) && 
-                   !string.IsNullOrEmpty(_currentState.Incode);
+            // We can recover VIN + Outcode context (UI convenience), but user must re-enter incode.
+            return !string.IsNullOrEmpty(_currentState.VIN) &&
+                   !string.IsNullOrEmpty(_currentState.Outcode);
         }
 
         /// <summary>

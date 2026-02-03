@@ -14,6 +14,13 @@ namespace PatsKillerPro.J2534
         private readonly J2534Api _api;
         private readonly FordUdsProtocol _uds;
 
+        /// <summary>
+        /// Internal access to the shared UDS protocol instance.
+        /// Used to bridge legacy <see cref="Communication.UdsService"/> consumers (PatsOperations)
+        /// without opening a second J2534 connection.
+        /// </summary>
+        internal FordUdsProtocol UdsProtocol => _uds;
+
         // Ford Module Addresses
         public static class ModuleAddress
         {
@@ -277,6 +284,20 @@ namespace PatsKillerPro.J2534
             {
                 await Task.Delay(10); // Async placeholder
                 _uds.SetTargetModule(ModuleAddress.BCM, ModuleAddress.BCM + 8);
+                var response = _uds.ClearDtc();
+                return response.Success;
+            });
+        }
+
+        /// <summary>
+        /// Clears DTCs for the specified module (default: BCM).
+        /// </summary>
+        public async Task<bool> ClearDtcsAsync(uint moduleAddress = ModuleAddress.BCM)
+        {
+            return await Task.Run(async () =>
+            {
+                await Task.Delay(10); // Async placeholder
+                _uds.SetTargetModule(moduleAddress, moduleAddress + 8);
                 var response = _uds.ClearDtc();
                 return response.Success;
             });

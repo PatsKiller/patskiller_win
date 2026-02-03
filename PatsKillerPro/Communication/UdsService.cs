@@ -12,6 +12,20 @@ namespace PatsKillerPro.Communication
         private FordUdsProtocol? _uds;
         private J2534Api? _api;
         private bool _disposed;
+        private bool _ownsTransport = true;
+
+        /// <summary>
+        /// Creates a non-owning wrapper around an existing FordUdsProtocol.
+        /// This is used to run legacy PatsOperations (which expects UdsService)
+        /// over the single shared J2534 connection.
+        /// </summary>
+        internal UdsService(FordUdsProtocol udsProtocol)
+        {
+            _uds = udsProtocol ?? throw new ArgumentNullException(nameof(udsProtocol));
+            _ownsTransport = false;
+        }
+
+        public UdsService() { }
 
         public bool IsConnected => _uds?.IsConnected ?? false;
 
@@ -21,6 +35,7 @@ namespace PatsKillerPro.Communication
             {
                 _api = new J2534Api(device.FunctionLibrary);
                 _uds = new FordUdsProtocol(_api);
+                _ownsTransport = true;
                 return true;
             }
             catch { return false; }
@@ -32,7 +47,11 @@ namespace PatsKillerPro.Communication
             return _uds.Connect(baudRate) == J2534Error.STATUS_NOERROR;
         }
 
-        public void Disconnect() => _uds?.Disconnect();
+        public void Disconnect()
+        {
+            if (_ownsTransport)
+                _uds?.Disconnect();
+        }
 
         public void SetTargetModule(uint txId, uint rxId) => _uds?.SetTargetModule(txId, rxId);
         public void SetTargetModule(uint moduleAddress) => _uds?.SetTargetModule(moduleAddress, moduleAddress + 8);
@@ -270,8 +289,10 @@ namespace PatsKillerPro.Communication
         {
             if (!_disposed)
             {
-                _uds?.Disconnect();
-                _api?.Dispose();
+                if (_ownsTransport)
+                    _uds?.Disconnect();
+                if (_ownsTransport)
+                    _api?.Dispose();
                 _disposed = true;
             }
             GC.SuppressFinalize(this);

@@ -1517,11 +1517,11 @@ private async void BtnErase_Click(object? s, EventArgs e)
             
             try
             {
-                var result = await J2534Service.Instance.ClearDtcsAsync();
+                var result = await J2534Service.Instance.ClearP160AAsync();
                 if (result.Success)
                 {
-                    MessageBox.Show("P160A cleared!");
-                    Log("success", "P160A cleared");
+                    MessageBox.Show("P160A cleared (targeted)");
+                    Log("success", "P160A cleared (targeted)");
                 }
                 else
                 {
@@ -1538,11 +1538,11 @@ private async void BtnErase_Click(object? s, EventArgs e)
             
             try
             {
-                var result = await J2534Service.Instance.ClearDtcsAsync();
+                var result = await J2534Service.Instance.ClearB10A2Async();
                 if (result.Success)
                 {
-                    MessageBox.Show("B10A2 cleared!");
-                    Log("success", "B10A2 cleared");
+                    MessageBox.Show("B10A2 cleared (targeted)");
+                    Log("success", "B10A2 cleared (targeted)");
                 }
                 else
                 {
@@ -1612,8 +1612,13 @@ private async void BtnErase_Click(object? s, EventArgs e)
         private async void BtnKeypad_Click(object? s, EventArgs e)
         {
             if (!_isConnected) { MessageBox.Show("Connect first"); return; }
-            
-            var r = MessageBox.Show("YES = Read keypad code\nNO = Write new code", "Keypad Code", MessageBoxButtons.YesNoCancel);
+
+            var r = MessageBox.Show(
+                "YES = Read keypad code\nNO = Write a new 5-digit code (digits 1-9 only)",
+                "Keypad Code",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
             if (r == DialogResult.Cancel) return;
 
             if (r == DialogResult.Yes)
@@ -1621,22 +1626,54 @@ private async void BtnErase_Click(object? s, EventArgs e)
                 if (!Confirm(1, "Read Keypad")) return;
                 try
                 {
-                    // Read keypad - placeholder
-                    MessageBox.Show("Keypad read not implemented in J2534Service yet");
-                    Log("info", "Keypad read requested");
+                    var result = await J2534Service.Instance.ReadKeypadCodeAsync();
+                    if (result.Success)
+                    {
+                        MessageBox.Show($"Keypad Code: {result.Code}\n\nTip: write it down before you close this window.", "Keypad Code", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Log("success", $"Keypad read: {result.Code}");
+                    }
+                    else
+                    {
+                        Log("error", result.Error ?? "Keypad read failed");
+                    }
                 }
                 catch (Exception ex) { ShowError("Error", "Failed", ex); }
             }
             else
             {
-                var nc = Microsoft.VisualBasic.Interaction.InputBox("Enter 5-digit code:", "Keypad Code", "");
-                if (nc.Length != 5) return;
+                // Writing keypad is a BCM write operation — require a safety checklist.
+                if (!SafetyChecklistForm.Show(
+                    this,
+                    "Write Keypad Code",
+                    "Writes a new 5-digit keypad/door code to the BCM.",
+                    new[]
+                    {
+                        "Battery support/charger connected (stable voltage)",
+                        "Ignition ON, engine OFF",
+                        "No other diagnostic tools connected",
+                        "I understand an incorrect code may lock me out"
+                    }))
+                    return;
+
+                using var prompt = new KeypadCodeInputForm();
+                if (prompt.ShowDialog(this) != DialogResult.OK) return;
+
+                var nc = prompt.Code;
+                if (string.IsNullOrWhiteSpace(nc)) return;
+
                 if (!Confirm(1, "Write Keypad")) return;
                 try
                 {
-                    // Write keypad - placeholder
-                    MessageBox.Show($"Keypad write to {nc} not implemented in J2534Service yet");
-                    Log("info", $"Keypad write {nc} requested");
+                    var result = await J2534Service.Instance.WriteKeypadCodeAsync(nc);
+                    if (result.Success)
+                    {
+                        MessageBox.Show($"Keypad code written: {nc}", "Keypad Code", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Log("success", $"Keypad write: {nc}");
+                    }
+                    else
+                    {
+                        Log("error", result.Error ?? "Keypad write failed");
+                    }
                 }
                 catch (Exception ex) { ShowError("Error", "Failed", ex); }
             }
@@ -1738,14 +1775,28 @@ private async void BtnErase_Click(object? s, EventArgs e)
         private async void BtnKam_Click(object? s, EventArgs e)
         {
             if (!_isConnected) { MessageBox.Show("Connect first"); return; }
+
+            // KAM clear is a write/routine operation. Require an explicit safety checklist.
+            if (!SafetyChecklistForm.Show(
+                this,
+                "Clear KAM",
+                "Clears PCM Keep-Alive Memory (adaptive learned values).",
+                new[]
+                {
+                    "Battery support/charger connected (stable voltage)",
+                    "Ignition ON, engine OFF",
+                    "No other diagnostic tools connected",
+                    "I understand this changes PCM learned values"
+                }))
+                return;
             
             try
             {
-                var result = await J2534Service.Instance.VehicleResetAsync();
+                var result = await J2534Service.Instance.ClearKAMAsync();
                 if (result.Success)
                 {
-                    MessageBox.Show("KAM cleared!");
-                    Log("success", "KAM cleared");
+                    MessageBox.Show("KAM cleared (proper routine)");
+                    Log("success", "KAM cleared (proper routine)");
                 }
                 else
                 {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using PatsKillerPro.Communication;
 using PatsKillerPro.J2534;
 using PatsKillerPro.Vehicle;
 using PatsKillerPro.Services.Workflow;
@@ -22,6 +23,19 @@ namespace PatsKillerPro.Services
         private J2534Api? _api;
         private J2534DeviceInfo? _currentDevice;
         private FordPatsService? _patsService;
+
+        // Legacy PatsOperations bridge (non-owning) for feature parity operations.
+        // This allows us to reuse the already-implemented PatsOperations methods
+        // without opening a second J2534 connection.
+        private PatsOperations CreatePatsOperations()
+        {
+            if (_patsService == null)
+                throw new InvalidOperationException("Not connected.");
+
+            // Non-owning wrapper around the shared UDS protocol.
+            var uds = new UdsService(_patsService.UdsProtocol);
+            return new PatsOperations(uds);
+        }
         
         // Workflow integration
         private WorkflowService? _workflowService;
@@ -335,15 +349,25 @@ namespace PatsKillerPro.Services
             }
         });
 
-        public Task<OperationResult> ClearCrashEventAsync() => RunExclusiveAsync(async () =>
+        /// <summary>
+        /// Clears the Ford "Crush Event" flag (BCM DID 0x5B17) using the legacy-proven PatsOperations implementation.
+        /// NOTE: This is not a generic DTC clear.
+        /// </summary>
+        public Task<OperationResult> ClearCrushEventAsync() => RunExclusiveAsync(async () =>
         {
             try
             {
                 if (_patsService == null)
                     return OperationResult.Fail("Not connected.");
 
-                var success = await _patsService.ClearCrashEventAsync();
-                return success ? OperationResult.Ok() : OperationResult.Fail("Clear crash event failed.");
+                // Use PatsOperations (it already performs the correct security/session steps)
+                await Task.Run(() =>
+                {
+                    var pats = CreatePatsOperations();
+                    pats.ClearCrushEvent();
+                }).ConfigureAwait(false);
+
+                return OperationResult.Ok();
             }
             catch (Exception ex)
             {
@@ -351,9 +375,13 @@ namespace PatsKillerPro.Services
             }
         });
 
-        // Alias for ClearCrashEventAsync
-        public Task<OperationResult> ClearCrashFlagAsync() => ClearCrashEventAsync();
+        // Backward-compatible names used by MainForm
+        public Task<OperationResult> ClearCrashEventAsync() => ClearCrushEventAsync();
+        public Task<OperationResult> ClearCrashFlagAsync() => ClearCrushEventAsync();
 
+        /// <summary>
+        /// Generic DTC clear (default BCM).
+        /// </summary>
         public Task<OperationResult> ClearDtcsAsync() => RunExclusiveAsync(async () =>
         {
             try
@@ -361,8 +389,133 @@ namespace PatsKillerPro.Services
                 if (_patsService == null)
                     return OperationResult.Fail("Not connected.");
 
-                var success = await _patsService.ClearCrashEventAsync(); // Uses same DTC clear
+                var success = await _patsService.ClearDtcsAsync().ConfigureAwait(false);
                 return success ? OperationResult.Ok() : OperationResult.Fail("Clear DTCs failed.");
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        /// <summary>
+        /// Targeted clear: PCM P160A.
+        /// </summary>
+        public Task<OperationResult> ClearP160AAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                await Task.Run(() =>
+                {
+                    var pats = CreatePatsOperations();
+                    pats.ClearP160A();
+                }).ConfigureAwait(false);
+
+                return OperationResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        /// <summary>
+        /// Targeted clear: BCM B10A2.
+        /// </summary>
+        public Task<OperationResult> ClearB10A2Async() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                await Task.Run(() =>
+                {
+                    var pats = CreatePatsOperations();
+                    pats.ClearB10A2();
+                }).ConfigureAwait(false);
+
+                return OperationResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        /// <summary>
+        /// Proper KAM clear routine (PCM routine control), not a generic ECU reset.
+        /// </summary>
+        public Task<OperationResult> ClearKAMAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                await Task.Run(() =>
+                {
+                    var pats = CreatePatsOperations();
+                    pats.ClearKAM();
+                }).ConfigureAwait(false);
+
+                return OperationResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                return OperationResult.Fail(ex.Message);
+            }
+        });
+
+        /// <summary>
+        /// Keypad (door code) read.
+        /// </summary>
+        public Task<KeypadResult> ReadKeypadCodeAsync() => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return KeypadResult.Fail("Not connected.");
+
+                var code = await Task.Run(() =>
+                {
+                    var pats = CreatePatsOperations();
+                    return pats.ReadKeypadCode();
+                }).ConfigureAwait(false);
+
+                return string.IsNullOrWhiteSpace(code)
+                    ? KeypadResult.Fail("Keypad code not returned.")
+                    : KeypadResult.Ok(code.Trim());
+            }
+            catch (Exception ex)
+            {
+                return KeypadResult.Fail(ex.Message);
+            }
+        });
+
+        /// <summary>
+        /// Keypad (door code) write.
+        /// </summary>
+        public Task<OperationResult> WriteKeypadCodeAsync(string code) => RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_patsService == null)
+                    return OperationResult.Fail("Not connected.");
+
+                if (string.IsNullOrWhiteSpace(code))
+                    return OperationResult.Fail("Code cannot be empty.");
+
+                await Task.Run(() =>
+                {
+                    var pats = CreatePatsOperations();
+                    pats.WriteKeypadCode(code.Trim());
+                }).ConfigureAwait(false);
+
+                return OperationResult.Ok();
             }
             catch (Exception ex)
             {
@@ -872,6 +1025,12 @@ namespace PatsKillerPro.Services
         {
             public static OutcodeResult Ok(string outcode) => new(true, outcode);
             public static OutcodeResult Fail(string error) => new(false, null, error);
+        }
+
+        public record KeypadResult(bool Success, string? Code = null, string? Error = null)
+        {
+            public static KeypadResult Ok(string code) => new(true, code);
+            public static KeypadResult Fail(string error) => new(false, null, error);
         }
 
         public record KeyOperationResult(bool Success, int CurrentKeyCount = 0, string? Error = null)
