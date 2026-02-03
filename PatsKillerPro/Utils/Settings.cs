@@ -131,9 +131,10 @@ namespace PatsKillerPro.Utils
             }
             catch (Exception ex)
             {
-                // Hard-fail is safer than silently dropping back to plaintext.
-                Logger.Error($"SecureStorage write failed for '{key}': {ex.Message}", ex);
-                throw;
+                // Do NOT crash the app if secure persistence isn't available (e.g., CredWrite blocked by policy).
+                // SecureStorage already avoids plaintext and will keep the secret in-memory for this run.
+                // Worst case: user will need to sign in again next launch.
+                Logger.Warning($"SecureStorage write failed for '{key}': {ex.Message}. Continuing without persisted token.");
             }
 
             lock (_lock)
