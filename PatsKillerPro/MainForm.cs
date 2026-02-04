@@ -1282,13 +1282,22 @@ namespace PatsKillerPro
 
         private async System.Threading.Tasks.Task CompleteLoginAsync(string authToken, string refreshToken, string email)
         {
+            var startTime = DateTime.Now;
+            
             _authToken = authToken ?? "";
             _refreshToken = refreshToken ?? "";
             _userEmail = email ?? "";
 
             SaveSession();
 
+            // Set auth context for ProActivityLogger
+            ProActivityLogger.Instance.SetAuthContext(_authToken, _userEmail);
+
             await RefreshTokenBalanceAsync();
+            
+            // Log successful login
+            ProActivityLogger.Instance.LogLogin(email, true, null, (int)(DateTime.Now - startTime).TotalMilliseconds);
+            Log("success", $"Logged in as {email}");
         }
 
         private async System.Threading.Tasks.Task RefreshTokenBalanceAsync()
@@ -1298,6 +1307,7 @@ namespace PatsKillerPro
             try
             {
                 TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
+                ProActivityLogger.Instance.SetAuthContext(_authToken, _userEmail);
                 await TokenBalanceService.Instance.RefreshBalanceAsync();
                 _tokenBalance = TokenBalanceService.Instance.TotalTokens;
             }
@@ -1323,7 +1333,14 @@ namespace PatsKillerPro
 
         private async void Logout()
         {
+            // Log logout before clearing session
+            if (!string.IsNullOrEmpty(_userEmail))
+            {
+                ProActivityLogger.Instance.LogLogout(_userEmail);
+            }
+            
             ClearSession();
+            ProActivityLogger.Instance.ClearAuthContext();
             ApplyAuthHeader();
 
             // Optional: immediately present the modal login again (switch user).
@@ -1375,6 +1392,8 @@ namespace PatsKillerPro
                 return;
             }
 
+            var startTime = DateTime.Now;
+
             try
             {
                 var device = _devices[idx];
@@ -1386,17 +1405,49 @@ namespace PatsKillerPro
                     _lblStatus.Text = "Status: Connected";
                     _lblStatus.ForeColor = SUCCESS;
                     Log("success", $"Connected to {device.Name}");
+                    
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                    {
+                        Action = "device_connect",
+                        ActionCategory = "diagnostics",
+                        Success = true,
+                        TokenChange = 0, // FREE
+                        Details = $"Connected to {device.Name}",
+                        ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds,
+                        Metadata = new { deviceName = device.Name, dllPath = device.DllPath }
+                    });
                 }
                 else
                 {
                     _lblStatus.Text = "Status: Connection Failed";
                     _lblStatus.ForeColor = DANGER;
                     Log("error", $"Failed: {result.Error}");
+                    
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                    {
+                        Action = "device_connect",
+                        ActionCategory = "diagnostics",
+                        Success = false,
+                        TokenChange = 0,
+                        ErrorMessage = result.Error,
+                        Details = $"Failed to connect to {device.Name}",
+                        ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+                    });
                 }
             }
             catch (Exception ex)
             {
+                ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                {
+                    Action = "device_connect",
+                    ActionCategory = "diagnostics",
+                    Success = false,
+                    ErrorMessage = ex.Message,
+                    ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+                });
+                
                 ShowError("Connect Failed", "Could not connect to device", ex);
+            }
             }
         }
 
@@ -1408,6 +1459,8 @@ namespace PatsKillerPro
         return;
     }
 
+    var startTime = DateTime.Now;
+
     try
     {
         var result = await J2534Service.Instance.ReadVehicleInfoAsync();
@@ -1416,16 +1469,45 @@ namespace PatsKillerPro
             _lblVin.Text = $"VIN: {result.Vin}";
             _lblVin.ForeColor = SUCCESS;
             Log("success", $"VIN: {result.Vin}");
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "read_vin",
+                ActionCategory = "diagnostics",
+                Vin = result.Vin,
+                Success = true,
+                TokenChange = 0, // FREE
+                ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+            });
         }
         else
         {
             _lblVin.Text = "VIN: Could not read";
             _lblVin.ForeColor = DANGER;
             Log("error", result.Error ?? "Failed to read VIN");
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "read_vin",
+                ActionCategory = "diagnostics",
+                Success = false,
+                TokenChange = 0,
+                ErrorMessage = result.Error ?? "Failed to read VIN",
+                ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+            });
         }
     }
     catch (Exception ex)
     {
+        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+        {
+            Action = "read_vin",
+            ActionCategory = "diagnostics",
+            Success = false,
+            ErrorMessage = ex.Message,
+            ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+        });
+        
         ShowError("Read Failed", "Could not read VIN", ex);
     }
 }
@@ -1438,8 +1520,18 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 return;
             }
 
+            var startTime = DateTime.Now;
+            string? vin = null;
+            string? vehicleYear = null;
+            string? vehicleModel = null;
+
             try
             {
+                // Extract vehicle info from UI
+                vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
+                if (string.IsNullOrWhiteSpace(vin)) vin = null;
+                vehicleModel = _cmbVehicles.SelectedItem?.ToString();
+
                 // Step 1: Read outcode from vehicle if not already present
                 if (string.IsNullOrEmpty(_txtOutcode.Text))
                 {
@@ -1457,10 +1549,6 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 // Step 2: Call provider-router to get incode (this charges 1 token)
                 Log("info", "Calculating incode via provider-router [1 TOKEN]...");
                 
-                // Extract VIN from label (format: "VIN: 1FA6P8...")
-                var vinText = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
-                var vin = string.IsNullOrWhiteSpace(vinText) ? null : vinText;
-                
                 var incodeResult = await Services.IncodeService.Instance.CalculateIncodeAsync(
                     _txtOutcode.Text, 
                     vin,
@@ -1470,6 +1558,21 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 if (!incodeResult.Success || string.IsNullOrEmpty(incodeResult.Incode))
                 {
                     Log("error", incodeResult.Error ?? "Failed to calculate incode");
+                    
+                    // Log failure
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                    {
+                        Action = "get_incode",
+                        ActionCategory = "key_programming",
+                        Vin = vin,
+                        VehicleYear = vehicleYear,
+                        VehicleModel = vehicleModel,
+                        Success = false,
+                        TokenChange = 0,
+                        ErrorMessage = incodeResult.Error ?? "Failed to calculate incode",
+                        ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+                    });
+                    
                     MessageBox.Show(
                         $"Failed to calculate incode:\n\n{incodeResult.Error}",
                         "Error",
@@ -1482,6 +1585,21 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 // Store in UI field ONLY (never to disk/settings)
                 _txtIncode.Text = incodeResult.Incode;
                 Log("success", $"Incode received (Provider: {incodeResult.ProviderUsed}, Tokens: {incodeResult.TokensCharged})");
+
+                // Log success
+                ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                {
+                    Action = "get_incode",
+                    ActionCategory = "key_programming",
+                    Vin = vin,
+                    VehicleYear = vehicleYear,
+                    VehicleModel = vehicleModel,
+                    Success = true,
+                    TokenChange = -incodeResult.TokensCharged,
+                    ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds,
+                    Details = $"Provider: {incodeResult.ProviderUsed}",
+                    Metadata = new { provider = incodeResult.ProviderUsed, tokensRemaining = incodeResult.TokensRemaining }
+                });
 
                 // Step 3: Initialize BcmSessionManager with UDS service
                 var uds = J2534Service.Instance.GetUdsService();
@@ -1500,6 +1618,20 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 if (unlockResult.IsSuccess)
                 {
                     Log("success", "✓ BCM unlocked - Key functions enabled");
+                    
+                    // Log BCM unlock success
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                    {
+                        Action = "bcm_unlock",
+                        ActionCategory = "key_programming",
+                        Vin = vin,
+                        VehicleYear = vehicleYear,
+                        VehicleModel = vehicleModel,
+                        Success = true,
+                        TokenChange = 0, // FREE - included with incode
+                        Details = "BCM unlocked, key functions enabled"
+                    });
+                    
                     MessageBox.Show(
                         $"BCM Unlocked Successfully!\n\n" +
                         $"Provider: {incodeResult.ProviderUsed}\n" +
@@ -1516,6 +1648,20 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 else
                 {
                     Log("warning", $"Incode received but BCM unlock failed: {unlockResult.Error}");
+                    
+                    // Log BCM unlock failure
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                    {
+                        Action = "bcm_unlock",
+                        ActionCategory = "key_programming",
+                        Vin = vin,
+                        VehicleYear = vehicleYear,
+                        VehicleModel = vehicleModel,
+                        Success = false,
+                        TokenChange = 0,
+                        ErrorMessage = unlockResult.Error
+                    });
+                    
                     MessageBox.Show(
                         $"Incode calculated but BCM unlock failed:\n\n{unlockResult.Error}\n\n" +
                         $"The incode is saved - you can retry the unlock manually.",
@@ -1527,6 +1673,18 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
             }
             catch (Exception ex)
             {
+                // Log exception
+                ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                {
+                    Action = "get_incode",
+                    ActionCategory = "key_programming",
+                    Vin = vin,
+                    Success = false,
+                    TokenChange = 0,
+                    ErrorMessage = ex.Message,
+                    ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+                });
+                
                 ShowError("Incode Failed", "Could not calculate incode", ex);
             }
         }
@@ -1548,9 +1706,13 @@ private async void BtnProgram_Click(object? s, EventArgs e)
         return;
     }
 
+    // Extract vehicle info
+    var vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
+    if (string.IsNullOrWhiteSpace(vin)) vin = null;
+    var vehicleModel = _cmbVehicles.SelectedItem?.ToString();
 
-            if (!Confirm(1, "Program Key"))
-                return;
+    if (!Confirm(1, "Program Key"))
+        return;
 
     try
     {
@@ -1562,6 +1724,18 @@ private async void BtnProgram_Click(object? s, EventArgs e)
         {
             var msg = unlock.Error ?? "Incode rejected";
             Log("error", msg);
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "program_key",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleModel = vehicleModel,
+                Success = false,
+                TokenChange = 0,
+                ErrorMessage = msg
+            });
+            
             MessageBox.Show($"Incode rejected: {msg}");
             return;
         }
@@ -1589,16 +1763,49 @@ private async void BtnProgram_Click(object? s, EventArgs e)
             _lblKeys.Text = prog.CurrentKeyCount.ToString();
             MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\nRemove key, insert next key, and click Program again.");
             Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "program_key",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleModel = vehicleModel,
+                Success = true,
+                TokenChange = 0, // FREE - session already charged
+                Details = $"Key programmed to slot {nextSlot}, total keys: {prog.CurrentKeyCount}",
+                Metadata = new { slot = nextSlot, totalKeys = prog.CurrentKeyCount }
+            });
         }
         else
         {
             var msg = prog.Error ?? "Programming failed";
             Log("error", msg);
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "program_key",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleModel = vehicleModel,
+                Success = false,
+                TokenChange = 0,
+                ErrorMessage = msg
+            });
+            
             MessageBox.Show($"Programming failed: {msg}");
         }
     }
     catch (Exception ex)
     {
+        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+        {
+            Action = "program_key",
+            ActionCategory = "key_programming",
+            Vin = vin,
+            Success = false,
+            ErrorMessage = ex.Message
+        });
+        
         ShowError("Program Failed", "Could not program key", ex);
     }
 }
@@ -1623,6 +1830,11 @@ private async void BtnErase_Click(object? s, EventArgs e)
         return;
     }
 
+    // Extract vehicle info
+    var vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
+    if (string.IsNullOrWhiteSpace(vin)) vin = null;
+    var vehicleModel = _cmbVehicles.SelectedItem?.ToString();
+
     try
     {
         Log("info", "Erasing all keys...");
@@ -1633,6 +1845,18 @@ private async void BtnErase_Click(object? s, EventArgs e)
         {
             var msg = unlock.Error ?? "Incode rejected";
             Log("error", msg);
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "erase_keys",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleModel = vehicleModel,
+                Success = false,
+                TokenChange = 0,
+                ErrorMessage = msg
+            });
+            
             MessageBox.Show($"Incode rejected: {msg}");
             return;
         }
@@ -1644,16 +1868,49 @@ private async void BtnErase_Click(object? s, EventArgs e)
             _lblKeys.Text = erase.CurrentKeyCount.ToString();
             MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}");
             Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "erase_keys",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleModel = vehicleModel,
+                Success = true,
+                TokenChange = 0, // FREE - session already charged
+                Details = $"All keys erased, remaining: {erase.CurrentKeyCount}",
+                Metadata = new { keysRemaining = erase.CurrentKeyCount }
+            });
         }
         else
         {
             var msg = erase.Error ?? "Erase failed";
             Log("error", msg);
+            
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "erase_keys",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleModel = vehicleModel,
+                Success = false,
+                TokenChange = 0,
+                ErrorMessage = msg
+            });
+            
             MessageBox.Show($"Erase failed: {msg}");
         }
     }
     catch (Exception ex)
     {
+        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+        {
+            Action = "erase_keys",
+            ActionCategory = "key_programming",
+            Vin = vin,
+            Success = false,
+            ErrorMessage = ex.Message
+        });
+        
         ShowError("Erase Failed", "Could not erase keys", ex);
     }
 }
