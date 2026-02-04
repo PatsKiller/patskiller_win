@@ -1448,7 +1448,6 @@ namespace PatsKillerPro
                 
                 ShowError("Connect Failed", "Could not connect to device", ex);
             }
-            }
         }
 
         private async void BtnReadVin_Click(object? s, EventArgs e)
