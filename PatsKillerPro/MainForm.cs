@@ -61,6 +61,7 @@ namespace PatsKillerPro
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
+        private ToolTip _toolTip = null!;
 
         // BCM Session Panel
         private Panel _bcmSessionPanel = null!;
@@ -322,6 +323,15 @@ namespace PatsKillerPro
 
         private void BuildUI()
         {
+            // Initialize ToolTip for all controls
+            _toolTip = new ToolTip
+            {
+                AutoPopDelay = 10000,
+                InitialDelay = 500,
+                ReshowDelay = 200,
+                ShowAlways = true
+            };
+
             // HEADER (table-based layout so it doesn't overlap at high DPI / long email)
             _header = new Panel
             {
@@ -1449,9 +1459,14 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
 
                 // Step 2: Call provider-router to get incode (this charges 1 token)
                 Log("info", "Calculating incode via provider-router [1 TOKEN]...");
+                
+                // Extract VIN from label (format: "VIN: 1FA6P8...")
+                var vinText = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
+                var vin = string.IsNullOrWhiteSpace(vinText) ? null : vinText;
+                
                 var incodeResult = await Services.IncodeService.Instance.CalculateIncodeAsync(
                     _txtOutcode.Text, 
-                    _txtVin.Text,
+                    vin,
                     "BCM" // Default to BCM for main form
                 );
 

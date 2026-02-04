@@ -359,10 +359,11 @@ namespace PatsKillerPro.Services
         });
 
         /// <summary>
-        /// Clears the Ford "Crush Event" flag (BCM DID 0x5B17) using the legacy-proven PatsOperations implementation.
+        /// <summary>
+        /// Clears the Ford "Crash Event" flag (BCM DID 0x5B17) using the legacy-proven PatsOperations implementation.
         /// NOTE: This is not a generic DTC clear.
         /// </summary>
-        public Task<OperationResult> ClearCrushEventAsync() => RunExclusiveAsync(async () =>
+        public Task<OperationResult> ClearCrashEventAsync() => RunExclusiveAsync(async () =>
         {
             try
             {
@@ -373,7 +374,7 @@ namespace PatsKillerPro.Services
                 await Task.Run(() =>
                 {
                     var pats = CreatePatsOperations();
-                    pats.ClearCrushEvent();
+                    pats.ClearCrashEvent(); // Use new method name
                 }).ConfigureAwait(false);
 
                 return OperationResult.Ok();
@@ -384,9 +385,9 @@ namespace PatsKillerPro.Services
             }
         });
 
-        // Backward-compatible names used by MainForm
-        public Task<OperationResult> ClearCrashEventAsync() => ClearCrushEventAsync();
-        public Task<OperationResult> ClearCrashFlagAsync() => ClearCrushEventAsync();
+        // Backward-compatible aliases
+        public Task<OperationResult> ClearCrushEventAsync() => ClearCrashEventAsync();
+        public Task<OperationResult> ClearCrashFlagAsync() => ClearCrashEventAsync();
 
         /// <summary>
         /// Generic DTC clear (default BCM).
