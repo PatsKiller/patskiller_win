@@ -215,7 +215,7 @@ namespace PatsKillerPro.Forms
                 if (success)
                 {
                     Log($"  ✓ {name} Counter written (1 token)", SUCCESS);
-                    await ProActivityLogger.Instance.LogActivityAsync($"key_counter_{name.ToLower()}", _vin, null, null, null, true, metadata: new { value });
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"key_counter_{name.ToLower()}", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = -1, Details = $"{name} counter set to {value}", Metadata = new { value } });
                     if (name == "Min") Invoke(new Action(() => _lblCurrentMin.Text = $"Current: {value}"));
                     else Invoke(new Action(() => _lblCurrentMax.Text = $"Current: {value}"));
                 }

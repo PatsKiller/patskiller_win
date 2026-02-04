@@ -140,7 +140,7 @@ namespace PatsKillerPro.Services
                 // Update token balance from response
                 if (result.TokensRemaining.HasValue)
                 {
-                    TokenBalanceService.Instance.UpdateFromServerResponse(result.TokensRemaining.Value);
+                    TokenBalanceService.Instance.RefreshAfterOperation();
                 }
 
                 return new IncodeResult

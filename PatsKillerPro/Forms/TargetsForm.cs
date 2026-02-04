@@ -225,7 +225,7 @@ namespace PatsKillerPro.Forms
                     if (!_uds.RequestSecurityAccess(moduleAddr)) { Log($"  ✗ {moduleName}: Security access denied", DANGER); return; }
                     System.Threading.Thread.Sleep(50);
                     var success = _uds.WriteDataByIdentifier(moduleAddr, did, bytes);
-                    if (success) { Log($"  ✓ {moduleName}: Written successfully (1 token)", SUCCESS); await ProActivityLogger.Instance.LogActivityAsync($"target_write_{moduleName.ToLower()}", _vin, null, null, null, true, metadata: new { did = $"0x{did:X4}", data = hexData }); }
+                    if (success) { Log($"  ✓ {moduleName}: Written successfully (1 token)", SUCCESS); ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"target_write_{moduleName.ToLower()}", ActionCategory = "targets", Vin = _vin, Success = true, TokenChange = -1, Details = $"Target block written to {moduleName}", Metadata = new { did = $"0x{did:X4}", data = hexData } }); }
                     else Log($"  ✗ {moduleName}: Write failed", DANGER);
                 } catch (Exception ex) { Log($"  ✗ {moduleName}: {ex.Message}", DANGER); }
             });
