@@ -657,10 +657,9 @@ namespace PatsKillerPro
             _bcmSessionPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = Dpi(60),
+                Height = Dpi(56),
                 BackColor = Color.FromArgb(25, 32, 42),
-                Margin = new Padding(0, Dpi(12), 0, 0),
-                Padding = new Padding(Dpi(16), Dpi(12), Dpi(16), Dpi(12))
+                Margin = new Padding(0, Dpi(10), 0, 0)
             };
             _bcmSessionPanel.Paint += (s, e) =>
             {
@@ -671,15 +670,27 @@ namespace PatsKillerPro
                 e.Graphics.DrawRectangle(pen, rect);
             };
 
-            // Left side: Status + Session info
-            var leftPanel = new FlowLayoutPanel
+            // Use TableLayoutPanel for reliable left-right layout
+            var sessionTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Padding = new Padding(Dpi(12), Dpi(10), Dpi(12), Dpi(10))
+            };
+            sessionTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); // Left expands
+            sessionTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // Right auto-sizes
+
+            // LEFT: Status + Session info
+            var leftFlow = new FlowLayoutPanel
             {
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 BackColor = Color.Transparent,
-                Dock = DockStyle.Left,
-                Padding = new Padding(0)
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0)
             };
 
             _lblBcmStatus = new Label
@@ -688,48 +699,49 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI Semibold", 11),
                 ForeColor = DANGER,
                 AutoSize = true,
-                Margin = new Padding(0, Dpi(4), Dpi(24), 0)
+                Margin = new Padding(0, Dpi(3), Dpi(20), 0)
             };
-            leftPanel.Controls.Add(_lblBcmStatus);
+            leftFlow.Controls.Add(_lblBcmStatus);
 
             _lblSessionTimer = new Label
             {
                 Text = "Session: 00:00",
                 Font = new Font("Segoe UI", 10),
-                ForeColor = Color.FromArgb(140, 150, 165),
+                ForeColor = Color.FromArgb(140, 200, 140),
                 AutoSize = true,
-                Margin = new Padding(0, Dpi(5), Dpi(12), 0),
+                Margin = new Padding(0, Dpi(4), Dpi(8), 0),
                 Visible = false
             };
-            leftPanel.Controls.Add(_lblSessionTimer);
+            leftFlow.Controls.Add(_lblSessionTimer);
 
             _lblKeepAlive = new Label
             {
                 Text = "●",
-                Font = new Font("Segoe UI", 14),
+                Font = new Font("Segoe UI", 12),
                 ForeColor = SUCCESS,
                 AutoSize = true,
                 Margin = new Padding(0, Dpi(2), 0, 0),
                 Visible = false
             };
             _toolTip.SetToolTip(_lblKeepAlive, "Keep-alive active\nBCM session maintained");
-            leftPanel.Controls.Add(_lblKeepAlive);
+            leftFlow.Controls.Add(_lblKeepAlive);
 
-            _bcmSessionPanel.Controls.Add(leftPanel);
+            sessionTable.Controls.Add(leftFlow, 0, 0);
 
-            // Right side: Operation buttons
-            var rightPanel = new FlowLayoutPanel
+            // RIGHT: Operation buttons in a FlowLayoutPanel
+            var rightFlow = new FlowLayoutPanel
             {
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
                 BackColor = Color.Transparent,
-                Dock = DockStyle.Right,
-                Padding = new Padding(0)
+                Anchor = AnchorStyles.Right,
+                Margin = new Padding(0)
             };
 
             // Helper for session buttons
-            Button CreateSessionButton(string text, int width)
+            Button CreateSessionBtn(string text, int width)
             {
                 var btn = new Button
                 {
@@ -737,11 +749,11 @@ namespace PatsKillerPro
                     Size = new Size(Dpi(width), Dpi(32)),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.FromArgb(45, 55, 70),
-                    ForeColor = Color.FromArgb(160, 170, 180),
+                    ForeColor = Color.FromArgb(140, 145, 155),
                     Font = new Font("Segoe UI", 9),
                     Enabled = false,
                     Cursor = Cursors.Arrow,
-                    Margin = new Padding(0, 0, Dpi(8), 0)
+                    Margin = new Padding(Dpi(6), 0, 0, 0)
                 };
                 btn.FlatAppearance.BorderColor = Color.FromArgb(60, 70, 85);
                 btn.FlatAppearance.BorderSize = 1;
@@ -749,23 +761,24 @@ namespace PatsKillerPro
                 return btn;
             }
 
-            _btnProgram = CreateSessionButton("🔑 Program Keys", 120);
+            _btnProgram = CreateSessionBtn("🔑 Program", 95);
+            _btnProgram.Margin = new Padding(0, 0, 0, 0); // First button no left margin
             _btnProgram.Click += BtnProgram_Click;
             _toolTip.SetToolTip(_btnProgram, "Program new PATS keys\nRequires BCM unlock\n[FREE - included with incode]");
-            rightPanel.Controls.Add(_btnProgram);
+            rightFlow.Controls.Add(_btnProgram);
 
-            _btnErase = CreateSessionButton("🗑️ Erase Keys", 110);
+            _btnErase = CreateSessionBtn("🗑️ Erase", 85);
             _btnErase.Click += BtnErase_Click;
             _toolTip.SetToolTip(_btnErase, "Erase all programmed keys\n⚠️ This cannot be undone!\n[FREE - included with incode]");
-            rightPanel.Controls.Add(_btnErase);
+            rightFlow.Controls.Add(_btnErase);
 
-            _btnKeyCounters = CreateSessionButton("📊 Counters", 100);
-            _btnKeyCounters.Margin = new Padding(0); // No right margin on last button
+            _btnKeyCounters = CreateSessionBtn("📊 Counters", 95);
             _btnKeyCounters.Click += BtnKeyCounters_Click;
             _toolTip.SetToolTip(_btnKeyCounters, "View/Edit key counters (Min/Max)\n[FREE - included with incode]");
-            rightPanel.Controls.Add(_btnKeyCounters);
+            rightFlow.Controls.Add(_btnKeyCounters);
 
-            _bcmSessionPanel.Controls.Add(rightPanel);
+            sessionTable.Controls.Add(rightFlow, 1, 0);
+            _bcmSessionPanel.Controls.Add(sessionTable);
             sec3.Controls.Add(_bcmSessionPanel);
 
             // Session timer update (every 1 second)
