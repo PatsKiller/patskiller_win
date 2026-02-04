@@ -1296,7 +1296,7 @@ namespace PatsKillerPro
             await RefreshTokenBalanceAsync();
             
             // Log successful login
-            ProActivityLogger.Instance.LogLogin(email, true, null, (int)(DateTime.Now - startTime).TotalMilliseconds);
+            ProActivityLogger.Instance.LogLogin(email ?? "unknown", true, null, (int)(DateTime.Now - startTime).TotalMilliseconds);
             Log("success", $"Logged in as {email}");
         }
 
@@ -1414,7 +1414,7 @@ namespace PatsKillerPro
                         TokenChange = 0, // FREE
                         Details = $"Connected to {device.Name}",
                         ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds,
-                        Metadata = new { deviceName = device.Name, dllPath = device.DllPath }
+                        Metadata = new { deviceName = device.Name, vendor = device.Vendor }
                     });
                 }
                 else
