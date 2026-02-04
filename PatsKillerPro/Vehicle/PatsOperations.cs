@@ -23,7 +23,8 @@ namespace PatsKillerPro.Vehicle
         public const int TOKEN_COST_BCM_FACTORY = 3;      // 2-3 tokens
         public const int TOKEN_COST_CLEAR_P160A = 1;      // 1 token
         public const int TOKEN_COST_CLEAR_B10A2 = 1;      // 1 token
-        public const int TOKEN_COST_CLEAR_CRASH = 1;      // 1 token
+        public const int TOKEN_COST_CLEAR_CRASH = 1;      // 1 token (preferred name)
+        public const int TOKEN_COST_CLEAR_CRUSH = TOKEN_COST_CLEAR_CRASH; // backward compat
         public const int TOKEN_COST_CLEAR_KAM = 0;        // FREE
         public const int TOKEN_COST_ESCL_INIT = 1;        // 1 token
         public const int TOKEN_COST_KEYPAD_READ = 1;      // 1 token
@@ -326,13 +327,13 @@ namespace PatsKillerPro.Vehicle
         }
 
         /// <summary>
-        /// Clears crash/crush event flag from BCM
+        /// Clears crash event flag from BCM (also known as "crush event")
         /// Token Cost: 1 token
         /// Used after collision repairs
         /// </summary>
-        public void ClearCrushEvent()
+        public void ClearCrashEvent()
         {
-            Logger.Info("Clearing crush event from BCM");
+            Logger.Info("Clearing crash event from BCM");
 
             try
             {
@@ -345,29 +346,35 @@ namespace PatsKillerPro.Vehicle
                 }
                 Thread.Sleep(100);
 
-                // Read crush event status first
-                var crushStatus = _uds.ReadDataByIdentifier(ModuleAddresses.BCM_TX, 0x5B17);
-                if (crushStatus != null && crushStatus.Length > 0 && crushStatus[0] != 0x00)
+                // Read crash event status first
+                var crashStatus = _uds.ReadDataByIdentifier(ModuleAddresses.BCM_TX, 0x5B17);
+                if (crashStatus != null && crashStatus.Length > 0 && crashStatus[0] != 0x00)
                 {
-                    Logger.Info($"Crush event detected (status: 0x{crushStatus[0]:X2}), clearing...");
+                    Logger.Info($"Crash event detected (status: 0x{crashStatus[0]:X2}), clearing...");
                     
-                    // Write 0x00 to clear crush event flag
+                    // Write 0x00 to clear crash event flag
                     _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, 0x5B17, new byte[] { 0x00 });
                     Thread.Sleep(500);
                     
-                    Logger.Info("Crush event cleared");
+                    Logger.Info("Crash event cleared");
                 }
                 else
                 {
-                    Logger.Info("No crush event detected");
+                    Logger.Info("No crash event detected");
                 }
             }
             catch (Exception ex)
             {
-                Logger.Error($"Clear crush event failed: {ex.Message}", ex);
+                Logger.Error($"Clear crash event failed: {ex.Message}", ex);
                 throw;
             }
         }
+
+        /// <summary>
+        /// Backward compatibility alias for ClearCrashEvent
+        /// </summary>
+        [Obsolete("Use ClearCrashEvent instead")]
+        public void ClearCrushEvent() => ClearCrashEvent();
 
         /// <summary>
         /// Clears Keep Alive Memory (KAM) - resets adaptive learning

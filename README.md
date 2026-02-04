@@ -13,7 +13,7 @@ Ford & Lincoln PATS Key Programming Solution
 - ESCL/CEI steering lock initialization
 - Door keypad code read/write
 - 2020+ Gateway unlock support
-- DTC clearing (P160A, B10A2, Crush Event)
+- DTC clearing (P160A, B10A2, Crash Event)
 - Comprehensive tooltips on all UI elements
 
 ### Requirements

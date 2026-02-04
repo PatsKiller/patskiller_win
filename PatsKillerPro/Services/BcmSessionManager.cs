@@ -49,8 +49,8 @@ namespace PatsKillerPro.Services
         private int _consecutiveFailures;
         private const int MAX_FAILURES = 3;
 
-        // Keep-alive timer
-        private Timer? _keepAliveTimer;
+        // Keep-alive timer (System.Threading.Timer for background execution)
+        private System.Threading.Timer? _keepAliveTimer;
         private const int KEEP_ALIVE_INTERVAL_MS = 2000; // 2 seconds
         private bool _keepAliveActive;
 
@@ -217,7 +217,7 @@ namespace PatsKillerPro.Services
             StopKeepAlive();
             
             _keepAliveActive = true;
-            _keepAliveTimer = new Timer(KeepAliveCallback, null, KEEP_ALIVE_INTERVAL_MS, KEEP_ALIVE_INTERVAL_MS);
+            _keepAliveTimer = new System.Threading.Timer(KeepAliveCallback, null, KEEP_ALIVE_INTERVAL_MS, KEEP_ALIVE_INTERVAL_MS);
             Log("Keep-alive timer started (2s interval)");
         }
 
