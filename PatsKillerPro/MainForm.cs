@@ -653,135 +653,119 @@ namespace PatsKillerPro
 
             sec3.Controls.Add(row3);
 
-            // === BCM SESSION PANEL ===
+            // === BCM SESSION PANEL (Professional Design) ===
             _bcmSessionPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = Dpi(70),
-                BackColor = Color.FromArgb(30, 40, 50),
-                Margin = DpiPad(0, 10, 0, 0),
-                Padding = DpiPad(15, 10, 15, 10)
+                Height = Dpi(60),
+                BackColor = Color.FromArgb(25, 32, 42),
+                Margin = new Padding(0, Dpi(12), 0, 0),
+                Padding = new Padding(Dpi(16), Dpi(12), Dpi(16), Dpi(12))
             };
             _bcmSessionPanel.Paint += (s, e) =>
             {
                 var state = BcmSessionManager.Instance.GetState();
-                var borderColor = state.IsUnlocked ? SUCCESS : Color.FromArgb(80, 80, 90);
-                using var pen = new Pen(borderColor, 2);
-                e.Graphics.DrawRectangle(pen, 1, 1, _bcmSessionPanel.Width - 3, _bcmSessionPanel.Height - 3);
+                var borderColor = state.IsUnlocked ? SUCCESS : Color.FromArgb(70, 75, 85);
+                using var pen = new Pen(borderColor, state.IsUnlocked ? 2 : 1);
+                var rect = new Rectangle(0, 0, _bcmSessionPanel.Width - 1, _bcmSessionPanel.Height - 1);
+                e.Graphics.DrawRectangle(pen, rect);
             };
 
-            var sessionLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 5,
-                RowCount = 1,
-                BackColor = Color.Transparent
-            };
-            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-            // Lock/Unlock indicator
-            _lblBcmStatus = new Label
-            {
-                Text = "🔒 BCM LOCKED",
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                ForeColor = DANGER,
-                AutoSize = true,
-                Margin = DpiPad(0, 8, 20, 0)
-            };
-            sessionLayout.Controls.Add(_lblBcmStatus, 0, 0);
-
-            // Session timer
-            _lblSessionTimer = new Label
-            {
-                Text = "Session: --:--",
-                Font = new Font("Segoe UI", 10),
-                ForeColor = TEXT_DIM,
-                AutoSize = true,
-                Margin = DpiPad(0, 10, 20, 0),
-                Visible = false
-            };
-            sessionLayout.Controls.Add(_lblSessionTimer, 1, 0);
-
-            // Keep-alive indicator
-            _lblKeepAlive = new Label
-            {
-                Text = "●",
-                Font = new Font("Segoe UI", 12),
-                ForeColor = SUCCESS,
-                AutoSize = true,
-                Margin = DpiPad(0, 8, 20, 0),
-                Visible = false
-            };
-            _toolTip.SetToolTip(_lblKeepAlive, "Keep-alive active - BCM session maintained");
-            sessionLayout.Controls.Add(_lblKeepAlive, 2, 0);
-
-            // Spacer
-            sessionLayout.Controls.Add(new Panel { BackColor = Color.Transparent }, 3, 0);
-
-            // Session operation buttons
-            var sessionBtnPanel = new FlowLayoutPanel
+            // Left side: Status + Session info
+            var leftPanel = new FlowLayoutPanel
             {
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 BackColor = Color.Transparent,
-                Margin = DpiPad(0, 0, 0, 0)
+                Dock = DockStyle.Left,
+                Padding = new Padding(0)
             };
 
-            _btnProgram = new Button
+            _lblBcmStatus = new Label
             {
-                Text = "🔑 Program Keys",
-                Size = new Size(Dpi(130), Dpi(36)),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = BTN_BG,
-                ForeColor = TEXT,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Enabled = false,
-                Margin = DpiPad(0, 0, 8, 0)
+                Text = "🔒 BCM LOCKED",
+                Font = new Font("Segoe UI Semibold", 11),
+                ForeColor = DANGER,
+                AutoSize = true,
+                Margin = new Padding(0, Dpi(4), Dpi(24), 0)
             };
-            _btnProgram.FlatAppearance.BorderColor = BORDER;
+            leftPanel.Controls.Add(_lblBcmStatus);
+
+            _lblSessionTimer = new Label
+            {
+                Text = "Session: 00:00",
+                Font = new Font("Segoe UI", 10),
+                ForeColor = Color.FromArgb(140, 150, 165),
+                AutoSize = true,
+                Margin = new Padding(0, Dpi(5), Dpi(12), 0),
+                Visible = false
+            };
+            leftPanel.Controls.Add(_lblSessionTimer);
+
+            _lblKeepAlive = new Label
+            {
+                Text = "●",
+                Font = new Font("Segoe UI", 14),
+                ForeColor = SUCCESS,
+                AutoSize = true,
+                Margin = new Padding(0, Dpi(2), 0, 0),
+                Visible = false
+            };
+            _toolTip.SetToolTip(_lblKeepAlive, "Keep-alive active\nBCM session maintained");
+            leftPanel.Controls.Add(_lblKeepAlive);
+
+            _bcmSessionPanel.Controls.Add(leftPanel);
+
+            // Right side: Operation buttons
+            var rightPanel = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                BackColor = Color.Transparent,
+                Dock = DockStyle.Right,
+                Padding = new Padding(0)
+            };
+
+            // Helper for session buttons
+            Button CreateSessionButton(string text, int width)
+            {
+                var btn = new Button
+                {
+                    Text = text,
+                    Size = new Size(Dpi(width), Dpi(32)),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(45, 55, 70),
+                    ForeColor = Color.FromArgb(160, 170, 180),
+                    Font = new Font("Segoe UI", 9),
+                    Enabled = false,
+                    Cursor = Cursors.Arrow,
+                    Margin = new Padding(0, 0, Dpi(8), 0)
+                };
+                btn.FlatAppearance.BorderColor = Color.FromArgb(60, 70, 85);
+                btn.FlatAppearance.BorderSize = 1;
+                btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 65, 80);
+                return btn;
+            }
+
+            _btnProgram = CreateSessionButton("🔑 Program Keys", 120);
             _btnProgram.Click += BtnProgram_Click;
-            _toolTip.SetToolTip(_btnProgram, "Program new PATS key\nRequires BCM unlock\n[FREE after incode]");
-            sessionBtnPanel.Controls.Add(_btnProgram);
+            _toolTip.SetToolTip(_btnProgram, "Program new PATS keys\nRequires BCM unlock\n[FREE - included with incode]");
+            rightPanel.Controls.Add(_btnProgram);
 
-            _btnErase = new Button
-            {
-                Text = "🗑️ Erase Keys",
-                Size = new Size(Dpi(120), Dpi(36)),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = BTN_BG,
-                ForeColor = TEXT,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Enabled = false,
-                Margin = DpiPad(0, 0, 8, 0)
-            };
-            _btnErase.FlatAppearance.BorderColor = BORDER;
+            _btnErase = CreateSessionButton("🗑️ Erase Keys", 110);
             _btnErase.Click += BtnErase_Click;
-            _toolTip.SetToolTip(_btnErase, "Erase all programmed keys\nRequires BCM unlock\n⚠️ DANGER!\n[FREE after incode]");
-            sessionBtnPanel.Controls.Add(_btnErase);
+            _toolTip.SetToolTip(_btnErase, "Erase all programmed keys\n⚠️ This cannot be undone!\n[FREE - included with incode]");
+            rightPanel.Controls.Add(_btnErase);
 
-            _btnKeyCounters = new Button
-            {
-                Text = "📊 Key Counters",
-                Size = new Size(Dpi(130), Dpi(36)),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = BTN_BG,
-                ForeColor = TEXT,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Enabled = false,
-                Margin = DpiPad(0, 0, 0, 0)
-            };
-            _btnKeyCounters.FlatAppearance.BorderColor = BORDER;
+            _btnKeyCounters = CreateSessionButton("📊 Counters", 100);
+            _btnKeyCounters.Margin = new Padding(0); // No right margin on last button
             _btnKeyCounters.Click += BtnKeyCounters_Click;
-            _toolTip.SetToolTip(_btnKeyCounters, "View/Edit Min/Max key counters\nRequires BCM unlock\n[FREE]");
-            sessionBtnPanel.Controls.Add(_btnKeyCounters);
+            _toolTip.SetToolTip(_btnKeyCounters, "View/Edit key counters (Min/Max)\n[FREE - included with incode]");
+            rightPanel.Controls.Add(_btnKeyCounters);
 
-            sessionLayout.Controls.Add(sessionBtnPanel, 4, 0);
-            _bcmSessionPanel.Controls.Add(sessionLayout);
+            _bcmSessionPanel.Controls.Add(rightPanel);
             sec3.Controls.Add(_bcmSessionPanel);
 
             // Session timer update (every 1 second)
@@ -2188,6 +2172,8 @@ private async void BtnErase_Click(object? s, EventArgs e)
             {
                 _lblBcmStatus.Text = "🔓 BCM UNLOCKED";
                 _lblBcmStatus.ForeColor = SUCCESS;
+                _lblSessionTimer.Text = $"Session: {state.DurationDisplay}";
+                _lblSessionTimer.ForeColor = Color.FromArgb(140, 200, 140);
                 _lblSessionTimer.Visible = true;
                 _lblKeepAlive.Visible = true;
                 _lblKeepAlive.ForeColor = state.KeepAliveActive ? SUCCESS : WARNING;
@@ -2197,7 +2183,6 @@ private async void BtnErase_Click(object? s, EventArgs e)
                 _lblBcmStatus.Text = "🔒 BCM LOCKED";
                 _lblBcmStatus.ForeColor = DANGER;
                 _lblSessionTimer.Visible = false;
-                _lblSessionTimer.Text = "Session: --:--";
                 _lblKeepAlive.Visible = false;
             }
 
@@ -2220,10 +2205,47 @@ private async void BtnErase_Click(object? s, EventArgs e)
             _btnErase.Enabled = enabled;
             _btnKeyCounters.Enabled = enabled;
 
-            // Update button colors based on state
-            _btnProgram.BackColor = enabled ? SUCCESS : BTN_BG;
-            _btnErase.BackColor = enabled ? DANGER : BTN_BG;
-            _btnKeyCounters.BackColor = enabled ? ACCENT : BTN_BG;
+            // Update button appearance based on enabled state
+            if (enabled)
+            {
+                // Enabled: Vibrant colors with white text
+                _btnProgram.BackColor = SUCCESS;
+                _btnProgram.ForeColor = Color.White;
+                _btnProgram.FlatAppearance.BorderColor = SUCCESS;
+                _btnProgram.Cursor = Cursors.Hand;
+
+                _btnErase.BackColor = Color.FromArgb(220, 60, 60);
+                _btnErase.ForeColor = Color.White;
+                _btnErase.FlatAppearance.BorderColor = Color.FromArgb(220, 60, 60);
+                _btnErase.Cursor = Cursors.Hand;
+
+                _btnKeyCounters.BackColor = ACCENT;
+                _btnKeyCounters.ForeColor = Color.White;
+                _btnKeyCounters.FlatAppearance.BorderColor = ACCENT;
+                _btnKeyCounters.Cursor = Cursors.Hand;
+            }
+            else
+            {
+                // Disabled: Muted appearance
+                var disabledBg = Color.FromArgb(45, 55, 70);
+                var disabledFg = Color.FromArgb(100, 110, 125);
+                var disabledBorder = Color.FromArgb(60, 70, 85);
+
+                _btnProgram.BackColor = disabledBg;
+                _btnProgram.ForeColor = disabledFg;
+                _btnProgram.FlatAppearance.BorderColor = disabledBorder;
+                _btnProgram.Cursor = Cursors.Arrow;
+
+                _btnErase.BackColor = disabledBg;
+                _btnErase.ForeColor = disabledFg;
+                _btnErase.FlatAppearance.BorderColor = disabledBorder;
+                _btnErase.Cursor = Cursors.Arrow;
+
+                _btnKeyCounters.BackColor = disabledBg;
+                _btnKeyCounters.ForeColor = disabledFg;
+                _btnKeyCounters.FlatAppearance.BorderColor = disabledBorder;
+                _btnKeyCounters.Cursor = Cursors.Arrow;
+            }
         }
 
         /// <summary>
