@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Text;
 
 namespace PatsKillerPro.Utils
@@ -7,6 +8,7 @@ namespace PatsKillerPro.Utils
     /// <summary>
     /// File-based logging utility
     /// Logs are stored in %APPDATA%\PatsKiller Pro\logs\
+    /// SECURITY: All logs are automatically redacted via SecretRedactor
     /// </summary>
     public static class Logger
     {
@@ -28,6 +30,22 @@ namespace PatsKillerPro.Utils
         /// Minimum log level to write to file
         /// </summary>
         public static LogLevel MinimumLevel { get; set; } = LogLevel.Info;
+
+        /// <summary>
+        /// Gets the application version from assembly
+        /// </summary>
+        private static string GetVersion()
+        {
+            try
+            {
+                var version = Assembly.GetExecutingAssembly().GetName().Version;
+                return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "2.0.0";
+            }
+            catch
+            {
+                return "2.0.0";
+            }
+        }
 
         /// <summary>
         /// Initializes the logger
@@ -55,7 +73,7 @@ namespace PatsKillerPro.Utils
 
                 // Write startup header
                 WriteToFile($"\n{'=',-60}");
-                WriteToFile($"PatsKiller Pro v1.0.0 - Session Started");
+                WriteToFile($"PatsKiller Pro v{GetVersion()} - Session Started");
                 WriteToFile($"Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 WriteToFile($"OS: {Environment.OSVersion}");
                 WriteToFile($"{'=',-60}\n");
@@ -155,12 +173,15 @@ namespace PatsKillerPro.Utils
                 Initialize();
             }
 
+            // SECURITY: Redact any incodes/outcodes before persisting to disk
+            var safeLine = SecretRedactor.Redact(line);
+
             lock (_lock)
             {
                 try
                 {
                     using var writer = new StreamWriter(_currentLogFile, true, Encoding.UTF8);
-                    writer.WriteLine(line);
+                    writer.WriteLine(safeLine);
                 }
                 catch
                 {

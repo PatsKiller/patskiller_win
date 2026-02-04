@@ -171,6 +171,7 @@ namespace PatsKillerPro.Services
         public void LogKeySessionStart(string vin, string? year, string? model, string outcode,
             bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
+            // SECURITY: outcode passed for server-side validation but NOT included in telemetry metadata
             LogActivity(new ActivityLogEntry
             {
                 Action = "key_session_start",
@@ -183,7 +184,7 @@ namespace PatsKillerPro.Services
                 ResponseTimeMs = responseTimeMs,
                 ErrorMessage = error,
                 Details = success ? $"Key session started for {vin}" : $"Session failed: {error}",
-                Metadata = new { outcode }
+                Metadata = new { } // SECURITY: No outcode in telemetry
             });
         }
 
@@ -230,6 +231,7 @@ namespace PatsKillerPro.Services
         public void LogParameterResetModule(string vin, string? year, string? model, string moduleName,
             string outcode, string incode, bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
+            // SECURITY: Never include incode in telemetry - only mask for reference
             LogActivity(new ActivityLogEntry
             {
                 Action = $"param_reset_{moduleName.ToLowerInvariant()}",
@@ -242,7 +244,7 @@ namespace PatsKillerPro.Services
                 ResponseTimeMs = responseTimeMs,
                 ErrorMessage = error,
                 Details = success ? $"{moduleName} reset complete" : $"{moduleName} reset failed: {error}",
-                Metadata = new { module = moduleName, outcode, incode }
+                Metadata = new { module = moduleName } // SECURITY: No outcode/incode in telemetry
             });
         }
 

@@ -13,7 +13,7 @@ namespace PatsKillerPro.Forms
 {
     /// <summary>
     /// PATS Target Blocks Form - Read/Write target data for BCM, PCM, ABS, RFA, ESCL
-    /// Token Cost: Read = FREE, Write = 1 TOKEN per module
+    /// Token Cost: All operations FREE (tokens only charged for incode conversions)
     /// </summary>
     public class TargetsForm : Form
     {
@@ -197,7 +197,6 @@ namespace PatsKillerPro.Forms
             if (cnt == 0) { MessageBox.Show("Select at least one module.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             using var confirm = new TargetWriteConfirmationForm(cnt);
             if (confirm.ShowDialog(this) != DialogResult.OK) return;
-            if (!TokenBalanceService.Instance.HasEnoughTokens(cnt)) { MessageBox.Show($"Insufficient tokens. Need {cnt}, have {TokenBalanceService.Instance.TotalTokens}", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             SetStatus("Writing...", WARNING); _btnWriteSelected.Enabled = false;
             try {
@@ -207,25 +206,23 @@ namespace PatsKillerPro.Forms
                 if (_chkAbs.Checked) await WriteModuleTarget("ABS", ModuleAddresses.ABS_TX, DID_TARGET_BLOCK, _txtAbsTarget.Text);
                 if (_chkRfa.Checked) await WriteModuleTarget("RFA", ModuleAddresses.RFA_TX, DID_RFA_TARGET, _txtRfaTarget.Text);
                 if (_chkEscl.Checked) await WriteModuleTarget("ESCL", ModuleAddresses.ESCL_TX, DID_ESCL_TARGET, _txtEsclTarget.Text);
-                Log("=== Write Complete ===", SUCCESS); SetStatus("Write complete", SUCCESS); _hasUnsavedChanges = false;
+                Log("=== Write Complete (FREE) ===", SUCCESS); SetStatus("Write complete", SUCCESS); _hasUnsavedChanges = false;
             } catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Write failed", DANGER); }
             finally { _btnWriteSelected.Enabled = true; }
         }
 
         private async Task WriteModuleTarget(string moduleName, uint moduleAddr, ushort did, string hexData)
         {
-            await Task.Run(async () => {
+            await Task.Run(() => {
                 try {
                     Log($"Writing {moduleName} target (DID 0x{did:X4})...");
                     var bytes = ParseHexString(hexData);
                     if (bytes == null || bytes.Length == 0) { Log($"  ✗ {moduleName}: Invalid hex data", DANGER); return; }
-                    var tokenResult = await TokenBalanceService.Instance.DeductForUtilityAsync($"target_write_{moduleName.ToLower()}", _vin);
-                    if (!tokenResult.Success) { Log($"  ✗ {moduleName}: Token deduction failed - {tokenResult.Error}", DANGER); return; }
                     _uds.StartExtendedSession(moduleAddr); System.Threading.Thread.Sleep(50);
                     if (!_uds.RequestSecurityAccess(moduleAddr)) { Log($"  ✗ {moduleName}: Security access denied", DANGER); return; }
                     System.Threading.Thread.Sleep(50);
                     var success = _uds.WriteDataByIdentifier(moduleAddr, did, bytes);
-                    if (success) { Log($"  ✓ {moduleName}: Written successfully (1 token)", SUCCESS); ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"target_write_{moduleName.ToLower()}", ActionCategory = "targets", Vin = _vin, Success = true, TokenChange = -1, Details = $"Target block written to {moduleName}", Metadata = new { did = $"0x{did:X4}", data = hexData } }); }
+                    if (success) { Log($"  ✓ {moduleName}: Written successfully (FREE)", SUCCESS); ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"target_write_{moduleName.ToLower()}", ActionCategory = "targets", Vin = _vin, Success = true, TokenChange = 0, Details = $"Target block written to {moduleName}", Metadata = new { did = $"0x{did:X4}" } }); }
                     else Log($"  ✗ {moduleName}: Write failed", DANGER);
                 } catch (Exception ex) { Log($"  ✗ {moduleName}: {ex.Message}", DANGER); }
             });
@@ -258,7 +255,7 @@ namespace PatsKillerPro.Forms
 
     public class TargetWriteConfirmationForm : Form
     {
-        private readonly Color BG = Color.FromArgb(26, 26, 30), CARD = Color.FromArgb(42, 42, 48), BORDER = Color.FromArgb(58, 58, 66), TEXT = Color.FromArgb(240, 240, 240), WARNING = Color.FromArgb(234, 179, 8), DANGER = Color.FromArgb(239, 68, 68);
+        private readonly Color BG = Color.FromArgb(26, 26, 30), CARD = Color.FromArgb(42, 42, 48), BORDER = Color.FromArgb(58, 58, 66), TEXT = Color.FromArgb(240, 240, 240), WARNING = Color.FromArgb(234, 179, 8), DANGER = Color.FromArgb(239, 68, 68), SUCCESS = Color.FromArgb(34, 197, 94);
         private CheckBox _chk1 = null!, _chk2 = null!, _chk3 = null!; private Button _btnWrite = null!; private readonly int _moduleCount;
         public TargetWriteConfirmationForm(int moduleCount) { _moduleCount = moduleCount; InitUI(); }
         private void InitUI()
@@ -269,7 +266,7 @@ namespace PatsKillerPro.Forms
             warnPanel.Paint += (s, e) => { using var p = new Pen(WARNING, 2); e.Graphics.DrawRectangle(p, 1, 1, warnPanel.Width - 3, warnPanel.Height - 3); };
             warnPanel.Controls.Add(new Label { Text = $"⚠️ Writing target blocks to {_moduleCount} module(s)", ForeColor = WARNING, Font = new Font("Segoe UI", 11, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
             layout.Controls.Add(warnPanel, 0, 0);
-            layout.Controls.Add(new Label { Text = $"Token Cost: {_moduleCount} token(s)", ForeColor = TEXT, Font = new Font("Segoe UI", 11), AutoSize = true, Margin = new Padding(0, 15, 0, 15) }, 0, 1);
+            layout.Controls.Add(new Label { Text = "Token Cost: FREE", ForeColor = SUCCESS, Font = new Font("Segoe UI", 11), AutoSize = true, Margin = new Padding(0, 15, 0, 15) }, 0, 1);
             _chk1 = new CheckBox { Text = "I have verified the target data is correct", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk1.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk1, 0, 2);
             _chk2 = new CheckBox { Text = "I understand this will overwrite existing data", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk2.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk2, 0, 3);
             _chk3 = new CheckBox { Text = "I have a backup of original values", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk3.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk3, 0, 4);

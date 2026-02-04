@@ -62,6 +62,12 @@ namespace PatsKillerPro
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
 
+        // BCM Session Panel
+        private Panel _bcmSessionPanel = null!;
+        private Label _lblBcmStatus = null!, _lblSessionTimer = null!, _lblKeepAlive = null!;
+        private Button _btnProgram = null!, _btnErase = null!, _btnKeyCounters = null!;
+        private System.Windows.Forms.Timer _sessionTimerUpdate = null!;
+
         // DPI helpers (keeps runtime-created controls scaling-friendly)
         private int Dpi(int px) => (int)Math.Round(px * (DeviceDpi / 96f));
         private Padding DpiPad(int l, int t, int r, int b) => new Padding(Dpi(l), Dpi(t), Dpi(r), Dpi(b));
@@ -636,31 +642,171 @@ namespace PatsKillerPro
             row3.Controls.Add(btnGetIncode);
 
             sec3.Controls.Add(row3);
+
+            // === BCM SESSION PANEL ===
+            _bcmSessionPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = Dpi(70),
+                BackColor = Color.FromArgb(30, 40, 50),
+                Margin = DpiPad(0, 10, 0, 0),
+                Padding = DpiPad(15, 10, 15, 10)
+            };
+            _bcmSessionPanel.Paint += (s, e) =>
+            {
+                var state = BcmSessionManager.Instance.GetState();
+                var borderColor = state.IsUnlocked ? SUCCESS : Color.FromArgb(80, 80, 90);
+                using var pen = new Pen(borderColor, 2);
+                e.Graphics.DrawRectangle(pen, 1, 1, _bcmSessionPanel.Width - 3, _bcmSessionPanel.Height - 3);
+            };
+
+            var sessionLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 5,
+                RowCount = 1,
+                BackColor = Color.Transparent
+            };
+            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            sessionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            // Lock/Unlock indicator
+            _lblBcmStatus = new Label
+            {
+                Text = "🔒 BCM LOCKED",
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
+                ForeColor = DANGER,
+                AutoSize = true,
+                Margin = DpiPad(0, 8, 20, 0)
+            };
+            sessionLayout.Controls.Add(_lblBcmStatus, 0, 0);
+
+            // Session timer
+            _lblSessionTimer = new Label
+            {
+                Text = "Session: --:--",
+                Font = new Font("Segoe UI", 10),
+                ForeColor = TEXT_DIM,
+                AutoSize = true,
+                Margin = DpiPad(0, 10, 20, 0),
+                Visible = false
+            };
+            sessionLayout.Controls.Add(_lblSessionTimer, 1, 0);
+
+            // Keep-alive indicator
+            _lblKeepAlive = new Label
+            {
+                Text = "●",
+                Font = new Font("Segoe UI", 12),
+                ForeColor = SUCCESS,
+                AutoSize = true,
+                Margin = DpiPad(0, 8, 20, 0),
+                Visible = false
+            };
+            _toolTip.SetToolTip(_lblKeepAlive, "Keep-alive active - BCM session maintained");
+            sessionLayout.Controls.Add(_lblKeepAlive, 2, 0);
+
+            // Spacer
+            sessionLayout.Controls.Add(new Panel { BackColor = Color.Transparent }, 3, 0);
+
+            // Session operation buttons
+            var sessionBtnPanel = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                BackColor = Color.Transparent,
+                Margin = DpiPad(0, 0, 0, 0)
+            };
+
+            _btnProgram = new Button
+            {
+                Text = "🔑 Program Keys",
+                Size = new Size(Dpi(130), Dpi(36)),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = BTN_BG,
+                ForeColor = TEXT,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Enabled = false,
+                Margin = DpiPad(0, 0, 8, 0)
+            };
+            _btnProgram.FlatAppearance.BorderColor = BORDER;
+            _btnProgram.Click += BtnProgram_Click;
+            _toolTip.SetToolTip(_btnProgram, "Program new PATS key\nRequires BCM unlock\n[FREE after incode]");
+            sessionBtnPanel.Controls.Add(_btnProgram);
+
+            _btnErase = new Button
+            {
+                Text = "🗑️ Erase Keys",
+                Size = new Size(Dpi(120), Dpi(36)),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = BTN_BG,
+                ForeColor = TEXT,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Enabled = false,
+                Margin = DpiPad(0, 0, 8, 0)
+            };
+            _btnErase.FlatAppearance.BorderColor = BORDER;
+            _btnErase.Click += BtnErase_Click;
+            _toolTip.SetToolTip(_btnErase, "Erase all programmed keys\nRequires BCM unlock\n⚠️ DANGER!\n[FREE after incode]");
+            sessionBtnPanel.Controls.Add(_btnErase);
+
+            _btnKeyCounters = new Button
+            {
+                Text = "📊 Key Counters",
+                Size = new Size(Dpi(130), Dpi(36)),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = BTN_BG,
+                ForeColor = TEXT,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Enabled = false,
+                Margin = DpiPad(0, 0, 0, 0)
+            };
+            _btnKeyCounters.FlatAppearance.BorderColor = BORDER;
+            _btnKeyCounters.Click += BtnKeyCounters_Click;
+            _toolTip.SetToolTip(_btnKeyCounters, "View/Edit Min/Max key counters\nRequires BCM unlock\n[FREE]");
+            sessionBtnPanel.Controls.Add(_btnKeyCounters);
+
+            sessionLayout.Controls.Add(sessionBtnPanel, 4, 0);
+            _bcmSessionPanel.Controls.Add(sessionLayout);
+            sec3.Controls.Add(_bcmSessionPanel);
+
+            // Session timer update (every 1 second)
+            _sessionTimerUpdate = new System.Windows.Forms.Timer { Interval = 1000 };
+            _sessionTimerUpdate.Tick += (s, e) => UpdateSessionTimerDisplay();
+            _sessionTimerUpdate.Start();
+
+            // Wire up BcmSessionManager events
+            BcmSessionManager.Instance.SessionStateChanged += OnBcmSessionStateChanged;
+            BcmSessionManager.Instance.LogMessage += msg => Log("info", msg);
+            BcmSessionManager.Instance.UnlockOperationsEnabled += OnUnlockOperationsEnabled;
+
             layout.Controls.Add(sec3, 0, 2);
             layout.SetColumnSpan(sec3, 2);
 
-            // === SECTION 4: KEY PROGRAMMING ===
-            var sec4 = Section("KEY PROGRAMMING");
+            // === SECTION 4: ADDITIONAL OPERATIONS ===
+            var sec4 = Section("ADDITIONAL OPERATIONS");
             var row4 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             
-            var btnProg = AutoBtn("Program Key", SUCCESS);
-            btnProg.Click += BtnProgram_Click;
-            row4.Controls.Add(btnProg);
-
-            var btnErase = AutoBtn("Erase All Keys", DANGER);
-            btnErase.Click += BtnErase_Click;
-            row4.Controls.Add(btnErase);
-
-            var btnParam = AutoBtn("Parameter Reset", WARNING);
+            // Parameter Reset - does not require BCM session (uses its own incode flow)
+            var btnParam = AutoBtn("⚙️ Parameter Reset", WARNING);
             btnParam.Click += BtnParam_Click;
+            _toolTip.SetToolTip(btnParam, "Reset PATS parameters across modules\nRequires separate incode\n[1 TOKEN per module]");
             row4.Controls.Add(btnParam);
 
-            var btnEscl = AutoBtn("ESCL Initialize", BTN_BG);
+            // ESCL Initialize - standalone operation
+            var btnEscl = AutoBtn("🔧 ESCL Initialize", BTN_BG);
             btnEscl.Click += BtnEscl_Click;
+            _toolTip.SetToolTip(btnEscl, "Initialize Electronic Steering Column Lock\n[1 TOKEN]");
             row4.Controls.Add(btnEscl);
 
-            var btnDisable = AutoBtn("Disable BCM Security", BTN_BG);
+            // Disable BCM Security - manual unlock (alternative to Get Incode auto-unlock)
+            var btnDisable = AutoBtn("🔓 Manual BCM Unlock", BTN_BG);
             btnDisable.Click += BtnDisable_Click;
+            _toolTip.SetToolTip(btnDisable, "Manually unlock BCM with existing incode\nUse if auto-unlock failed");
             row4.Controls.Add(btnDisable);
 
             sec4.Controls.Add(row4);
@@ -1287,23 +1433,89 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
 
             try
             {
-                var result = await J2534Service.Instance.ReadOutcodeAsync();
-                if (result.Success && !string.IsNullOrEmpty(result.Outcode))
+                // Step 1: Read outcode from vehicle if not already present
+                if (string.IsNullOrEmpty(_txtOutcode.Text))
                 {
-                    _txtOutcode.Text = result.Outcode;
-                    Log("success", $"Outcode: {result.Outcode}");
-                    
-                    // TODO: Call incode service to get incode from outcode
-                    MessageBox.Show($"Outcode retrieved: {result.Outcode}\n\nUse the web portal or API to calculate the incode.");
+                    Log("info", "Reading outcode from vehicle...");
+                    var outcodeResult = await J2534Service.Instance.ReadOutcodeAsync();
+                    if (!outcodeResult.Success || string.IsNullOrEmpty(outcodeResult.Outcode))
+                    {
+                        Log("error", outcodeResult.Error ?? "Failed to read outcode");
+                        return;
+                    }
+                    _txtOutcode.Text = outcodeResult.Outcode;
+                    Log("success", $"Outcode read: {Utils.SecretRedactor.MaskOutcode(outcodeResult.Outcode)}");
+                }
+
+                // Step 2: Call provider-router to get incode (this charges 1 token)
+                Log("info", "Calculating incode via provider-router [1 TOKEN]...");
+                var incodeResult = await Services.IncodeService.Instance.CalculateIncodeAsync(
+                    _txtOutcode.Text, 
+                    _txtVin.Text,
+                    "BCM" // Default to BCM for main form
+                );
+
+                if (!incodeResult.Success || string.IsNullOrEmpty(incodeResult.Incode))
+                {
+                    Log("error", incodeResult.Error ?? "Failed to calculate incode");
+                    MessageBox.Show(
+                        $"Failed to calculate incode:\n\n{incodeResult.Error}",
+                        "Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return;
+                }
+
+                // Store in UI field ONLY (never to disk/settings)
+                _txtIncode.Text = incodeResult.Incode;
+                Log("success", $"Incode received (Provider: {incodeResult.ProviderUsed}, Tokens: {incodeResult.TokensCharged})");
+
+                // Step 3: Initialize BcmSessionManager with UDS service
+                var uds = J2534Service.Instance.GetUdsService();
+                if (uds != null)
+                {
+                    BcmSessionManager.Instance.Initialize(uds);
+                }
+
+                // Step 4: AUTO-UNLOCK SEQUENCE
+                Log("info", "Starting BCM auto-unlock sequence...");
+                var unlockResult = await BcmSessionManager.Instance.UnlockBcmAsync(
+                    _txtOutcode.Text,
+                    incodeResult.Incode
+                );
+
+                if (unlockResult.IsSuccess)
+                {
+                    Log("success", "✓ BCM unlocked - Key functions enabled");
+                    MessageBox.Show(
+                        $"BCM Unlocked Successfully!\n\n" +
+                        $"Provider: {incodeResult.ProviderUsed}\n" +
+                        $"Tokens charged: {incodeResult.TokensCharged}\n\n" +
+                        $"Key functions are now enabled:\n" +
+                        $"• Program Keys\n" +
+                        $"• Erase Keys\n" +
+                        $"• Key Counters",
+                        "BCM Unlocked",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
                 }
                 else
                 {
-                    Log("error", result.Error ?? "Failed to read outcode");
+                    Log("warning", $"Incode received but BCM unlock failed: {unlockResult.Error}");
+                    MessageBox.Show(
+                        $"Incode calculated but BCM unlock failed:\n\n{unlockResult.Error}\n\n" +
+                        $"The incode is saved - you can retry the unlock manually.",
+                        "Unlock Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
                 }
             }
             catch (Exception ex)
             {
-                ShowError("Read Failed", "Could not read outcode", ex);
+                ShowError("Incode Failed", "Could not calculate incode", ex);
             }
         }
         #endregion
@@ -1930,6 +2142,11 @@ private async void BtnErase_Click(object? s, EventArgs e)
         {
             try
             {
+                // End BCM session
+                BcmSessionManager.Instance.EndSession();
+                _sessionTimerUpdate?.Stop();
+                _sessionTimerUpdate?.Dispose();
+
                 J2534Service.Instance.Disconnect();
                 _logoImage?.Dispose();
                 _logoImage = null;
@@ -1938,5 +2155,80 @@ private async void BtnErase_Click(object? s, EventArgs e)
 
             base.OnFormClosing(e);
         }
+
+        #region BCM Session UI Handlers
+
+        /// <summary>
+        /// Update BCM session panel UI when state changes
+        /// </summary>
+        private void OnBcmSessionStateChanged(BcmSessionState state)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => OnBcmSessionStateChanged(state)));
+                return;
+            }
+
+            if (state.IsUnlocked)
+            {
+                _lblBcmStatus.Text = "🔓 BCM UNLOCKED";
+                _lblBcmStatus.ForeColor = SUCCESS;
+                _lblSessionTimer.Visible = true;
+                _lblKeepAlive.Visible = true;
+                _lblKeepAlive.ForeColor = state.KeepAliveActive ? SUCCESS : WARNING;
+            }
+            else
+            {
+                _lblBcmStatus.Text = "🔒 BCM LOCKED";
+                _lblBcmStatus.ForeColor = DANGER;
+                _lblSessionTimer.Visible = false;
+                _lblSessionTimer.Text = "Session: --:--";
+                _lblKeepAlive.Visible = false;
+            }
+
+            // Refresh panel border color
+            _bcmSessionPanel.Invalidate();
+        }
+
+        /// <summary>
+        /// Enable/disable unlock-dependent operations
+        /// </summary>
+        private void OnUnlockOperationsEnabled(bool enabled)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => OnUnlockOperationsEnabled(enabled)));
+                return;
+            }
+
+            _btnProgram.Enabled = enabled;
+            _btnErase.Enabled = enabled;
+            _btnKeyCounters.Enabled = enabled;
+
+            // Update button colors based on state
+            _btnProgram.BackColor = enabled ? SUCCESS : BTN_BG;
+            _btnErase.BackColor = enabled ? DANGER : BTN_BG;
+            _btnKeyCounters.BackColor = enabled ? ACCENT : BTN_BG;
+        }
+
+        /// <summary>
+        /// Update session timer display every second
+        /// </summary>
+        private void UpdateSessionTimerDisplay()
+        {
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action(UpdateSessionTimerDisplay)); } catch { }
+                return;
+            }
+
+            var state = BcmSessionManager.Instance.GetState();
+            if (state.IsUnlocked)
+            {
+                _lblSessionTimer.Text = $"Session: {state.DurationDisplay}";
+            }
+        }
+
+        #endregion
     }
 }

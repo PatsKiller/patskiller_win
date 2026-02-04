@@ -23,7 +23,7 @@ namespace PatsKillerPro.Vehicle
         public const int TOKEN_COST_BCM_FACTORY = 3;      // 2-3 tokens
         public const int TOKEN_COST_CLEAR_P160A = 1;      // 1 token
         public const int TOKEN_COST_CLEAR_B10A2 = 1;      // 1 token
-        public const int TOKEN_COST_CLEAR_CRUSH = 1;      // 1 token
+        public const int TOKEN_COST_CLEAR_CRASH = 1;      // 1 token
         public const int TOKEN_COST_CLEAR_KAM = 0;        // FREE
         public const int TOKEN_COST_ESCL_INIT = 1;        // 1 token
         public const int TOKEN_COST_KEYPAD_READ = 1;      // 1 token
@@ -48,7 +48,8 @@ namespace PatsKillerPro.Vehicle
             if (string.IsNullOrEmpty(incode))
                 throw new ArgumentException("Incode cannot be empty", nameof(incode));
 
-            Logger.Info($"Starting key programming with incode: {incode}");
+            // SECURITY: Never log incodes to disk
+            Logger.Info("Starting key programming [incode provided]");
 
             try
             {
@@ -65,7 +66,7 @@ namespace PatsKillerPro.Vehicle
                 Thread.Sleep(100);
 
                 // Step 3: Submit incode via routine control
-                Logger.Info("Submitting incode...");
+                Logger.Info("Submitting security code...");
                 var incodeBytes = ParseIncodeToBytes(incode);
                 var routineData = new byte[3 + incodeBytes.Length];
                 routineData[0] = 0x71;  // Routine identifier high

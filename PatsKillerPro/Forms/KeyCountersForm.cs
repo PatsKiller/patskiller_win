@@ -78,7 +78,7 @@ namespace PatsKillerPro.Forms
                 Text = "ℹ️ KEY COUNTER SETTINGS\n" +
                        "• Min Counter (0x5B13): Minimum keys required for vehicle start. Typical: 2\n" +
                        "• Max Counter (0x5B14): Maximum keys that can be programmed. Typical: 8\n" +
-                       "• Read is FREE. Write uses 1 TOKEN (single BCM session unlocks both writes)"
+                       "• All operations are FREE (tokens only charged for incode conversions)"
             };
             instructionPanel.Controls.Add(instructionLabel);
             mainLayout.Controls.Add(instructionPanel, 0, 1);
@@ -123,15 +123,15 @@ namespace PatsKillerPro.Forms
             buttonBar.Controls.Add(new Label { Text = "│", ForeColor = BORDER, AutoSize = true, Margin = new Padding(10, 12, 10, 0) });
 
             _btnWriteMin = CreateButton("💾 Write Min", WARNING); _btnWriteMin.Click += BtnWriteMin_Click;
-            _toolTip.SetToolTip(_btnWriteMin, ToolTipHelper.GetToolTip("KeyCountersWriteMin"));
+            _toolTip.SetToolTip(_btnWriteMin, "Write minimum key counter value\n[FREE]");
             buttonBar.Controls.Add(_btnWriteMin);
 
             _btnWriteMax = CreateButton("💾 Write Max", WARNING); _btnWriteMax.Click += BtnWriteMax_Click;
-            _toolTip.SetToolTip(_btnWriteMax, ToolTipHelper.GetToolTip("KeyCountersWriteMax"));
+            _toolTip.SetToolTip(_btnWriteMax, "Write maximum key counter value\n[FREE]");
             buttonBar.Controls.Add(_btnWriteMax);
 
-            _btnWriteBoth = CreateButton("💾 Write Both (1 Token)", SUCCESS); _btnWriteBoth.Click += BtnWriteBoth_Click;
-            _toolTip.SetToolTip(_btnWriteBoth, ToolTipHelper.GetToolTip("KeyCountersWriteBoth"));
+            _btnWriteBoth = CreateButton("💾 Write Both", SUCCESS); _btnWriteBoth.Click += BtnWriteBoth_Click;
+            _toolTip.SetToolTip(_btnWriteBoth, "Write BOTH Min and Max counters\nSingle BCM unlock session\n[FREE]");
             buttonBar.Controls.Add(_btnWriteBoth);
 
             mainLayout.Controls.Add(buttonBar, 0, 3);
@@ -203,17 +203,14 @@ namespace PatsKillerPro.Forms
 
             using var confirm = new KeyCounterWriteConfirmationForm(name == "Min" ? value : -1, name == "Max" ? value : -1, false);
             if (confirm.ShowDialog(this) != DialogResult.OK) return;
-            if (!TokenBalanceService.Instance.HasEnoughTokens(1)) { MessageBox.Show("Insufficient tokens.", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             SetStatus($"Writing {name}...", WARNING);
             var btn = name == "Min" ? _btnWriteMin : _btnWriteMax; btn.Enabled = false;
             try
             {
-                await Task.Run(async () =>
+                await Task.Run(() =>
                 {
                     Log($"=== Writing {name} Counter ===", WARNING);
-                    var tokenResult = await TokenBalanceService.Instance.DeductForUtilityAsync($"key_counter_{name.ToLower()}", _vin);
-                    if (!tokenResult.Success) { Log($"  ✗ Token deduction failed: {tokenResult.Error}", DANGER); return; }
 
                     _uds.StartExtendedSession(ModuleAddresses.BCM_TX);
                     System.Threading.Thread.Sleep(50);
@@ -223,8 +220,8 @@ namespace PatsKillerPro.Forms
                     var success = _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, did, new byte[] { (byte)value });
                     if (success)
                     {
-                        Log($"  ✓ {name} Counter = {value} (1 token)", SUCCESS);
-                        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"key_counter_{name.ToLower()}", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = -1, Details = $"{name} counter set to {value}", Metadata = new { value } });
+                        Log($"  ✓ {name} Counter = {value} (FREE)", SUCCESS);
+                        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"key_counter_{name.ToLower()}", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = 0, Details = $"{name} counter set to {value}", Metadata = new { value } });
                         if (name == "Min") Invoke(new Action(() => _lblCurrentMin.Text = $"Current: {value}"));
                         else Invoke(new Action(() => _lblCurrentMax.Text = $"Current: {value}"));
                     }
@@ -237,7 +234,7 @@ namespace PatsKillerPro.Forms
         }
 
         /// <summary>
-        /// Write Both - 1 TOKEN for single BCM session unlock, writes both Min and Max
+        /// Write Both - FREE (no token charge for utility operations)
         /// </summary>
         private async void BtnWriteBoth_Click(object? sender, EventArgs e)
         {
@@ -246,24 +243,19 @@ namespace PatsKillerPro.Forms
 
             using var confirm = new KeyCounterWriteConfirmationForm(minVal, maxVal, true);
             if (confirm.ShowDialog(this) != DialogResult.OK) return;
-            if (!TokenBalanceService.Instance.HasEnoughTokens(1)) { MessageBox.Show("Insufficient tokens. Need 1.", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             SetStatus("Writing both...", WARNING); _btnWriteBoth.Enabled = false; _btnWriteMin.Enabled = false; _btnWriteMax.Enabled = false;
             try
             {
-                await Task.Run(async () =>
+                await Task.Run(() =>
                 {
                     Log("=== Writing Both Counters (Single Session) ===", WARNING);
-
-                    // Deduct 1 token for entire operation
-                    var tokenResult = await TokenBalanceService.Instance.DeductForUtilityAsync("key_counter_both", _vin);
-                    if (!tokenResult.Success) { Log($"  ✗ Token deduction failed: {tokenResult.Error}", DANGER); return; }
 
                     // Single BCM unlock session
                     _uds.StartExtendedSession(ModuleAddresses.BCM_TX);
                     System.Threading.Thread.Sleep(50);
                     if (!_uds.RequestSecurityAccess(ModuleAddresses.BCM_TX)) { Log("  ✗ Security access denied", DANGER); return; }
-                    Log("  ✓ BCM unlocked (1 token)", SUCCESS);
+                    Log("  ✓ BCM unlocked", SUCCESS);
                     System.Threading.Thread.Sleep(50);
 
                     // Write Min
@@ -277,7 +269,7 @@ namespace PatsKillerPro.Forms
 
                     System.Threading.Thread.Sleep(50);
 
-                    // Write Max (same session, no additional token)
+                    // Write Max (same session)
                     var maxSuccess = _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, DID_MAX_KEY_COUNTER, new byte[] { (byte)maxVal });
                     if (maxSuccess)
                     {
@@ -288,8 +280,8 @@ namespace PatsKillerPro.Forms
 
                     if (minSuccess && maxSuccess)
                     {
-                        Log("=== Both Written Successfully (1 token total) ===", SUCCESS);
-                        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = "key_counter_both", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = -1, Details = $"Min={minVal}, Max={maxVal}", Metadata = new { min = minVal, max = maxVal } });
+                        Log("=== Both Written Successfully (FREE) ===", SUCCESS);
+                        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = "key_counter_both", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = 0, Details = $"Min={minVal}, Max={maxVal}", Metadata = new { min = minVal, max = maxVal } });
                     }
                 });
                 SetStatus("Both written", SUCCESS);
@@ -327,10 +319,8 @@ namespace PatsKillerPro.Forms
             warnPanel.Controls.Add(new Label { Text = $"⚠️ {msg}", ForeColor = WARNING, Font = new Font("Segoe UI", 11, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
             layout.Controls.Add(warnPanel, 0, 0);
 
-            // Write Both uses single BCM session = 1 token, individual writes = 1 token each
-            var tokenCost = 1;
-            var tokenNote = _writeBoth ? "1 token (single BCM unlock session)" : "1 token";
-            layout.Controls.Add(new Label { Text = $"Token Cost: {tokenNote}", ForeColor = TEXT, Font = new Font("Segoe UI", 11), AutoSize = true, Margin = new Padding(0, 15, 0, 15) }, 0, 1);
+            // All utility operations are FREE
+            layout.Controls.Add(new Label { Text = "Token Cost: FREE", ForeColor = Color.FromArgb(34, 197, 94), Font = new Font("Segoe UI", 11), AutoSize = true, Margin = new Padding(0, 15, 0, 15) }, 0, 1);
 
             _chk1 = new CheckBox { Text = "I understand this affects vehicle security", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk1.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk1, 0, 2);
             _chk2 = new CheckBox { Text = "I have read the current counter values", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk2.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk2, 0, 3);

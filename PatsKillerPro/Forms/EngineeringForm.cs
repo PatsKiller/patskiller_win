@@ -13,7 +13,7 @@ namespace PatsKillerPro.Forms
 {
     /// <summary>
     /// Engineering Mode Form - Extended diagnostic operations
-    /// Token Cost: Read = FREE, Write = 1 TOKEN, Routine Start = 1 TOKEN
+    /// Token Cost: All operations FREE (tokens only charged for incode conversions via Get Incode)
     /// </summary>
     public class EngineeringForm : Form
     {
@@ -151,7 +151,7 @@ namespace PatsKillerPro.Forms
             btnPanel.Controls.Add(_btnDidRead);
             
             _btnDidWrite = CreateButton("💾 Write DID", WARNING); _btnDidWrite.Click += BtnDidWrite_Click;
-            _toolTip.SetToolTip(_btnDidWrite, "Write data to DID (Service 0x2E)\nSends: 2E XX XX [data]\n⚠️ Requires security access\n[1 TOKEN]");
+            _toolTip.SetToolTip(_btnDidWrite, "Write data to DID (Service 0x2E)\nSends: 2E XX XX [data]\n⚠️ Requires security access\n[FREE]");
             btnPanel.Controls.Add(_btnDidWrite);
             layout.Controls.Add(btnPanel, 1, 3); layout.SetColumnSpan(btnPanel, 2);
 
@@ -160,7 +160,7 @@ namespace PatsKillerPro.Forms
             infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
             infoPanel.Controls.Add(new Label { 
                 Text = "📘 DID READ/WRITE INSTRUCTIONS\n" +
-                       "• Read = FREE | Write = 1 TOKEN\n" +
+                       "• All operations FREE (tokens only for incode conversions)\n" +
                        "• DID format: 4 hex digits (e.g., F190 for VIN)\n" +
                        "• Write requires security access (BCM unlock)\n" +
                        "• Common DIDs: F190=VIN, C126=PATS Status, 5B13/5B14=Key Counters", 
@@ -208,7 +208,7 @@ namespace PatsKillerPro.Forms
 
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 15, 0, 0) };
             _btnRoutineStart = CreateButton("▶ Start (0x01)", SUCCESS); _btnRoutineStart.Click += async (s, e) => await ExecuteRoutine(0x01, "Start");
-            _toolTip.SetToolTip(_btnRoutineStart, "Start routine (Service 0x31 Sub 0x01)\nSends: 31 01 XX XX [data]\n[1 TOKEN]");
+            _toolTip.SetToolTip(_btnRoutineStart, "Start routine (Service 0x31 Sub 0x01)\nSends: 31 01 XX XX [data]\n[FREE]");
             btnPanel.Controls.Add(_btnRoutineStart);
             
             _btnRoutineStop = CreateButton("⏹ Stop (0x02)", DANGER); _btnRoutineStop.Click += async (s, e) => await ExecuteRoutine(0x02, "Stop");
@@ -225,7 +225,7 @@ namespace PatsKillerPro.Forms
             infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
             infoPanel.Controls.Add(new Label { 
                 Text = "📘 ROUTINE CONTROL INSTRUCTIONS\n" +
-                       "• Start = 1 TOKEN | Stop/Results = FREE\n" +
+                       "• All operations FREE (tokens only for incode conversions)\n" +
                        "• 0x01 = Start routine, 0x02 = Stop routine, 0x03 = Get results\n" +
                        "• Common Routines: 716D=PATS Incode, 716C=Write Key, 0201=Clear KAM\n" +
                        "• For PATS Incode (716D): Enter 4-digit incode in Data field", 
@@ -254,7 +254,7 @@ namespace PatsKillerPro.Forms
 
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 15, 0, 0) };
             _btnRawSend = CreateButton("📤 Send Raw", WARNING); _btnRawSend.Click += BtnRawSend_Click;
-            _toolTip.SetToolTip(_btnRawSend, "Send raw UDS request to selected module\n⚠️ Write operations cost 1 TOKEN\n⚠️ DANGEROUS - incorrect commands can damage modules!");
+            _toolTip.SetToolTip(_btnRawSend, "Send raw UDS request to selected module\n⚠️ DANGEROUS - incorrect commands can damage modules!\n[FREE]");
             btnPanel.Controls.Add(_btnRawSend);
             layout.Controls.Add(btnPanel, 1, 2);
 
@@ -264,7 +264,7 @@ namespace PatsKillerPro.Forms
             warnPanel.Controls.Add(new Label { 
                 Text = "⚠️ RAW UDS MODE - EXPERTS ONLY!\n" +
                        "Incorrect commands can permanently brick modules.\n" +
-                       "Read (22, 19, 3E) = FREE | Write (2E, 31, 27) = 1 TOKEN", 
+                       "All operations FREE (tokens only for incode conversions)", 
                 ForeColor = DANGER, Dock = DockStyle.Fill, Padding = new Padding(12), Font = new Font("Segoe UI", 9, FontStyle.Bold) 
             });
             layout.Controls.Add(warnPanel, 0, 3); layout.SetColumnSpan(warnPanel, 2);
@@ -324,7 +324,8 @@ namespace PatsKillerPro.Forms
                        "1. Read Outcode [FREE]\n" +
                        "   Reads security code from BCM\n\n" +
                        "2. Get Incode [1 TOKEN]\n" +
-                       "   Calculates unlock code via API\n\n" +
+                       "   Calculates unlock code via API\n" +
+                       "   (Only operation that costs tokens)\n\n" +
                        "3. Unlock PATS [FREE]\n" +
                        "   Submits incode to unlock\n\n" +
                        "After unlock, BCM accepts\n" +
@@ -360,10 +361,9 @@ namespace PatsKillerPro.Forms
         {
             if (!ushort.TryParse(_txtDid.Text, System.Globalization.NumberStyles.HexNumber, null, out ushort did)) { MessageBox.Show("Invalid DID.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             var bytes = ParseHexString(_txtDidValue.Text); if (bytes == null || bytes.Length == 0) { MessageBox.Show("Invalid value.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
-            if (MessageBox.Show($"Write {bytes.Length} bytes to DID 0x{did:X4}?\n\n⚠️ Cost: 1 TOKEN", "Confirm Write", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-            if (!TokenBalanceService.Instance.HasEnoughTokens(1)) { MessageBox.Show("Insufficient tokens.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (MessageBox.Show($"Write {bytes.Length} bytes to DID 0x{did:X4}?\n\n⚠️ This may affect module operation", "Confirm Write", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             SetStatus("Writing...", WARNING); _btnDidWrite.Enabled = false;
-            try { await Task.Run(async () => { Log($"Writing DID 0x{did:X4}..."); var tr = await TokenBalanceService.Instance.DeductForUtilityAsync("engineering_did_write", _vin); if (!tr.Success) { Log($"Token deduction failed: {tr.Error}", DANGER); return; } _uds.StartExtendedSession(_currentModuleAddr); System.Threading.Thread.Sleep(50); if (!_uds.RequestSecurityAccess(_currentModuleAddr)) { Log("  ✗ Security denied", DANGER); return; } System.Threading.Thread.Sleep(50); var ok = _uds.WriteDataByIdentifier(_currentModuleAddr, did, bytes); if (ok) { Log("  ✓ Written (1 token)", SUCCESS); ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = "engineering_did_write", ActionCategory = "engineering", Vin = _vin, Success = true, TokenChange = -1, Details = $"DID 0x{did:X4} written", Metadata = new { did = $"0x{did:X4}" } }); } else Log("  ✗ Write failed", DANGER); }); SetStatus("Write complete", SUCCESS); }
+            try { await Task.Run(() => { Log($"Writing DID 0x{did:X4}..."); _uds.StartExtendedSession(_currentModuleAddr); System.Threading.Thread.Sleep(50); if (!_uds.RequestSecurityAccess(_currentModuleAddr)) { Log("  ✗ Security denied", DANGER); return; } System.Threading.Thread.Sleep(50); var ok = _uds.WriteDataByIdentifier(_currentModuleAddr, did, bytes); if (ok) { Log("  ✓ Written (FREE)", SUCCESS); ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = "engineering_did_write", ActionCategory = "engineering", Vin = _vin, Success = true, TokenChange = 0, Details = $"DID 0x{did:X4} written", Metadata = new { did = $"0x{did:X4}" } }); } else Log("  ✗ Write failed", DANGER); }); SetStatus("Write complete", SUCCESS); }
             catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Write failed", DANGER); } finally { _btnDidWrite.Enabled = true; }
         }
 
@@ -371,9 +371,8 @@ namespace PatsKillerPro.Forms
         {
             if (!ushort.TryParse(_txtRoutineId.Text, System.Globalization.NumberStyles.HexNumber, null, out ushort routineId)) { MessageBox.Show("Invalid Routine ID.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             var data = ParseHexString(_txtRoutineData.Text) ?? Array.Empty<byte>();
-            if (subFunction == 0x01 && !TokenBalanceService.Instance.HasEnoughTokens(1)) { MessageBox.Show("Insufficient tokens.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             SetStatus($"Routine {action}...", WARNING);
-            try { await Task.Run(async () => { Log($"Routine {action} 0x{routineId:X4}..."); if (subFunction == 0x01) { var tr = await TokenBalanceService.Instance.DeductForUtilityAsync("engineering_routine", _vin); if (!tr.Success) { Log($"Token deduction failed: {tr.Error}", DANGER); return; } } _uds.StartExtendedSession(_currentModuleAddr); System.Threading.Thread.Sleep(50); var routineData = new byte[2 + data.Length]; routineData[0] = (byte)(routineId >> 8); routineData[1] = (byte)(routineId & 0xFF); Array.Copy(data, 0, routineData, 2, data.Length); var response = _uds.RoutineControl(_currentModuleAddr, subFunction, routineData); if (response != null && response.Length > 0) Log($"  ✓ Response: {BitConverter.ToString(response).Replace("-", " ")}", SUCCESS); else Log($"  ✓ Routine {action} sent", SUCCESS); }); SetStatus($"Routine {action} done", SUCCESS); }
+            try { await Task.Run(() => { Log($"Routine {action} 0x{routineId:X4}..."); _uds.StartExtendedSession(_currentModuleAddr); System.Threading.Thread.Sleep(50); var routineData = new byte[2 + data.Length]; routineData[0] = (byte)(routineId >> 8); routineData[1] = (byte)(routineId & 0xFF); Array.Copy(data, 0, routineData, 2, data.Length); var response = _uds.RoutineControl(_currentModuleAddr, subFunction, routineData); if (response != null && response.Length > 0) Log($"  ✓ Response: {BitConverter.ToString(response).Replace("-", " ")}", SUCCESS); else Log($"  ✓ Routine {action} sent (FREE)", SUCCESS); }); SetStatus($"Routine {action} done", SUCCESS); }
             catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Routine failed", DANGER); }
         }
 
@@ -381,9 +380,9 @@ namespace PatsKillerPro.Forms
         {
             var bytes = ParseHexString(_txtRawRequest.Text); if (bytes == null || bytes.Length == 0) { MessageBox.Show("Invalid request.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             bool isWrite = bytes[0] == 0x2E || bytes[0] == 0x31 || bytes[0] == 0x3E;
-            if (isWrite) { if (MessageBox.Show($"Send {bytes.Length} bytes?\n\n⚠️ DANGER! Cost: 1 TOKEN", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; if (!TokenBalanceService.Instance.HasEnoughTokens(1)) { MessageBox.Show("Insufficient tokens.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; } }
+            if (isWrite) { if (MessageBox.Show($"Send {bytes.Length} bytes?\n\n⚠️ DANGER! This operation cannot be undone.", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return; }
             SetStatus("Sending...", WARNING); _btnRawSend.Enabled = false;
-            try { await Task.Run(async () => { Log($"Sending: {BitConverter.ToString(bytes).Replace("-", " ")}"); if (isWrite) { var tr = await TokenBalanceService.Instance.DeductForUtilityAsync("engineering_raw", _vin); if (!tr.Success) { Log($"Token deduction failed: {tr.Error}", DANGER); return; } } _uds.StartExtendedSession(_currentModuleAddr); System.Threading.Thread.Sleep(50); var response = _uds.SendRawRequest(_currentModuleAddr, bytes); var responseHex = response != null ? BitConverter.ToString(response).Replace("-", " ") : "No response"; Invoke(new Action(() => _txtRawResponse.Text = responseHex)); Log($"  Response: {responseHex}", response != null ? SUCCESS : WARNING); }); SetStatus("Send complete", SUCCESS); }
+            try { await Task.Run(() => { Log($"Sending: {BitConverter.ToString(bytes).Replace("-", " ")}"); _uds.StartExtendedSession(_currentModuleAddr); System.Threading.Thread.Sleep(50); var response = _uds.SendRawRequest(_currentModuleAddr, bytes); var responseHex = response != null ? BitConverter.ToString(response).Replace("-", " ") : "No response"; Invoke(new Action(() => _txtRawResponse.Text = responseHex)); Log($"  Response: {responseHex} (FREE)", response != null ? SUCCESS : WARNING); }); SetStatus("Send complete", SUCCESS); }
             catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Send failed", DANGER); _txtRawResponse.Text = $"Error: {ex.Message}"; } finally { _btnRawSend.Enabled = true; }
         }
 
@@ -398,7 +397,16 @@ namespace PatsKillerPro.Forms
         {
             if (string.IsNullOrEmpty(_txtOutcode.Text)) { MessageBox.Show("Read outcode first.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             SetStatus("Getting incode...", WARNING); _btnGetIncode.Enabled = false;
-            try { Log($"Requesting incode for {_txtOutcode.Text}..."); var result = await IncodeService.Instance.CalculateIncodeAsync(_txtOutcode.Text, _vin, _cmbModule.SelectedItem?.ToString()); if (result.Success && !string.IsNullOrEmpty(result.Incode)) { _txtIncode.Text = result.Incode; Log($"  ✓ Incode: {result.Incode} (Provider: {result.ProviderUsed}, Tokens: {result.TokensCharged})", SUCCESS); } else Log($"  ✗ Failed: {result.Error}", DANGER); SetStatus("Incode received", SUCCESS); }
+            try { 
+                Log($"Requesting incode..."); // SECURITY: Don't log outcode
+                var result = await IncodeService.Instance.CalculateIncodeAsync(_txtOutcode.Text, _vin, _cmbModule.SelectedItem?.ToString()); 
+                if (result.Success && !string.IsNullOrEmpty(result.Incode)) { 
+                    _txtIncode.Text = result.Incode; 
+                    // SECURITY: Don't log actual incode to UI - it's visible in the text field
+                    Log($"  ✓ Incode received (Provider: {result.ProviderUsed}, Tokens: {result.TokensCharged})", SUCCESS); 
+                } else Log($"  ✗ Failed: {result.Error}", DANGER); 
+                SetStatus("Incode received", SUCCESS); 
+            }
             catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Failed", DANGER); } finally { _btnGetIncode.Enabled = true; }
         }
 
