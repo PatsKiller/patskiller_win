@@ -1,0 +1,273 @@
+using System;
+using System.Drawing;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using PatsKillerPro.Communication;
+using PatsKillerPro.Services;
+using PatsKillerPro.Utils;
+using PatsKillerPro.Vehicle;
+
+namespace PatsKillerPro.Forms
+{
+    /// <summary>
+    /// Key Counters Form - Read/Write Min/Max key counter values
+    /// Token Cost: Read = FREE, Write = 1 TOKEN each
+    /// </summary>
+    public class KeyCountersForm : Form
+    {
+        private readonly Color BG = Color.FromArgb(26, 26, 30), SURFACE = Color.FromArgb(35, 35, 40), CARD = Color.FromArgb(42, 42, 48);
+        private readonly Color BORDER = Color.FromArgb(58, 58, 66), TEXT = Color.FromArgb(240, 240, 240), TEXT_DIM = Color.FromArgb(160, 160, 165);
+        private readonly Color ACCENT = Color.FromArgb(59, 130, 246), SUCCESS = Color.FromArgb(34, 197, 94), WARNING = Color.FromArgb(234, 179, 8), DANGER = Color.FromArgb(239, 68, 68), BTN_BG = Color.FromArgb(54, 54, 64);
+
+        private const ushort DID_MIN_KEY_COUNTER = 0x5B13;
+        private const ushort DID_MAX_KEY_COUNTER = 0x5B14;
+
+        private NumericUpDown _numMin = null!, _numMax = null!;
+        private Label _lblCurrentMin = null!, _lblCurrentMax = null!, _lblStatus = null!;
+        private Button _btnRead = null!, _btnWriteMin = null!, _btnWriteMax = null!, _btnWriteBoth = null!;
+        private RichTextBox _txtLog = null!;
+
+        private readonly UdsService _uds;
+        private readonly string _vin;
+        private int _originalMin = -1, _originalMax = -1;
+
+        public KeyCountersForm(UdsService uds, string vin)
+        {
+            _uds = uds ?? throw new ArgumentNullException(nameof(uds));
+            _vin = vin ?? "Unknown";
+            InitializeComponent();
+            BuildUI();
+        }
+
+        private void InitializeComponent()
+        {
+            Text = "Key Counters"; Size = new Size(600, 550); MinimumSize = new Size(550, 500);
+            StartPosition = FormStartPosition.CenterParent; BackColor = BG; ForeColor = TEXT; Font = new Font("Segoe UI", 10F);
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; ShowInTaskbar = false;
+        }
+
+        private void BuildUI()
+        {
+            var mainLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = BG, Padding = new Padding(20) };
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 200));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            // Header
+            var header = new Panel { Dock = DockStyle.Fill, BackColor = CARD, Padding = new Padding(15, 10, 15, 10) };
+            header.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, header.Width - 1, header.Height - 1); };
+            var headerFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+            headerFlow.Controls.Add(new Label { Text = "🔢 KEY COUNTERS", Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = ACCENT, AutoSize = true, Margin = new Padding(0, 8, 20, 0) });
+            _lblStatus = new Label { Text = "Ready", Font = new Font("Segoe UI", 10), ForeColor = SUCCESS, AutoSize = true, Margin = new Padding(20, 12, 0, 0) };
+            headerFlow.Controls.Add(_lblStatus);
+            header.Controls.Add(headerFlow);
+            mainLayout.Controls.Add(header, 0, 0);
+
+            // Counter Panel
+            var counterPanel = new Panel { Dock = DockStyle.Fill, BackColor = SURFACE, Padding = new Padding(20), Margin = new Padding(0, 10, 0, 10) };
+            counterPanel.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, counterPanel.Width - 1, counterPanel.Height - 1); };
+            var counterLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3, BackColor = Color.Transparent };
+            counterLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+            counterLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+            counterLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+
+            // Min Counter
+            counterLayout.Controls.Add(new Label { Text = "Minimum Keys", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 0, 5) }, 0, 0);
+            _lblCurrentMin = new Label { Text = "Current: --", ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(0, 5, 0, 10) };
+            counterLayout.Controls.Add(_lblCurrentMin, 0, 1);
+            _numMin = new NumericUpDown { Minimum = 0, Maximum = 8, Value = 2, Width = 100, Font = new Font("Segoe UI", 14, FontStyle.Bold), BackColor = Color.FromArgb(45, 45, 55), ForeColor = TEXT };
+            counterLayout.Controls.Add(_numMin, 0, 2);
+
+            // Max Counter
+            counterLayout.Controls.Add(new Label { Text = "Maximum Keys", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 0, 5) }, 1, 0);
+            _lblCurrentMax = new Label { Text = "Current: --", ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(0, 5, 0, 10) };
+            counterLayout.Controls.Add(_lblCurrentMax, 1, 1);
+            _numMax = new NumericUpDown { Minimum = 0, Maximum = 8, Value = 8, Width = 100, Font = new Font("Segoe UI", 14, FontStyle.Bold), BackColor = Color.FromArgb(45, 45, 55), ForeColor = TEXT };
+            counterLayout.Controls.Add(_numMax, 1, 2);
+
+            // Info Panel
+            var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 40, 50), Margin = new Padding(10, 0, 0, 0) };
+            infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
+            infoPanel.Controls.Add(new Label { Text = "ℹ️ DIDs:\n0x5B13 = Min\n0x5B14 = Max\n\nMin ≤ Max\nValid: 0-8", ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(10), Font = new Font("Segoe UI", 9) });
+            counterLayout.Controls.Add(infoPanel, 2, 0);
+            counterLayout.SetRowSpan(infoPanel, 3);
+            counterPanel.Controls.Add(counterLayout);
+            mainLayout.Controls.Add(counterPanel, 0, 1);
+
+            // Buttons
+            var buttonBar = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Padding = new Padding(0, 10, 0, 10) };
+            _btnRead = CreateButton("📖 Read Counters", ACCENT); _btnRead.Click += BtnRead_Click; buttonBar.Controls.Add(_btnRead);
+            buttonBar.Controls.Add(new Label { Text = "│", ForeColor = BORDER, AutoSize = true, Margin = new Padding(10, 12, 10, 0) });
+            _btnWriteMin = CreateButton("💾 Write Min", WARNING); _btnWriteMin.Click += BtnWriteMin_Click; buttonBar.Controls.Add(_btnWriteMin);
+            _btnWriteMax = CreateButton("💾 Write Max", WARNING); _btnWriteMax.Click += BtnWriteMax_Click; buttonBar.Controls.Add(_btnWriteMax);
+            _btnWriteBoth = CreateButton("💾 Write Both", DANGER); _btnWriteBoth.Click += BtnWriteBoth_Click; buttonBar.Controls.Add(_btnWriteBoth);
+            mainLayout.Controls.Add(buttonBar, 0, 2);
+
+            // Log
+            var logPanel = new Panel { Dock = DockStyle.Fill, BackColor = SURFACE, Padding = new Padding(10) };
+            logPanel.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, logPanel.Width - 1, logPanel.Height - 1); };
+            _txtLog = new RichTextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 30, 35), ForeColor = TEXT_DIM, Font = new Font("Consolas", 9), ReadOnly = true, BorderStyle = BorderStyle.None };
+            logPanel.Controls.Add(_txtLog);
+            mainLayout.Controls.Add(logPanel, 0, 3);
+
+            Controls.Add(mainLayout);
+        }
+
+        private Button CreateButton(string text, Color bgColor)
+        {
+            var btn = new Button { Text = text, Size = new Size(130, 40), FlatStyle = FlatStyle.Flat, BackColor = bgColor, ForeColor = TEXT, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 10, 0) };
+            btn.FlatAppearance.BorderColor = BORDER; return btn;
+        }
+
+        private void Log(string msg, Color? color = null) { if (_txtLog.InvokeRequired) { _txtLog.Invoke(new Action(() => Log(msg, color))); return; } _txtLog.SelectionStart = _txtLog.TextLength; _txtLog.SelectionColor = color ?? TEXT_DIM; _txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {msg}\n"); _txtLog.ScrollToCaret(); }
+        private void SetStatus(string text, Color color) { if (_lblStatus.InvokeRequired) { _lblStatus.Invoke(new Action(() => SetStatus(text, color))); return; } _lblStatus.Text = text; _lblStatus.ForeColor = color; }
+
+        private async void BtnRead_Click(object? sender, EventArgs e)
+        {
+            SetStatus("Reading...", WARNING); _btnRead.Enabled = false;
+            try
+            {
+                await Task.Run(() =>
+                {
+                    Log("=== Reading Key Counters ===", ACCENT);
+                    _uds.StartExtendedSession(ModuleAddresses.BCM_TX);
+                    System.Threading.Thread.Sleep(50);
+
+                    var minData = _uds.ReadDataByIdentifier(ModuleAddresses.BCM_TX, DID_MIN_KEY_COUNTER);
+                    if (minData != null && minData.Length > 0)
+                    {
+                        _originalMin = minData[0];
+                        Invoke(new Action(() => { _lblCurrentMin.Text = $"Current: {_originalMin}"; _numMin.Value = _originalMin; }));
+                        Log($"  ✓ Min Counter: {_originalMin}", SUCCESS);
+                    }
+                    else Log("  ✗ Min Counter: No response", DANGER);
+
+                    System.Threading.Thread.Sleep(50);
+                    var maxData = _uds.ReadDataByIdentifier(ModuleAddresses.BCM_TX, DID_MAX_KEY_COUNTER);
+                    if (maxData != null && maxData.Length > 0)
+                    {
+                        _originalMax = maxData[0];
+                        Invoke(new Action(() => { _lblCurrentMax.Text = $"Current: {_originalMax}"; _numMax.Value = _originalMax; }));
+                        Log($"  ✓ Max Counter: {_originalMax}", SUCCESS);
+                    }
+                    else Log("  ✗ Max Counter: No response", DANGER);
+
+                    Log("=== Read Complete ===", SUCCESS);
+                });
+                SetStatus("Read complete", SUCCESS);
+            }
+            catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Read failed", DANGER); }
+            finally { _btnRead.Enabled = true; }
+        }
+
+        private async void BtnWriteMin_Click(object? sender, EventArgs e) => await WriteCounter("Min", DID_MIN_KEY_COUNTER, (int)_numMin.Value);
+        private async void BtnWriteMax_Click(object? sender, EventArgs e) => await WriteCounter("Max", DID_MAX_KEY_COUNTER, (int)_numMax.Value);
+
+        private async void BtnWriteBoth_Click(object? sender, EventArgs e)
+        {
+            if (_numMin.Value > _numMax.Value) { MessageBox.Show("Min cannot be greater than Max.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            using var confirm = new KeyCounterWriteConfirmationForm((int)_numMin.Value, (int)_numMax.Value, true);
+            if (confirm.ShowDialog(this) != DialogResult.OK) return;
+            if (!TokenBalanceService.Instance.HasEnoughTokens(2)) { MessageBox.Show("Insufficient tokens. Need 2.", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+            SetStatus("Writing both...", WARNING); _btnWriteBoth.Enabled = false;
+            try
+            {
+                await WriteCounterInternal("Min", DID_MIN_KEY_COUNTER, (int)_numMin.Value);
+                await WriteCounterInternal("Max", DID_MAX_KEY_COUNTER, (int)_numMax.Value);
+                SetStatus("Both written", SUCCESS);
+            }
+            catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Write failed", DANGER); }
+            finally { _btnWriteBoth.Enabled = true; }
+        }
+
+        private async Task WriteCounter(string name, ushort did, int value)
+        {
+            if (name == "Min" && value > _numMax.Value) { MessageBox.Show("Min cannot be greater than Max.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (name == "Max" && value < _numMin.Value) { MessageBox.Show("Max cannot be less than Min.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+            using var confirm = new KeyCounterWriteConfirmationForm(name == "Min" ? value : -1, name == "Max" ? value : -1, false);
+            if (confirm.ShowDialog(this) != DialogResult.OK) return;
+            if (!TokenBalanceService.Instance.HasEnoughTokens(1)) { MessageBox.Show("Insufficient tokens.", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+            SetStatus($"Writing {name}...", WARNING);
+            var btn = name == "Min" ? _btnWriteMin : _btnWriteMax; btn.Enabled = false;
+            try { await WriteCounterInternal(name, did, value); SetStatus($"{name} written", SUCCESS); }
+            catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Write failed", DANGER); }
+            finally { btn.Enabled = true; }
+        }
+
+        private async Task WriteCounterInternal(string name, ushort did, int value)
+        {
+            await Task.Run(async () =>
+            {
+                Log($"Writing {name} Counter = {value}...");
+                var tokenResult = await TokenBalanceService.Instance.DeductForUtilityAsync($"key_counter_{name.ToLower()}", _vin);
+                if (!tokenResult.Success) { Log($"  ✗ Token deduction failed: {tokenResult.Error}", DANGER); return; }
+
+                _uds.StartExtendedSession(ModuleAddresses.BCM_TX);
+                System.Threading.Thread.Sleep(50);
+                if (!_uds.RequestSecurityAccess(ModuleAddresses.BCM_TX)) { Log($"  ✗ Security access denied", DANGER); return; }
+                System.Threading.Thread.Sleep(50);
+
+                var success = _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, did, new byte[] { (byte)value });
+                if (success)
+                {
+                    Log($"  ✓ {name} Counter written (1 token)", SUCCESS);
+                    await ProActivityLogger.Instance.LogActivityAsync($"key_counter_{name.ToLower()}", _vin, null, null, null, true, metadata: new { value });
+                    if (name == "Min") Invoke(new Action(() => _lblCurrentMin.Text = $"Current: {value}"));
+                    else Invoke(new Action(() => _lblCurrentMax.Text = $"Current: {value}"));
+                }
+                else Log($"  ✗ {name} Counter write failed", DANGER);
+            });
+        }
+    }
+
+    public class KeyCounterWriteConfirmationForm : Form
+    {
+        private readonly Color BG = Color.FromArgb(26, 26, 30), CARD = Color.FromArgb(42, 42, 48), BORDER = Color.FromArgb(58, 58, 66), TEXT = Color.FromArgb(240, 240, 240), WARNING = Color.FromArgb(234, 179, 8), DANGER = Color.FromArgb(239, 68, 68);
+        private CheckBox _chk1 = null!, _chk2 = null!, _chk3 = null!;
+        private Button _btnWrite = null!;
+        private readonly int _minValue, _maxValue;
+        private readonly bool _writeBoth;
+
+        public KeyCounterWriteConfirmationForm(int minValue, int maxValue, bool writeBoth)
+        {
+            _minValue = minValue; _maxValue = maxValue; _writeBoth = writeBoth;
+            InitUI();
+        }
+
+        private void InitUI()
+        {
+            Text = "Confirm Write"; Size = new Size(450, 320); StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
+            BackColor = BG; ForeColor = TEXT; Font = new Font("Segoe UI", 10F);
+
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(20) };
+
+            var warnPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(60, 40, 20), Height = 50 };
+            warnPanel.Paint += (s, e) => { using var p = new Pen(WARNING, 2); e.Graphics.DrawRectangle(p, 1, 1, warnPanel.Width - 3, warnPanel.Height - 3); };
+            var msg = _writeBoth ? $"Writing Min={_minValue}, Max={_maxValue}" : (_minValue >= 0 ? $"Writing Min={_minValue}" : $"Writing Max={_maxValue}");
+            warnPanel.Controls.Add(new Label { Text = $"⚠️ {msg}", ForeColor = WARNING, Font = new Font("Segoe UI", 11, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
+            layout.Controls.Add(warnPanel, 0, 0);
+
+            var tokenCost = _writeBoth ? 2 : 1;
+            layout.Controls.Add(new Label { Text = $"Token Cost: {tokenCost} token(s)", ForeColor = TEXT, Font = new Font("Segoe UI", 11), AutoSize = true, Margin = new Padding(0, 15, 0, 15) }, 0, 1);
+
+            _chk1 = new CheckBox { Text = "I understand this affects vehicle security", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk1.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk1, 0, 2);
+            _chk2 = new CheckBox { Text = "I have read the current counter values", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk2.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk2, 0, 3);
+            _chk3 = new CheckBox { Text = "I accept responsibility for this change", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk3.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk3, 0, 4);
+
+            var buttonPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Margin = new Padding(0, 15, 0, 0) };
+            var btnCancel = new Button { Text = "Cancel", Size = new Size(100, 40), FlatStyle = FlatStyle.Flat, BackColor = CARD, ForeColor = TEXT, DialogResult = DialogResult.Cancel }; btnCancel.FlatAppearance.BorderColor = BORDER; buttonPanel.Controls.Add(btnCancel);
+            _btnWrite = new Button { Text = "✓ WRITE", Size = new Size(120, 40), FlatStyle = FlatStyle.Flat, BackColor = DANGER, ForeColor = TEXT, Font = new Font("Segoe UI", 10, FontStyle.Bold), Enabled = false, DialogResult = DialogResult.OK, Margin = new Padding(0, 0, 10, 0) }; _btnWrite.FlatAppearance.BorderColor = DANGER; buttonPanel.Controls.Add(_btnWrite);
+            layout.Controls.Add(buttonPanel, 0, 5);
+
+            Controls.Add(layout);
+            AcceptButton = _btnWrite; CancelButton = btnCancel;
+        }
+
+        private void UpdateBtn(object? s, EventArgs e) => _btnWrite.Enabled = _chk1.Checked && _chk2.Checked && _chk3.Checked;
+    }
+}

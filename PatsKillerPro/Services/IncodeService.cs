@@ -8,12 +8,12 @@ using System.Threading.Tasks;
 namespace PatsKillerPro.Services
 {
     /// <summary>
-    /// Service for calculating incodes via the multi-provider routing system.
-    /// Calls the provider-route-request edge function which handles:
-    /// - Provider selection (priority, health, rotation status)
-    /// - Automatic failover to backup providers
-    /// - Rate limiting
-    /// - Usage logging
+    /// Service for calculating incodes via the provider-router edge function.
+    /// Handles:
+    /// - Multi-provider routing (IncodeService, EZimmo)
+    /// - 3-tier cache (user cache, global cache, provider call)
+    /// - Token deduction and balance tracking
+    /// - Automatic failover
     /// </summary>
     public class IncodeService
     {
@@ -65,39 +65,36 @@ namespace PatsKillerPro.Services
         // ============ INCODE CALCULATION ============
 
         /// <summary>
-        /// Calculate incode from outcode using the multi-provider routing system.
-        /// The backend selects the best provider based on priority, health, and availability.
+        /// Calculate incode from outcode using the provider-router edge function.
+        /// API Format: { action: "calculate_incode", outcode, vehicleInfo }
+        /// user_email is extracted from Bearer token server-side.
         /// </summary>
-        /// <param name="outcode">The BCM/module outcode</param>
-        /// <param name="vin">Vehicle VIN (optional, for logging)</param>
-        /// <param name="moduleType">Module type: "BCM", "PCM", "ABS", "IPC" (optional)</param>
-        /// <returns>IncodeResult with success status and incode or error</returns>
-        public async Task<IncodeResult> CalculateIncodeAsync(string outcode, string? vin = null, string? moduleType = null)
+        public async Task<IncodeResult> CalculateIncodeAsync(string outcode, string? vin = null, string? moduleType = null, int? year = null, string? make = null, string? model = null)
         {
             try
             {
-                var payload = new
+                // Build request in correct format for provider-router
+                var request = new ProviderRouterRequest
                 {
-                    outcode = outcode,
-                    vin = vin,
-                    module_type = moduleType
-                };
-
-                var request = new ProviderRouteRequest
-                {
-                    ServiceType = "incode_calculation",
-                    ActionType = "get_incode",
-                    Payload = payload,
-                    UserId = UserId,
-                    UserEmail = UserEmail
+                    Action = "calculate_incode",
+                    Outcode = outcode,
+                    VehicleInfo = new VehicleInfoPayload
+                    {
+                        Vin = vin,
+                        Year = year,
+                        Make = make ?? "Ford",
+                        Model = model,
+                        ModuleType = moduleType ?? "BCM"
+                    }
                 };
 
                 var json = JsonSerializer.Serialize(request, new JsonSerializerOptions
                 {
-                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 });
 
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/provider-route-request")
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/provider-router")
                 {
                     Content = new StringContent(json, Encoding.UTF8, "application/json")
                 };
@@ -116,18 +113,18 @@ namespace PatsKillerPro.Services
                     return new IncodeResult
                     {
                         Success = false,
-                        Error = $"Provider API error: {response.StatusCode} - {responseBody}"
+                        Error = $"API error: {response.StatusCode} - {responseBody}"
                     };
                 }
 
-                var result = JsonSerializer.Deserialize<ProviderRouteResponse>(responseBody, new JsonSerializerOptions
+                var result = JsonSerializer.Deserialize<ProviderRouterResponse>(responseBody, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
 
                 if (result == null)
                 {
-                    return new IncodeResult { Success = false, Error = "Invalid response from provider" };
+                    return new IncodeResult { Success = false, Error = "Invalid response" };
                 }
 
                 if (!result.Success)
@@ -136,19 +133,26 @@ namespace PatsKillerPro.Services
                     {
                         Success = false,
                         Error = result.Error ?? "Provider returned failure",
-                        ProviderUsed = result.ProviderUsed
+                        ProviderUsed = result.Source
                     };
                 }
 
-                // Extract incode from response data
-                var incode = ExtractIncodeFromResponse(result.Data);
+                // Update token balance from response
+                if (result.TokensRemaining.HasValue)
+                {
+                    TokenBalanceService.Instance.UpdateFromServerResponse(result.TokensRemaining.Value);
+                }
 
                 return new IncodeResult
                 {
                     Success = true,
-                    Incode = incode,
-                    ProviderUsed = result.ProviderUsed,
-                    ResponseTimeMs = result.ResponseTimeMs
+                    Incode = result.Incode,
+                    ProviderUsed = result.Source,
+                    TokensCharged = result.TokensCharged ?? 0,
+                    TokensRemaining = result.TokensRemaining ?? 0,
+                    IsOwnDuplicate = result.IsOwnDuplicate ?? false,
+                    IsGlobalCache = result.IsGlobalCache ?? false,
+                    ResponseTimeMs = result.ResponseTimeMs ?? 0
                 };
             }
             catch (TaskCanceledException)
@@ -180,7 +184,7 @@ namespace PatsKillerPro.Services
         {
             try
             {
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/provider-health-check");
+                var httpRequest = new HttpRequestMessage(HttpMethod.Get, $"{SUPABASE_URL}/functions/v1/provider-router?action=health");
                 httpRequest.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 if (!string.IsNullOrEmpty(AuthToken))
                 {
@@ -211,87 +215,74 @@ namespace PatsKillerPro.Services
                 return new ProviderHealthResult { Success = false, Error = ex.Message };
             }
         }
-
-        private string? ExtractIncodeFromResponse(JsonElement? data)
-        {
-            if (data == null) return null;
-
-            try
-            {
-                // Try common response formats
-                if (data.Value.TryGetProperty("incode", out var incodeProp))
-                {
-                    return incodeProp.GetString();
-                }
-                if (data.Value.TryGetProperty("Incode", out var incodeProp2))
-                {
-                    return incodeProp2.GetString();
-                }
-                if (data.Value.TryGetProperty("result", out var resultProp))
-                {
-                    if (resultProp.TryGetProperty("incode", out var nestedIncode))
-                    {
-                        return nestedIncode.GetString();
-                    }
-                    return resultProp.GetString();
-                }
-                if (data.Value.TryGetProperty("code", out var codeProp))
-                {
-                    return codeProp.GetString();
-                }
-
-                // Return raw string if it looks like an incode
-                var rawString = data.Value.ToString();
-                if (!string.IsNullOrEmpty(rawString) && rawString.Length >= 4 && rawString.Length <= 20)
-                {
-                    return rawString;
-                }
-            }
-            catch
-            {
-                // Ignore extraction errors
-            }
-
-            return null;
-        }
     }
 
     // ============ REQUEST/RESPONSE MODELS ============
 
-    public class ProviderRouteRequest
+    /// <summary>
+    /// Request format for provider-router edge function
+    /// </summary>
+    public class ProviderRouterRequest
     {
-        [JsonPropertyName("service_type")]
-        public string ServiceType { get; set; } = "";
+        [JsonPropertyName("action")]
+        public string Action { get; set; } = "calculate_incode";
 
-        [JsonPropertyName("action_type")]
-        public string ActionType { get; set; } = "";
+        [JsonPropertyName("outcode")]
+        public string Outcode { get; set; } = "";
 
-        [JsonPropertyName("payload")]
-        public object? Payload { get; set; }
-
-        [JsonPropertyName("user_id")]
-        public string? UserId { get; set; }
-
-        [JsonPropertyName("user_email")]
-        public string? UserEmail { get; set; }
+        [JsonPropertyName("vehicleInfo")]
+        public VehicleInfoPayload? VehicleInfo { get; set; }
     }
 
-    public class ProviderRouteResponse
+    public class VehicleInfoPayload
+    {
+        [JsonPropertyName("vin")]
+        public string? Vin { get; set; }
+
+        [JsonPropertyName("year")]
+        public int? Year { get; set; }
+
+        [JsonPropertyName("make")]
+        public string? Make { get; set; }
+
+        [JsonPropertyName("model")]
+        public string? Model { get; set; }
+
+        [JsonPropertyName("moduleType")]
+        public string? ModuleType { get; set; }
+    }
+
+    /// <summary>
+    /// Response format from provider-router edge function
+    /// </summary>
+    public class ProviderRouterResponse
     {
         [JsonPropertyName("success")]
         public bool Success { get; set; }
 
+        [JsonPropertyName("incode")]
+        public string? Incode { get; set; }
+
         [JsonPropertyName("error")]
         public string? Error { get; set; }
 
-        [JsonPropertyName("data")]
-        public JsonElement? Data { get; set; }
+        [JsonPropertyName("source")]
+        public string? Source { get; set; }
 
-        [JsonPropertyName("provider_used")]
-        public string? ProviderUsed { get; set; }
+        [JsonPropertyName("tokensCharged")]
+        public int? TokensCharged { get; set; }
 
-        [JsonPropertyName("response_time_ms")]
-        public int ResponseTimeMs { get; set; }
+        [JsonPropertyName("tokensRemaining")]
+        public int? TokensRemaining { get; set; }
+
+        [JsonPropertyName("isOwnDuplicate")]
+        public bool? IsOwnDuplicate { get; set; }
+
+        [JsonPropertyName("isGlobalCache")]
+        public bool? IsGlobalCache { get; set; }
+
+        [JsonPropertyName("responseTimeMs")]
+        public int? ResponseTimeMs { get; set; }
     }
 
     public class IncodeResult
@@ -300,6 +291,10 @@ namespace PatsKillerPro.Services
         public string? Incode { get; set; }
         public string? Error { get; set; }
         public string? ProviderUsed { get; set; }
+        public int TokensCharged { get; set; }
+        public int TokensRemaining { get; set; }
+        public bool IsOwnDuplicate { get; set; }
+        public bool IsGlobalCache { get; set; }
         public int ResponseTimeMs { get; set; }
     }
 

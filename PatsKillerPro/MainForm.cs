@@ -6,6 +6,8 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using PatsKillerPro.Communication;
+using PatsKillerPro.Forms;
 using PatsKillerPro.J2534;
 using PatsKillerPro.Services;
 using PatsKillerPro.Utils;
@@ -693,7 +695,7 @@ namespace PatsKillerPro
             var r1 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
             var d1 = AutoBtn("Clear P160A", BTN_BG); d1.Click += BtnP160A_Click; r1.Controls.Add(d1);
             var d2 = AutoBtn("Clear B10A2", BTN_BG); d2.Click += BtnB10A2_Click; r1.Controls.Add(d2);
-            var d3 = AutoBtn("Clear Crush Event", BTN_BG); d3.Click += BtnCrush_Click; r1.Controls.Add(d3);
+            var d3 = AutoBtn("Clear Crash Event", BTN_BG); d3.Click += BtnCrush_Click; r1.Controls.Add(d3);
             sec1.Controls.Add(r1);
             layout.Controls.Add(sec1, 0, 0);
 
@@ -715,6 +717,17 @@ namespace PatsKillerPro
             var mod = AutoBtn("Read All Module Info", BTN_BG); mod.Click += BtnModInfo_Click; r4.Controls.Add(mod);
             sec4.Controls.Add(r4);
             layout.Controls.Add(sec4, 1, 1);
+
+            // === PHASE 2: ADVANCED TOOLS ===
+            var sec5 = Section("ADVANCED TOOLS");
+            var r5 = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true };
+            var btnTargets = AutoBtn("🎯 Target Blocks", ACCENT); btnTargets.Click += BtnTargets_Click; r5.Controls.Add(btnTargets);
+            var btnKeyCounters = AutoBtn("🔢 Key Counters", BTN_BG); btnKeyCounters.Click += BtnKeyCounters_Click; r5.Controls.Add(btnKeyCounters);
+            var btnEngineering = AutoBtn("🔧 Engineering Mode", WARNING); btnEngineering.Click += BtnEngineering_Click; r5.Controls.Add(btnEngineering);
+            sec5.Controls.Add(r5);
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(sec5, 0, 2);
+            layout.SetColumnSpan(sec5, 2);
 
             _content.Controls.Add(_diagTab);
         }
@@ -1555,15 +1568,15 @@ private async void BtnErase_Click(object? s, EventArgs e)
         private async void BtnCrush_Click(object? s, EventArgs e)
         {
             if (!_isConnected) { MessageBox.Show("Connect first"); return; }
-            if (!Confirm(1, "Clear Crush Event")) return;
+            if (!Confirm(1, "Clear Crash Event")) return;
             
             try
             {
                 var result = await J2534Service.Instance.ClearCrashFlagAsync();
                 if (result.Success)
                 {
-                    MessageBox.Show("Crush event cleared!");
-                    Log("success", "Crush cleared");
+                    MessageBox.Show("Crash event cleared!");
+                    Log("success", "Crash event cleared");
                 }
                 else
                 {
@@ -1845,6 +1858,59 @@ private async void BtnErase_Click(object? s, EventArgs e)
                 }
             }
             catch (Exception ex) { ShowError("Error", "Failed", ex); }
+        }
+
+        // === PHASE 2: ADVANCED TOOLS HANDLERS ===
+        private void BtnTargets_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect to vehicle first"); return; }
+            try
+            {
+                var uds = J2534Service.Instance.GetUdsService();
+                var vin = _lblVin.Text.Replace("VIN: ", "").Trim();
+                if (uds == null) { MessageBox.Show("UDS service not available"); return; }
+                using var form = new Forms.TargetsForm(uds, vin);
+                form.ShowDialog(this);
+            }
+            catch (Exception ex) { ShowError("Error", "Failed to open Targets form", ex); }
+        }
+
+        private void BtnKeyCounters_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect to vehicle first"); return; }
+            try
+            {
+                var uds = J2534Service.Instance.GetUdsService();
+                var vin = _lblVin.Text.Replace("VIN: ", "").Trim();
+                if (uds == null) { MessageBox.Show("UDS service not available"); return; }
+                using var form = new Forms.KeyCountersForm(uds, vin);
+                form.ShowDialog(this);
+            }
+            catch (Exception ex) { ShowError("Error", "Failed to open Key Counters form", ex); }
+        }
+
+        private void BtnEngineering_Click(object? s, EventArgs e)
+        {
+            if (!_isConnected) { MessageBox.Show("Connect to vehicle first"); return; }
+            var result = MessageBox.Show(
+                "⚠️ ENGINEERING MODE WARNING ⚠️\n\n" +
+                "This mode provides direct access to vehicle modules.\n" +
+                "Incorrect usage can permanently damage modules.\n\n" +
+                "Only use if you know exactly what you are doing.\n\n" +
+                "Do you want to continue?",
+                "Engineering Mode",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (result != DialogResult.Yes) return;
+            try
+            {
+                var uds = J2534Service.Instance.GetUdsService();
+                var vin = _lblVin.Text.Replace("VIN: ", "").Trim();
+                if (uds == null) { MessageBox.Show("UDS service not available"); return; }
+                using var form = new Forms.EngineeringForm(uds, vin);
+                form.ShowDialog(this);
+            }
+            catch (Exception ex) { ShowError("Error", "Failed to open Engineering form", ex); }
         }
         #endregion
 

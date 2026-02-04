@@ -36,6 +36,15 @@ namespace PatsKillerPro.Services
             var uds = new UdsService(_patsService.UdsProtocol);
             return new PatsOperations(uds);
         }
+
+        /// <summary>
+        /// Get direct access to UdsService for advanced operations (Phase 2)
+        /// </summary>
+        public UdsService? GetUdsService()
+        {
+            if (_patsService?.UdsProtocol == null) return null;
+            return new UdsService(_patsService.UdsProtocol);
+        }
         
         // Workflow integration
         private WorkflowService? _workflowService;
