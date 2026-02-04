@@ -64,9 +64,20 @@ namespace PatsKillerPro.Utils
             ["OpenEngineering"] = "Open Engineering Mode\nAdvanced DID read/write, routine control, raw UDS\n⚠️ For experts only!\n[Various token costs]",
             // === PHASE 2: KEY COUNTERS ===
             ["KeyCountersRead"] = "Read Min/Max key counters from BCM\nDIDs: 0x5B13 (Min), 0x5B14 (Max)\n[FREE]",
-            ["KeyCountersWriteMin"] = "Write minimum key counter value\n⚠️ Affects vehicle security\n[1 TOKEN]",
-            ["KeyCountersWriteMax"] = "Write maximum key counter value\n⚠️ Affects vehicle security\n[1 TOKEN]",
-            ["OpenKeyCounters"] = "Open Key Counters manager\nRead/Set Min/Max key counter values\n[Read=FREE, Write=1 TOKEN each]",
+            ["KeyCountersWriteMin"] = "Write minimum key counter value\nMin = minimum keys required for vehicle start\nTypical value: 2 (always need 2+ keys)\n⚠️ Affects vehicle security\n[1 TOKEN]",
+            ["KeyCountersWriteMax"] = "Write maximum key counter value\nMax = maximum keys that can be programmed\nTypical value: 8 (8 slots available)\n⚠️ Affects vehicle security\n[1 TOKEN]",
+            ["KeyCountersWriteBoth"] = "Write BOTH Min and Max counters\nSingle BCM unlock session, writes both values\n⚠️ Min must be ≤ Max\n[1 TOKEN - single session]",
+            ["OpenKeyCounters"] = "Open Key Counters manager\nRead/Set Min/Max key counter values\n[Read=FREE, Write=1 TOKEN]",
+            // === PHASE 2: ENGINEERING MODE DETAILED ===
+            ["EngineeringDidReadCommon"] = "Read common DID from module\nSelect from dropdown: VIN, PATS Status, Key Count, etc.\n[FREE]",
+            ["EngineeringDidReadCustom"] = "Read custom DID (4 hex digits)\nEnter DID like F190, C126, 5B13\n[FREE]",
+            ["EngineeringDidWriteCustom"] = "Write data to custom DID\n⚠️ CAUTION: May affect module operation!\nRequires security access (incode)\n[1 TOKEN]",
+            ["EngineeringRoutineResults"] = "Read routine control results (0x03)\nCheck status of previously started routine\n[FREE]",
+            ["EngineeringPatsOutcode"] = "Read PATS outcode from current module\nUsed for incode calculation\n[FREE]",
+            ["EngineeringPatsIncode"] = "Submit incode to unlock PATS\nRequires valid incode from outcode\n[1 TOKEN]",
+            ["EngineeringPatsUnlock"] = "Full PATS unlock sequence\nRead outcode → Get incode → Unlock\n[1 TOKEN]",
+            ["EngineeringRawRead"] = "Send raw UDS read request\nFormat: Service ID + Data (hex)\nExample: 22 F1 90 (Read VIN)\n[FREE]",
+            ["EngineeringRawWrite"] = "Send raw UDS write request\n⚠️ DANGER: May damage module!\nExample: 2E XX XX YY (Write DID)\n[1 TOKEN]",
         };
 
         // Tooltip text definitions (legacy static class)

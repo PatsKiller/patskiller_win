@@ -11,7 +11,7 @@ namespace PatsKillerPro.Forms
 {
     /// <summary>
     /// Key Counters Form - Read/Write Min/Max key counter values
-    /// Token Cost: Read = FREE, Write = 1 TOKEN each
+    /// Token Cost: Read = FREE, Write Min/Max/Both = 1 TOKEN (single BCM session)
     /// </summary>
     public class KeyCountersForm : Form
     {
@@ -26,6 +26,7 @@ namespace PatsKillerPro.Forms
         private Label _lblCurrentMin = null!, _lblCurrentMax = null!, _lblStatus = null!;
         private Button _btnRead = null!, _btnWriteMin = null!, _btnWriteMax = null!, _btnWriteBoth = null!;
         private RichTextBox _txtLog = null!;
+        private ToolTip _toolTip = null!;
 
         private readonly UdsService _uds;
         private readonly string _vin;
@@ -41,18 +42,20 @@ namespace PatsKillerPro.Forms
 
         private void InitializeComponent()
         {
-            Text = "Key Counters"; Size = new Size(600, 550); MinimumSize = new Size(550, 500);
+            Text = "Key Counters"; Size = new Size(650, 620); MinimumSize = new Size(600, 580);
             StartPosition = FormStartPosition.CenterParent; BackColor = BG; ForeColor = TEXT; Font = new Font("Segoe UI", 10F);
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; ShowInTaskbar = false;
+            _toolTip = ToolTipHelper.CreateToolTip();
         }
 
         private void BuildUI()
         {
-            var mainLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = BG, Padding = new Padding(20) };
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 200));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var mainLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = BG, Padding = new Padding(20) };
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));   // Header
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));   // Instructions
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 180));  // Counters
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));   // Buttons
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // Log
 
             // Header
             var header = new Panel { Dock = DockStyle.Fill, BackColor = CARD, Padding = new Padding(15, 10, 15, 10) };
@@ -64,8 +67,24 @@ namespace PatsKillerPro.Forms
             header.Controls.Add(headerFlow);
             mainLayout.Controls.Add(header, 0, 0);
 
+            // Instructions Panel
+            var instructionPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 45, 60), Padding = new Padding(12), Margin = new Padding(0, 8, 0, 8) };
+            instructionPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, instructionPanel.Width - 1, instructionPanel.Height - 1); };
+            var instructionLabel = new Label
+            {
+                Dock = DockStyle.Fill,
+                ForeColor = TEXT_DIM,
+                Font = new Font("Segoe UI", 9),
+                Text = "ℹ️ KEY COUNTER SETTINGS\n" +
+                       "• Min Counter (0x5B13): Minimum keys required for vehicle start. Typical: 2\n" +
+                       "• Max Counter (0x5B14): Maximum keys that can be programmed. Typical: 8\n" +
+                       "• Read is FREE. Write uses 1 TOKEN (single BCM session unlocks both writes)"
+            };
+            instructionPanel.Controls.Add(instructionLabel);
+            mainLayout.Controls.Add(instructionPanel, 0, 1);
+
             // Counter Panel
-            var counterPanel = new Panel { Dock = DockStyle.Fill, BackColor = SURFACE, Padding = new Padding(20), Margin = new Padding(0, 10, 0, 10) };
+            var counterPanel = new Panel { Dock = DockStyle.Fill, BackColor = SURFACE, Padding = new Padding(20), Margin = new Padding(0, 5, 0, 5) };
             counterPanel.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, counterPanel.Width - 1, counterPanel.Height - 1); };
             var counterLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3, BackColor = Color.Transparent };
             counterLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
@@ -89,34 +108,47 @@ namespace PatsKillerPro.Forms
             // Info Panel
             var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 40, 50), Margin = new Padding(10, 0, 0, 0) };
             infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
-            infoPanel.Controls.Add(new Label { Text = "ℹ️ DIDs:\n0x5B13 = Min\n0x5B14 = Max\n\nMin ≤ Max\nValid: 0-8", ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(10), Font = new Font("Segoe UI", 9) });
+            infoPanel.Controls.Add(new Label { Text = "📋 DIDs:\n0x5B13 = Min\n0x5B14 = Max\n\n✓ Min ≤ Max\n✓ Valid: 0-8", ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(10), Font = new Font("Segoe UI", 9) });
             counterLayout.Controls.Add(infoPanel, 2, 0);
             counterLayout.SetRowSpan(infoPanel, 3);
             counterPanel.Controls.Add(counterLayout);
-            mainLayout.Controls.Add(counterPanel, 0, 1);
+            mainLayout.Controls.Add(counterPanel, 0, 2);
 
-            // Buttons
-            var buttonBar = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Padding = new Padding(0, 10, 0, 10) };
-            _btnRead = CreateButton("📖 Read Counters", ACCENT); _btnRead.Click += BtnRead_Click; buttonBar.Controls.Add(_btnRead);
+            // Buttons with tooltips
+            var buttonBar = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Padding = new Padding(0, 5, 0, 5) };
+            _btnRead = CreateButton("📖 Read Counters", ACCENT); _btnRead.Click += BtnRead_Click;
+            _toolTip.SetToolTip(_btnRead, ToolTipHelper.GetToolTip("KeyCountersRead"));
+            buttonBar.Controls.Add(_btnRead);
+
             buttonBar.Controls.Add(new Label { Text = "│", ForeColor = BORDER, AutoSize = true, Margin = new Padding(10, 12, 10, 0) });
-            _btnWriteMin = CreateButton("💾 Write Min", WARNING); _btnWriteMin.Click += BtnWriteMin_Click; buttonBar.Controls.Add(_btnWriteMin);
-            _btnWriteMax = CreateButton("💾 Write Max", WARNING); _btnWriteMax.Click += BtnWriteMax_Click; buttonBar.Controls.Add(_btnWriteMax);
-            _btnWriteBoth = CreateButton("💾 Write Both", DANGER); _btnWriteBoth.Click += BtnWriteBoth_Click; buttonBar.Controls.Add(_btnWriteBoth);
-            mainLayout.Controls.Add(buttonBar, 0, 2);
+
+            _btnWriteMin = CreateButton("💾 Write Min", WARNING); _btnWriteMin.Click += BtnWriteMin_Click;
+            _toolTip.SetToolTip(_btnWriteMin, ToolTipHelper.GetToolTip("KeyCountersWriteMin"));
+            buttonBar.Controls.Add(_btnWriteMin);
+
+            _btnWriteMax = CreateButton("💾 Write Max", WARNING); _btnWriteMax.Click += BtnWriteMax_Click;
+            _toolTip.SetToolTip(_btnWriteMax, ToolTipHelper.GetToolTip("KeyCountersWriteMax"));
+            buttonBar.Controls.Add(_btnWriteMax);
+
+            _btnWriteBoth = CreateButton("💾 Write Both (1 Token)", SUCCESS); _btnWriteBoth.Click += BtnWriteBoth_Click;
+            _toolTip.SetToolTip(_btnWriteBoth, ToolTipHelper.GetToolTip("KeyCountersWriteBoth"));
+            buttonBar.Controls.Add(_btnWriteBoth);
+
+            mainLayout.Controls.Add(buttonBar, 0, 3);
 
             // Log
             var logPanel = new Panel { Dock = DockStyle.Fill, BackColor = SURFACE, Padding = new Padding(10) };
             logPanel.Paint += (s, e) => { using var p = new Pen(BORDER); e.Graphics.DrawRectangle(p, 0, 0, logPanel.Width - 1, logPanel.Height - 1); };
             _txtLog = new RichTextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 30, 35), ForeColor = TEXT_DIM, Font = new Font("Consolas", 9), ReadOnly = true, BorderStyle = BorderStyle.None };
             logPanel.Controls.Add(_txtLog);
-            mainLayout.Controls.Add(logPanel, 0, 3);
+            mainLayout.Controls.Add(logPanel, 0, 4);
 
             Controls.Add(mainLayout);
         }
 
         private Button CreateButton(string text, Color bgColor)
         {
-            var btn = new Button { Text = text, Size = new Size(130, 40), FlatStyle = FlatStyle.Flat, BackColor = bgColor, ForeColor = TEXT, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 10, 0) };
+            var btn = new Button { Text = text, AutoSize = true, MinimumSize = new Size(120, 40), Padding = new Padding(10, 5, 10, 5), FlatStyle = FlatStyle.Flat, BackColor = bgColor, ForeColor = TEXT, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 10, 0) };
             btn.FlatAppearance.BorderColor = BORDER; return btn;
         }
 
@@ -153,7 +185,7 @@ namespace PatsKillerPro.Forms
                     }
                     else Log("  ✗ Max Counter: No response", DANGER);
 
-                    Log("=== Read Complete ===", SUCCESS);
+                    Log("=== Read Complete (FREE) ===", SUCCESS);
                 });
                 SetStatus("Read complete", SUCCESS);
             }
@@ -161,28 +193,10 @@ namespace PatsKillerPro.Forms
             finally { _btnRead.Enabled = true; }
         }
 
-        private async void BtnWriteMin_Click(object? sender, EventArgs e) => await WriteCounter("Min", DID_MIN_KEY_COUNTER, (int)_numMin.Value);
-        private async void BtnWriteMax_Click(object? sender, EventArgs e) => await WriteCounter("Max", DID_MAX_KEY_COUNTER, (int)_numMax.Value);
+        private async void BtnWriteMin_Click(object? sender, EventArgs e) => await WriteSingleCounter("Min", DID_MIN_KEY_COUNTER, (int)_numMin.Value);
+        private async void BtnWriteMax_Click(object? sender, EventArgs e) => await WriteSingleCounter("Max", DID_MAX_KEY_COUNTER, (int)_numMax.Value);
 
-        private async void BtnWriteBoth_Click(object? sender, EventArgs e)
-        {
-            if (_numMin.Value > _numMax.Value) { MessageBox.Show("Min cannot be greater than Max.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            using var confirm = new KeyCounterWriteConfirmationForm((int)_numMin.Value, (int)_numMax.Value, true);
-            if (confirm.ShowDialog(this) != DialogResult.OK) return;
-            if (!TokenBalanceService.Instance.HasEnoughTokens(2)) { MessageBox.Show("Insufficient tokens. Need 2.", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-
-            SetStatus("Writing both...", WARNING); _btnWriteBoth.Enabled = false;
-            try
-            {
-                await WriteCounterInternal("Min", DID_MIN_KEY_COUNTER, (int)_numMin.Value);
-                await WriteCounterInternal("Max", DID_MAX_KEY_COUNTER, (int)_numMax.Value);
-                SetStatus("Both written", SUCCESS);
-            }
-            catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Write failed", DANGER); }
-            finally { _btnWriteBoth.Enabled = true; }
-        }
-
-        private async Task WriteCounter(string name, ushort did, int value)
+        private async Task WriteSingleCounter(string name, ushort did, int value)
         {
             if (name == "Min" && value > _numMax.Value) { MessageBox.Show("Min cannot be greater than Max.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (name == "Max" && value < _numMin.Value) { MessageBox.Show("Max cannot be less than Min.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
@@ -193,34 +207,95 @@ namespace PatsKillerPro.Forms
 
             SetStatus($"Writing {name}...", WARNING);
             var btn = name == "Min" ? _btnWriteMin : _btnWriteMax; btn.Enabled = false;
-            try { await WriteCounterInternal(name, did, value); SetStatus($"{name} written", SUCCESS); }
+            try
+            {
+                await Task.Run(async () =>
+                {
+                    Log($"=== Writing {name} Counter ===", WARNING);
+                    var tokenResult = await TokenBalanceService.Instance.DeductForUtilityAsync($"key_counter_{name.ToLower()}", _vin);
+                    if (!tokenResult.Success) { Log($"  ✗ Token deduction failed: {tokenResult.Error}", DANGER); return; }
+
+                    _uds.StartExtendedSession(ModuleAddresses.BCM_TX);
+                    System.Threading.Thread.Sleep(50);
+                    if (!_uds.RequestSecurityAccess(ModuleAddresses.BCM_TX)) { Log("  ✗ Security access denied", DANGER); return; }
+                    System.Threading.Thread.Sleep(50);
+
+                    var success = _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, did, new byte[] { (byte)value });
+                    if (success)
+                    {
+                        Log($"  ✓ {name} Counter = {value} (1 token)", SUCCESS);
+                        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"key_counter_{name.ToLower()}", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = -1, Details = $"{name} counter set to {value}", Metadata = new { value } });
+                        if (name == "Min") Invoke(new Action(() => _lblCurrentMin.Text = $"Current: {value}"));
+                        else Invoke(new Action(() => _lblCurrentMax.Text = $"Current: {value}"));
+                    }
+                    else Log($"  ✗ {name} write failed", DANGER);
+                });
+                SetStatus($"{name} written", SUCCESS);
+            }
             catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Write failed", DANGER); }
             finally { btn.Enabled = true; }
         }
 
-        private async Task WriteCounterInternal(string name, ushort did, int value)
+        /// <summary>
+        /// Write Both - 1 TOKEN for single BCM session unlock, writes both Min and Max
+        /// </summary>
+        private async void BtnWriteBoth_Click(object? sender, EventArgs e)
         {
-            await Task.Run(async () =>
+            int minVal = (int)_numMin.Value, maxVal = (int)_numMax.Value;
+            if (minVal > maxVal) { MessageBox.Show("Min cannot be greater than Max.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+            using var confirm = new KeyCounterWriteConfirmationForm(minVal, maxVal, true);
+            if (confirm.ShowDialog(this) != DialogResult.OK) return;
+            if (!TokenBalanceService.Instance.HasEnoughTokens(1)) { MessageBox.Show("Insufficient tokens. Need 1.", "Insufficient Tokens", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+            SetStatus("Writing both...", WARNING); _btnWriteBoth.Enabled = false; _btnWriteMin.Enabled = false; _btnWriteMax.Enabled = false;
+            try
             {
-                Log($"Writing {name} Counter = {value}...");
-                var tokenResult = await TokenBalanceService.Instance.DeductForUtilityAsync($"key_counter_{name.ToLower()}", _vin);
-                if (!tokenResult.Success) { Log($"  ✗ Token deduction failed: {tokenResult.Error}", DANGER); return; }
-
-                _uds.StartExtendedSession(ModuleAddresses.BCM_TX);
-                System.Threading.Thread.Sleep(50);
-                if (!_uds.RequestSecurityAccess(ModuleAddresses.BCM_TX)) { Log($"  ✗ Security access denied", DANGER); return; }
-                System.Threading.Thread.Sleep(50);
-
-                var success = _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, did, new byte[] { (byte)value });
-                if (success)
+                await Task.Run(async () =>
                 {
-                    Log($"  ✓ {name} Counter written (1 token)", SUCCESS);
-                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = $"key_counter_{name.ToLower()}", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = -1, Details = $"{name} counter set to {value}", Metadata = new { value } });
-                    if (name == "Min") Invoke(new Action(() => _lblCurrentMin.Text = $"Current: {value}"));
-                    else Invoke(new Action(() => _lblCurrentMax.Text = $"Current: {value}"));
-                }
-                else Log($"  ✗ {name} Counter write failed", DANGER);
-            });
+                    Log("=== Writing Both Counters (Single Session) ===", WARNING);
+
+                    // Deduct 1 token for entire operation
+                    var tokenResult = await TokenBalanceService.Instance.DeductForUtilityAsync("key_counter_both", _vin);
+                    if (!tokenResult.Success) { Log($"  ✗ Token deduction failed: {tokenResult.Error}", DANGER); return; }
+
+                    // Single BCM unlock session
+                    _uds.StartExtendedSession(ModuleAddresses.BCM_TX);
+                    System.Threading.Thread.Sleep(50);
+                    if (!_uds.RequestSecurityAccess(ModuleAddresses.BCM_TX)) { Log("  ✗ Security access denied", DANGER); return; }
+                    Log("  ✓ BCM unlocked (1 token)", SUCCESS);
+                    System.Threading.Thread.Sleep(50);
+
+                    // Write Min
+                    var minSuccess = _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, DID_MIN_KEY_COUNTER, new byte[] { (byte)minVal });
+                    if (minSuccess)
+                    {
+                        Log($"  ✓ Min Counter = {minVal}", SUCCESS);
+                        Invoke(new Action(() => _lblCurrentMin.Text = $"Current: {minVal}"));
+                    }
+                    else { Log($"  ✗ Min write failed", DANGER); }
+
+                    System.Threading.Thread.Sleep(50);
+
+                    // Write Max (same session, no additional token)
+                    var maxSuccess = _uds.WriteDataByIdentifier(ModuleAddresses.BCM_TX, DID_MAX_KEY_COUNTER, new byte[] { (byte)maxVal });
+                    if (maxSuccess)
+                    {
+                        Log($"  ✓ Max Counter = {maxVal}", SUCCESS);
+                        Invoke(new Action(() => _lblCurrentMax.Text = $"Current: {maxVal}"));
+                    }
+                    else { Log($"  ✗ Max write failed", DANGER); }
+
+                    if (minSuccess && maxSuccess)
+                    {
+                        Log("=== Both Written Successfully (1 token total) ===", SUCCESS);
+                        ProActivityLogger.Instance.LogActivity(new ActivityLogEntry { Action = "key_counter_both", ActionCategory = "key_counters", Vin = _vin, Success = true, TokenChange = -1, Details = $"Min={minVal}, Max={maxVal}", Metadata = new { min = minVal, max = maxVal } });
+                    }
+                });
+                SetStatus("Both written", SUCCESS);
+            }
+            catch (Exception ex) { Log($"Error: {ex.Message}", DANGER); SetStatus("Write failed", DANGER); }
+            finally { _btnWriteBoth.Enabled = true; _btnWriteMin.Enabled = true; _btnWriteMax.Enabled = true; }
         }
     }
 
@@ -252,8 +327,10 @@ namespace PatsKillerPro.Forms
             warnPanel.Controls.Add(new Label { Text = $"⚠️ {msg}", ForeColor = WARNING, Font = new Font("Segoe UI", 11, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
             layout.Controls.Add(warnPanel, 0, 0);
 
-            var tokenCost = _writeBoth ? 2 : 1;
-            layout.Controls.Add(new Label { Text = $"Token Cost: {tokenCost} token(s)", ForeColor = TEXT, Font = new Font("Segoe UI", 11), AutoSize = true, Margin = new Padding(0, 15, 0, 15) }, 0, 1);
+            // Write Both uses single BCM session = 1 token, individual writes = 1 token each
+            var tokenCost = 1;
+            var tokenNote = _writeBoth ? "1 token (single BCM unlock session)" : "1 token";
+            layout.Controls.Add(new Label { Text = $"Token Cost: {tokenNote}", ForeColor = TEXT, Font = new Font("Segoe UI", 11), AutoSize = true, Margin = new Padding(0, 15, 0, 15) }, 0, 1);
 
             _chk1 = new CheckBox { Text = "I understand this affects vehicle security", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk1.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk1, 0, 2);
             _chk2 = new CheckBox { Text = "I have read the current counter values", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 5, 0, 5) }; _chk2.CheckedChanged += UpdateBtn; layout.Controls.Add(_chk2, 0, 3);

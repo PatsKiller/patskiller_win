@@ -13,7 +13,7 @@ namespace PatsKillerPro.Forms
 {
     /// <summary>
     /// Engineering Mode Form - Extended diagnostic operations
-    /// Token Cost: Read = FREE, Write = 1 TOKEN, Routine = 1 TOKEN
+    /// Token Cost: Read = FREE, Write = 1 TOKEN, Routine Start = 1 TOKEN
     /// </summary>
     public class EngineeringForm : Form
     {
@@ -21,23 +21,34 @@ namespace PatsKillerPro.Forms
         private readonly Color BORDER = Color.FromArgb(58, 58, 66), TEXT = Color.FromArgb(240, 240, 240), TEXT_DIM = Color.FromArgb(160, 160, 165);
         private readonly Color ACCENT = Color.FromArgb(59, 130, 246), SUCCESS = Color.FromArgb(34, 197, 94), WARNING = Color.FromArgb(234, 179, 8), DANGER = Color.FromArgb(239, 68, 68), BTN_BG = Color.FromArgb(54, 54, 64);
 
-        private readonly Dictionary<string, (string Name, ushort DID)> _commonDids = new() {
-            ["VIN"] = ("VIN", 0xF190), ["ECU_Serial"] = ("ECU Serial", 0xF18C), ["Software_Version"] = ("Software Version", 0xF195),
-            ["PATS_Status"] = ("PATS Status", 0xC126), ["Key_Count"] = ("Key Count", 0xC125), ["Outcode"] = ("PATS Outcode", 0xC123),
-            ["Target_Block"] = ("Target Block", 0xC00C), ["Min_Key_Counter"] = ("Min Key Counter", 0x5B13), ["Max_Key_Counter"] = ("Max Key Counter", 0x5B14), ["Crash_Event"] = ("Crash Event", 0x5B17),
+        private readonly Dictionary<string, (string Name, ushort DID, string Desc)> _commonDids = new() {
+            ["VIN"] = ("VIN", 0xF190, "Vehicle Identification Number (17 chars)"),
+            ["ECU_Serial"] = ("ECU Serial", 0xF18C, "Module serial number"),
+            ["Software_Version"] = ("Software Version", 0xF195, "Calibration/software version"),
+            ["PATS_Status"] = ("PATS Status", 0xC126, "PATS system status byte"),
+            ["Key_Count"] = ("Key Count", 0xC125, "Number of programmed keys"),
+            ["Outcode"] = ("PATS Outcode", 0xC123, "Security outcode for incode calc"),
+            ["Target_Block"] = ("Target Block", 0xC00C, "PATS target block (10 bytes)"),
+            ["Min_Key_Counter"] = ("Min Key Counter", 0x5B13, "Minimum keys required (0-8)"),
+            ["Max_Key_Counter"] = ("Max Key Counter", 0x5B14, "Maximum keys allowed (0-8)"),
+            ["Crash_Event"] = ("Crash Event", 0x5B17, "Crash sensor flag"),
         };
-        private readonly Dictionary<string, (string Name, ushort RoutineId)> _commonRoutines = new() {
-            ["PATS_Incode"] = ("PATS Incode Submit", 0x716D), ["WKIP"] = ("Write Key In Progress", 0x716C), ["ESCL_Init"] = ("ESCL Initialize", 0xF110), ["KAM_Clear"] = ("KAM Clear", 0x0201),
+        private readonly Dictionary<string, (string Name, ushort RoutineId, string Desc)> _commonRoutines = new() {
+            ["PATS_Incode"] = ("PATS Incode Submit", 0x716D, "Submit incode to unlock PATS security"),
+            ["WKIP"] = ("Write Key In Progress", 0x716C, "Start key programming routine"),
+            ["ESCL_Init"] = ("ESCL Initialize", 0xF110, "Initialize steering column lock"),
+            ["KAM_Clear"] = ("KAM Clear", 0x0201, "Clear Keep Alive Memory"),
         };
 
         private TabControl _tabControl = null!;
         private ComboBox _cmbModule = null!, _cmbDid = null!, _cmbRoutine = null!;
         private TextBox _txtDid = null!, _txtDidValue = null!, _txtRoutineId = null!, _txtRoutineData = null!;
         private TextBox _txtRawRequest = null!, _txtRawResponse = null!, _txtOutcode = null!, _txtIncode = null!;
-        private Button _btnDidRead = null!, _btnDidWrite = null!, _btnRoutineStart = null!, _btnRoutineStop = null!;
+        private Button _btnDidRead = null!, _btnDidWrite = null!, _btnRoutineStart = null!, _btnRoutineStop = null!, _btnRoutineResults = null!;
         private Button _btnRawSend = null!, _btnReadOutcode = null!, _btnGetIncode = null!, _btnUnlock = null!;
-        private Label _lblStatus = null!;
+        private Label _lblStatus = null!, _lblDidDesc = null!, _lblRoutineDesc = null!;
         private RichTextBox _txtLog = null!;
+        private ToolTip _toolTip = null!;
 
         private readonly UdsService _uds;
         private readonly string _vin;
@@ -54,17 +65,18 @@ namespace PatsKillerPro.Forms
 
         private void InitializeComponent()
         {
-            Text = "Engineering Mode"; Size = new Size(950, 750); MinimumSize = new Size(900, 700);
+            Text = "Engineering Mode"; Size = new Size(980, 780); MinimumSize = new Size(950, 750);
             StartPosition = FormStartPosition.CenterParent; BackColor = BG; ForeColor = TEXT; Font = new Font("Segoe UI", 10F);
             FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; ShowInTaskbar = false;
+            _toolTip = ToolTipHelper.CreateToolTip();
         }
 
         private void BuildUI()
         {
             var mainLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = BG, Padding = new Padding(15) };
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
 
             var header = new Panel { Dock = DockStyle.Fill, BackColor = CARD, Padding = new Padding(15, 10, 15, 10) };
@@ -101,31 +113,59 @@ namespace PatsKillerPro.Forms
         private TabPage CreateDidTab()
         {
             var tab = new TabPage("DID Read/Write") { BackColor = SURFACE, Padding = new Padding(15) };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 5, BackColor = Color.Transparent };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 6, BackColor = Color.Transparent };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
             layout.Controls.Add(new Label { Text = "Common DIDs:", ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 0);
-            _cmbDid = new ComboBox { Width = 200, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = SURFACE, ForeColor = TEXT, Margin = new Padding(0, 5, 0, 5) };
-            _cmbDid.Items.Add("-- Select --"); foreach (var kv in _commonDids) _cmbDid.Items.Add($"{kv.Value.Name} (0x{kv.Value.DID:X4})");
-            _cmbDid.SelectedIndex = 0; _cmbDid.SelectedIndexChanged += (s, e) => { if (_cmbDid.SelectedIndex > 0) _txtDid.Text = $"{_commonDids.Values.ToArray()[_cmbDid.SelectedIndex - 1].DID:X4}"; };
+            _cmbDid = new ComboBox { Width = 250, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = SURFACE, ForeColor = TEXT, Margin = new Padding(0, 5, 0, 5) };
+            _cmbDid.Items.Add("-- Select Common DID --"); foreach (var kv in _commonDids) _cmbDid.Items.Add($"{kv.Value.Name} (0x{kv.Value.DID:X4})");
+            _cmbDid.SelectedIndex = 0; 
+            _cmbDid.SelectedIndexChanged += (s, e) => { 
+                if (_cmbDid.SelectedIndex > 0) 
+                {
+                    var did = _commonDids.Values.ToArray()[_cmbDid.SelectedIndex - 1];
+                    _txtDid.Text = $"{did.DID:X4}";
+                    _lblDidDesc.Text = $"📋 {did.Desc}";
+                }
+                else _lblDidDesc.Text = "";
+            };
             layout.Controls.Add(_cmbDid, 1, 0);
+
+            // DID Description label
+            _lblDidDesc = new Label { Text = "", ForeColor = ACCENT, AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
+            layout.Controls.Add(_lblDidDesc, 2, 0);
 
             layout.Controls.Add(new Label { Text = "DID (Hex):", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 1);
             _txtDid = new TextBox { Width = 150, BackColor = Color.FromArgb(45, 45, 55), ForeColor = TEXT, Font = new Font("Consolas", 11), Text = "F190", Margin = new Padding(0, 5, 0, 5) };
+            _toolTip.SetToolTip(_txtDid, "Enter 4-digit hex DID\nExamples: F190 (VIN), C126 (PATS Status)");
             layout.Controls.Add(_txtDid, 1, 1);
 
             layout.Controls.Add(new Label { Text = "Value (Hex):", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 2);
             _txtDidValue = new TextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 55), ForeColor = TEXT, Font = new Font("Consolas", 11), Margin = new Padding(0, 5, 10, 5) };
+            _toolTip.SetToolTip(_txtDidValue, "Read: Shows returned data\nWrite: Enter hex bytes (e.g., 01 02 03)");
             layout.Controls.Add(_txtDidValue, 1, 2); layout.SetColumnSpan(_txtDidValue, 2);
 
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 15, 0, 0) };
-            _btnDidRead = CreateButton("📖 Read DID", ACCENT); _btnDidRead.Click += BtnDidRead_Click; btnPanel.Controls.Add(_btnDidRead);
-            _btnDidWrite = CreateButton("💾 Write DID", WARNING); _btnDidWrite.Click += BtnDidWrite_Click; btnPanel.Controls.Add(_btnDidWrite);
+            _btnDidRead = CreateButton("📖 Read DID", ACCENT); _btnDidRead.Click += BtnDidRead_Click;
+            _toolTip.SetToolTip(_btnDidRead, "Read data from DID (Service 0x22)\nSends: 22 XX XX\n[FREE]");
+            btnPanel.Controls.Add(_btnDidRead);
+            
+            _btnDidWrite = CreateButton("💾 Write DID", WARNING); _btnDidWrite.Click += BtnDidWrite_Click;
+            _toolTip.SetToolTip(_btnDidWrite, "Write data to DID (Service 0x2E)\nSends: 2E XX XX [data]\n⚠️ Requires security access\n[1 TOKEN]");
+            btnPanel.Controls.Add(_btnDidWrite);
             layout.Controls.Add(btnPanel, 1, 3); layout.SetColumnSpan(btnPanel, 2);
 
-            var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 40, 50), Margin = new Padding(0, 10, 0, 0) };
+            // Instructions panel
+            var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 45, 60), Margin = new Padding(0, 10, 0, 0) };
             infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
-            infoPanel.Controls.Add(new Label { Text = "ℹ️ Read = FREE, Write = 1 TOKEN\nDID format: 4 hex digits (e.g., F190)", ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(10) });
+            infoPanel.Controls.Add(new Label { 
+                Text = "📘 DID READ/WRITE INSTRUCTIONS\n" +
+                       "• Read = FREE | Write = 1 TOKEN\n" +
+                       "• DID format: 4 hex digits (e.g., F190 for VIN)\n" +
+                       "• Write requires security access (BCM unlock)\n" +
+                       "• Common DIDs: F190=VIN, C126=PATS Status, 5B13/5B14=Key Counters", 
+                ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(12), Font = new Font("Segoe UI", 9) 
+            });
             layout.Controls.Add(infoPanel, 0, 4); layout.SetColumnSpan(infoPanel, 3);
             tab.Controls.Add(layout);
             return tab;
@@ -134,32 +174,63 @@ namespace PatsKillerPro.Forms
         private TabPage CreateRoutineTab()
         {
             var tab = new TabPage("Routine Control") { BackColor = SURFACE, Padding = new Padding(15) };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 5, BackColor = Color.Transparent };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 6, BackColor = Color.Transparent };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
             layout.Controls.Add(new Label { Text = "Common:", ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 0);
-            _cmbRoutine = new ComboBox { Width = 200, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = SURFACE, ForeColor = TEXT, Margin = new Padding(0, 5, 0, 5) };
-            _cmbRoutine.Items.Add("-- Select --"); foreach (var kv in _commonRoutines) _cmbRoutine.Items.Add($"{kv.Value.Name} (0x{kv.Value.RoutineId:X4})");
-            _cmbRoutine.SelectedIndex = 0; _cmbRoutine.SelectedIndexChanged += (s, e) => { if (_cmbRoutine.SelectedIndex > 0) _txtRoutineId.Text = $"{_commonRoutines.Values.ToArray()[_cmbRoutine.SelectedIndex - 1].RoutineId:X4}"; };
+            _cmbRoutine = new ComboBox { Width = 250, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = SURFACE, ForeColor = TEXT, Margin = new Padding(0, 5, 0, 5) };
+            _cmbRoutine.Items.Add("-- Select Common Routine --"); foreach (var kv in _commonRoutines) _cmbRoutine.Items.Add($"{kv.Value.Name} (0x{kv.Value.RoutineId:X4})");
+            _cmbRoutine.SelectedIndex = 0; 
+            _cmbRoutine.SelectedIndexChanged += (s, e) => { 
+                if (_cmbRoutine.SelectedIndex > 0) 
+                {
+                    var routine = _commonRoutines.Values.ToArray()[_cmbRoutine.SelectedIndex - 1];
+                    _txtRoutineId.Text = $"{routine.RoutineId:X4}";
+                    _lblRoutineDesc.Text = $"📋 {routine.Desc}";
+                }
+                else _lblRoutineDesc.Text = "";
+            };
             layout.Controls.Add(_cmbRoutine, 1, 0);
+
+            // Routine Description label
+            _lblRoutineDesc = new Label { Text = "", ForeColor = ACCENT, AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
+            layout.Controls.Add(_lblRoutineDesc, 2, 0);
 
             layout.Controls.Add(new Label { Text = "Routine ID:", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 1);
             _txtRoutineId = new TextBox { Width = 150, BackColor = Color.FromArgb(45, 45, 55), ForeColor = TEXT, Font = new Font("Consolas", 11), Text = "716D", Margin = new Padding(0, 5, 0, 5) };
+            _toolTip.SetToolTip(_txtRoutineId, "Enter 4-digit hex Routine ID\nExamples: 716D (Incode), 716C (WKIP)");
             layout.Controls.Add(_txtRoutineId, 1, 1);
 
             layout.Controls.Add(new Label { Text = "Data (Hex):", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 2);
             _txtRoutineData = new TextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 55), ForeColor = TEXT, Font = new Font("Consolas", 11), Margin = new Padding(0, 5, 10, 5) };
+            _toolTip.SetToolTip(_txtRoutineData, "Optional routine parameters\nFor PATS Incode: enter 4-digit incode");
             layout.Controls.Add(_txtRoutineData, 1, 2); layout.SetColumnSpan(_txtRoutineData, 2);
 
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 15, 0, 0) };
-            _btnRoutineStart = CreateButton("▶ Start (0x01)", SUCCESS); _btnRoutineStart.Click += async (s, e) => await ExecuteRoutine(0x01, "Start"); btnPanel.Controls.Add(_btnRoutineStart);
-            _btnRoutineStop = CreateButton("⏹ Stop (0x02)", DANGER); _btnRoutineStop.Click += async (s, e) => await ExecuteRoutine(0x02, "Stop"); btnPanel.Controls.Add(_btnRoutineStop);
-            var btnResults = CreateButton("📋 Results (0x03)", BTN_BG); btnResults.Click += async (s, e) => await ExecuteRoutine(0x03, "Results"); btnPanel.Controls.Add(btnResults);
+            _btnRoutineStart = CreateButton("▶ Start (0x01)", SUCCESS); _btnRoutineStart.Click += async (s, e) => await ExecuteRoutine(0x01, "Start");
+            _toolTip.SetToolTip(_btnRoutineStart, "Start routine (Service 0x31 Sub 0x01)\nSends: 31 01 XX XX [data]\n[1 TOKEN]");
+            btnPanel.Controls.Add(_btnRoutineStart);
+            
+            _btnRoutineStop = CreateButton("⏹ Stop (0x02)", DANGER); _btnRoutineStop.Click += async (s, e) => await ExecuteRoutine(0x02, "Stop");
+            _toolTip.SetToolTip(_btnRoutineStop, "Stop routine (Service 0x31 Sub 0x02)\nSends: 31 02 XX XX\n[FREE]");
+            btnPanel.Controls.Add(_btnRoutineStop);
+            
+            _btnRoutineResults = CreateButton("📋 Results (0x03)", BTN_BG); _btnRoutineResults.Click += async (s, e) => await ExecuteRoutine(0x03, "Results");
+            _toolTip.SetToolTip(_btnRoutineResults, "Get routine results (Service 0x31 Sub 0x03)\nSends: 31 03 XX XX\n[FREE]");
+            btnPanel.Controls.Add(_btnRoutineResults);
             layout.Controls.Add(btnPanel, 1, 3); layout.SetColumnSpan(btnPanel, 2);
 
-            var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 40, 50), Margin = new Padding(0, 10, 0, 0) };
+            // Instructions panel
+            var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 45, 60), Margin = new Padding(0, 10, 0, 0) };
             infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
-            infoPanel.Controls.Add(new Label { Text = "ℹ️ Routine Start = 1 TOKEN\n0x01=Start, 0x02=Stop, 0x03=Results", ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(10) });
+            infoPanel.Controls.Add(new Label { 
+                Text = "📘 ROUTINE CONTROL INSTRUCTIONS\n" +
+                       "• Start = 1 TOKEN | Stop/Results = FREE\n" +
+                       "• 0x01 = Start routine, 0x02 = Stop routine, 0x03 = Get results\n" +
+                       "• Common Routines: 716D=PATS Incode, 716C=Write Key, 0201=Clear KAM\n" +
+                       "• For PATS Incode (716D): Enter 4-digit incode in Data field", 
+                ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(12), Font = new Font("Segoe UI", 9) 
+            });
             layout.Controls.Add(infoPanel, 0, 4); layout.SetColumnSpan(infoPanel, 3);
             tab.Controls.Add(layout);
             return tab;
@@ -168,25 +239,48 @@ namespace PatsKillerPro.Forms
         private TabPage CreateRawUdsTab()
         {
             var tab = new TabPage("Raw UDS") { BackColor = SURFACE, Padding = new Padding(15) };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, BackColor = Color.Transparent };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5, BackColor = Color.Transparent };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
             layout.Controls.Add(new Label { Text = "Request (Hex):", ForeColor = TEXT, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 0);
             _txtRawRequest = new TextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 55), ForeColor = TEXT, Font = new Font("Consolas", 11), Text = "22 F1 90", Margin = new Padding(0, 5, 0, 5) };
+            _toolTip.SetToolTip(_txtRawRequest, "Enter raw UDS bytes separated by spaces\nExamples:\n  22 F1 90 = Read VIN\n  10 03 = Extended Session\n  27 01 = Security Seed Request");
             layout.Controls.Add(_txtRawRequest, 1, 0);
 
             layout.Controls.Add(new Label { Text = "Response:", ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 1);
             _txtRawResponse = new TextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(35, 35, 40), ForeColor = SUCCESS, Font = new Font("Consolas", 11), ReadOnly = true, Margin = new Padding(0, 5, 0, 5), Multiline = true, Height = 80, ScrollBars = ScrollBars.Vertical };
+            _toolTip.SetToolTip(_txtRawResponse, "Shows raw response bytes from module\nPositive response: 62 XX XX (for 22 request)\nNegative response: 7F XX XX (error)");
             layout.Controls.Add(_txtRawResponse, 1, 1);
 
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 15, 0, 0) };
-            _btnRawSend = CreateButton("📤 Send Raw", WARNING); _btnRawSend.Click += BtnRawSend_Click; btnPanel.Controls.Add(_btnRawSend);
+            _btnRawSend = CreateButton("📤 Send Raw", WARNING); _btnRawSend.Click += BtnRawSend_Click;
+            _toolTip.SetToolTip(_btnRawSend, "Send raw UDS request to selected module\n⚠️ Write operations cost 1 TOKEN\n⚠️ DANGEROUS - incorrect commands can damage modules!");
+            btnPanel.Controls.Add(_btnRawSend);
             layout.Controls.Add(btnPanel, 1, 2);
 
+            // Warning panel
             var warnPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(50, 30, 30), Margin = new Padding(0, 10, 0, 0) };
             warnPanel.Paint += (s, e) => { using var p = new Pen(DANGER, 2); e.Graphics.DrawRectangle(p, 1, 1, warnPanel.Width - 3, warnPanel.Height - 3); };
-            warnPanel.Controls.Add(new Label { Text = "⚠️ RAW UDS MODE - Use with extreme caution!\nIncorrect commands can brick modules permanently.\n[1 TOKEN for write operations]", ForeColor = DANGER, Dock = DockStyle.Fill, Padding = new Padding(10), Font = new Font("Segoe UI", 9, FontStyle.Bold) });
+            warnPanel.Controls.Add(new Label { 
+                Text = "⚠️ RAW UDS MODE - EXPERTS ONLY!\n" +
+                       "Incorrect commands can permanently brick modules.\n" +
+                       "Read (22, 19, 3E) = FREE | Write (2E, 31, 27) = 1 TOKEN", 
+                ForeColor = DANGER, Dock = DockStyle.Fill, Padding = new Padding(12), Font = new Font("Segoe UI", 9, FontStyle.Bold) 
+            });
             layout.Controls.Add(warnPanel, 0, 3); layout.SetColumnSpan(warnPanel, 2);
+
+            // Instructions panel
+            var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 45, 60), Margin = new Padding(0, 10, 0, 0) };
+            infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
+            infoPanel.Controls.Add(new Label { 
+                Text = "📘 COMMON UDS SERVICES\n" +
+                       "• 10 01/03 = Session Control (Default/Extended)\n" +
+                       "• 22 XX XX = Read Data By ID    • 2E XX XX [data] = Write Data By ID\n" +
+                       "• 27 01/02 = Security Access    • 31 01/02/03 = Routine Control\n" +
+                       "• 19 02 FF = Read DTCs          • 14 FF FF FF = Clear DTCs", 
+                ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(12), Font = new Font("Segoe UI", 9) 
+            });
+            layout.Controls.Add(infoPanel, 0, 4); layout.SetColumnSpan(infoPanel, 2);
             tab.Controls.Add(layout);
             return tab;
         }
@@ -194,25 +288,50 @@ namespace PatsKillerPro.Forms
         private TabPage CreatePatsUnlockTab()
         {
             var tab = new TabPage("PATS Unlock Helper") { BackColor = SURFACE, Padding = new Padding(15) };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 5, BackColor = Color.Transparent };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 6, BackColor = Color.Transparent };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
 
             layout.Controls.Add(new Label { Text = "Step 1:", ForeColor = ACCENT, AutoSize = true, Margin = new Padding(0, 10, 0, 0), Font = new Font("Segoe UI", 10, FontStyle.Bold) }, 0, 0);
-            _btnReadOutcode = CreateButton("📖 Read Outcode", ACCENT); _btnReadOutcode.Click += BtnReadOutcode_Click; layout.Controls.Add(_btnReadOutcode, 1, 0);
+            _btnReadOutcode = CreateButton("📖 Read Outcode", ACCENT); _btnReadOutcode.Click += BtnReadOutcode_Click;
+            _toolTip.SetToolTip(_btnReadOutcode, "Read PATS outcode from selected module\nReads DID 0xC123 (Pre-PATS outcode)\n[FREE]");
+            layout.Controls.Add(_btnReadOutcode, 1, 0);
 
             layout.Controls.Add(new Label { Text = "Outcode:", ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 1);
             _txtOutcode = new TextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(35, 35, 40), ForeColor = WARNING, Font = new Font("Consolas", 14, FontStyle.Bold), ReadOnly = true, Margin = new Padding(0, 5, 10, 5), TextAlign = HorizontalAlignment.Center };
+            _toolTip.SetToolTip(_txtOutcode, "PATS outcode from module\nFormat varies by platform");
             layout.Controls.Add(_txtOutcode, 1, 1);
 
             layout.Controls.Add(new Label { Text = "Step 2:", ForeColor = ACCENT, AutoSize = true, Margin = new Padding(0, 10, 0, 0), Font = new Font("Segoe UI", 10, FontStyle.Bold) }, 0, 2);
-            _btnGetIncode = CreateButton("🔑 Get Incode", WARNING); _btnGetIncode.Click += BtnGetIncode_Click; layout.Controls.Add(_btnGetIncode, 1, 2);
+            _btnGetIncode = CreateButton("🔑 Get Incode", WARNING); _btnGetIncode.Click += BtnGetIncode_Click;
+            _toolTip.SetToolTip(_btnGetIncode, "Calculate incode from outcode via PatsKiller.com API\nRequires valid outcode in field above\n[1 TOKEN]");
+            layout.Controls.Add(_btnGetIncode, 1, 2);
 
             layout.Controls.Add(new Label { Text = "Incode:", ForeColor = TEXT_DIM, AutoSize = true, Margin = new Padding(0, 10, 0, 0) }, 0, 3);
             _txtIncode = new TextBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(35, 35, 40), ForeColor = SUCCESS, Font = new Font("Consolas", 14, FontStyle.Bold), ReadOnly = true, Margin = new Padding(0, 5, 10, 5), TextAlign = HorizontalAlignment.Center };
+            _toolTip.SetToolTip(_txtIncode, "Calculated incode for PATS unlock\n4-8 digit code depending on platform");
             layout.Controls.Add(_txtIncode, 1, 3);
 
             layout.Controls.Add(new Label { Text = "Step 3:", ForeColor = ACCENT, AutoSize = true, Margin = new Padding(0, 10, 0, 0), Font = new Font("Segoe UI", 10, FontStyle.Bold) }, 0, 4);
-            _btnUnlock = CreateButton("🔓 Unlock PATS", SUCCESS); _btnUnlock.Click += BtnUnlock_Click; layout.Controls.Add(_btnUnlock, 1, 4);
+            _btnUnlock = CreateButton("🔓 Unlock PATS", SUCCESS); _btnUnlock.Click += BtnUnlock_Click;
+            _toolTip.SetToolTip(_btnUnlock, "Submit incode to unlock PATS security\nRuns routine 0x716D with incode\n[FREE - incode already charged]");
+            layout.Controls.Add(_btnUnlock, 1, 4);
+
+            // Instructions panel on the right
+            var infoPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(30, 45, 60), Margin = new Padding(10, 0, 0, 0) };
+            infoPanel.Paint += (s, e) => { using var p = new Pen(ACCENT, 1); e.Graphics.DrawRectangle(p, 0, 0, infoPanel.Width - 1, infoPanel.Height - 1); };
+            infoPanel.Controls.Add(new Label { 
+                Text = "📘 PATS UNLOCK HELPER\n\n" +
+                       "1. Read Outcode [FREE]\n" +
+                       "   Reads security code from BCM\n\n" +
+                       "2. Get Incode [1 TOKEN]\n" +
+                       "   Calculates unlock code via API\n\n" +
+                       "3. Unlock PATS [FREE]\n" +
+                       "   Submits incode to unlock\n\n" +
+                       "After unlock, BCM accepts\n" +
+                       "key programming commands.", 
+                ForeColor = TEXT_DIM, Dock = DockStyle.Fill, Padding = new Padding(12), Font = new Font("Segoe UI", 9) 
+            });
+            layout.Controls.Add(infoPanel, 2, 0); layout.SetRowSpan(infoPanel, 5);
 
             tab.Controls.Add(layout);
             return tab;
