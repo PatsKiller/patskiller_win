@@ -7,80 +7,71 @@ using System.Text;
 namespace PatsKillerPro.Utils
 {
     /// <summary>
-    /// Generates and caches hardware + software identifiers for license machine-binding.
+    /// Provides unique machine identification for license binding.
     ///
-    /// Two independent IDs are produced:
-    ///   • MachineId  – SHA-256 of CPU ProcessorId + Motherboard Serial + BIOS Serial (via WMI).
-    ///                  Survives OS re-install; changes with hardware swap.
-    ///   • SIID       – Random GUID written to %LocalAppData%\PatsKillerPro\.siid on first run.
-    ///                  Survives hardware swap; changes with OS re-install / app re-install.
-    ///   • CombinedId – "{MachineId}:{SIID}" sent to server for the strictest binding.
+    /// Two identifiers:
+    ///   MachineId  – SHA-256 of CPU + Motherboard + BIOS serials (survives OS reinstall)
+    ///   SIID       – random GUID stored on disk at first launch   (survives HW change)
+    ///   CombinedId – "MachineId:SIID" sent to server              (survives neither alone)
     ///
-    /// Both are computed once at process start and cached for the lifetime of the application.
+    /// Used by LicenseService, ProActivityLogger, and LicenseActivationForm.
     /// </summary>
     [SupportedOSPlatform("windows")]
     public static class MachineIdentity
     {
-        private static readonly Lazy<string> _machineId = new(ComputeMachineId);
-        private static readonly Lazy<string> _siid = new(GetOrCreateSIID);
-
         private const string APP_FOLDER = "PatsKillerPro";
         private const string SIID_FILE = ".siid";
 
-        // ──────────────────────────────── Public API ────────────────────────────────
+        private static string? _machineId;
+        private static string? _siid;
+        private static string? _combinedId;
+
+        // ───────────────────── Public Properties ──────────────────────
 
         /// <summary>
-        /// Hardware fingerprint (CPU + Motherboard + BIOS).  20 chars, Base64.
-        /// Stable across OS re-installs on the same physical machine.
+        /// Hardware fingerprint: SHA-256(CPU ProcessorId + Motherboard Serial + BIOS Serial).
+        /// First 20 chars of Base64 hash. Survives OS reinstall; changes on HW swap.
         /// </summary>
-        public static string MachineId => _machineId.Value;
+        public static string MachineId => _machineId ??= GenerateMachineId();
 
         /// <summary>
-        /// Software Instance ID (random GUID persisted to disk on first launch).  16 chars hex.
-        /// Unique per install – survives hardware changes.
+        /// Software Instance ID: 16-char hex GUID generated once and stored in
+        /// %LocalAppData%\PatsKillerPro\.siid.  Survives HW change; lost on reinstall.
         /// </summary>
-        public static string SIID => _siid.Value;
+        public static string SIID => _siid ??= GetOrCreateSIID();
 
         /// <summary>
-        /// "{MachineId}:{SIID}" – the value sent to the license server.
-        /// If either component changes, the activation slot must be re-claimed.
+        /// Combined identifier: "MachineId:SIID".
+        /// Both halves must match for license validation to pass.
         /// </summary>
-        public static string CombinedId => $"{MachineId}:{SIID}";
+        public static string CombinedId => _combinedId ??= $"{MachineId}:{SIID}";
 
-        // ──────────────────────── Machine ID (Hardware) ─────────────────────────────
+        /// <summary>
+        /// Friendly machine name shown in admin console / license dialogs.
+        /// </summary>
+        public static string MachineName => Environment.MachineName;
 
-        private static string ComputeMachineId()
+        // ───────────────────── Machine ID (hardware) ─────────────────
+
+        private static string GenerateMachineId()
         {
             try
             {
                 var data = new StringBuilder();
-
-                // WMI hardware identifiers – these survive OS re-installs
                 data.Append(GetWmiValue("Win32_Processor", "ProcessorId"));
                 data.Append(GetWmiValue("Win32_BaseBoard", "SerialNumber"));
                 data.Append(GetWmiValue("Win32_BIOS", "SerialNumber"));
 
-                // Only fall back if ALL queries returned empty
-                if (data.Length == 0)
-                {
-                    Logger.Warning("[MachineIdentity] WMI returned no hardware data, using fallback");
-                    data.Append(Environment.MachineName);
-                    data.Append(Environment.ProcessorCount);
-                }
-
                 using var sha = SHA256.Create();
                 var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data.ToString()));
-                var id = Convert.ToBase64String(hash)[..20]; // 20-char fingerprint
-
-                Logger.Info($"[MachineIdentity] MachineId generated: {id[..6]}...");
-                return id;
+                return Convert.ToBase64String(hash)[..20]; // 20-char fingerprint
             }
-            catch (Exception ex)
+            catch
             {
-                Logger.Error($"[MachineIdentity] MachineId generation failed: {ex.Message}");
-                // Absolute fallback – deterministic but weak
+                // Fallback: machine name + user hash
                 using var sha = SHA256.Create();
-                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(Environment.MachineName + Environment.UserName));
+                var fallback = Environment.MachineName + Environment.UserName;
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(fallback));
                 return Convert.ToBase64String(hash)[..20];
             }
         }
@@ -93,79 +84,36 @@ namespace PatsKillerPro.Utils
                     $"SELECT {property} FROM {wmiClass}");
                 foreach (var obj in searcher.Get())
                 {
-                    var val = obj[property]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(val) && val != "To Be Filled By O.E.M.")
-                        return val;
+                    return obj[property]?.ToString() ?? "";
                 }
             }
-            catch (Exception ex)
-            {
-                Logger.Debug($"[MachineIdentity] WMI {wmiClass}.{property} failed: {ex.Message}");
-            }
+            catch { }
             return "";
         }
 
-        // ────────────────────── SIID (Software Instance) ────────────────────────────
+        // ───────────────────── SIID (software instance) ──────────────
 
         private static string GetOrCreateSIID()
         {
-            try
+            var folder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                APP_FOLDER);
+            Directory.CreateDirectory(folder);
+
+            var siidPath = Path.Combine(folder, SIID_FILE);
+
+            // Read existing
+            if (File.Exists(siidPath))
             {
-                var folder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    APP_FOLDER);
-                var siidPath = Path.Combine(folder, SIID_FILE);
-
-                // Read existing SIID
-                if (File.Exists(siidPath))
-                {
-                    var existing = File.ReadAllText(siidPath).Trim();
-                    if (existing.Length >= 12 && existing.Length <= 40)
-                    {
-                        Logger.Info($"[MachineIdentity] SIID loaded: {existing[..6]}...");
-                        return existing;
-                    }
-                    Logger.Warning($"[MachineIdentity] SIID file corrupt ({existing.Length} chars), regenerating");
-                }
-
-                // Generate new SIID
-                Directory.CreateDirectory(folder);
-                var siid = Guid.NewGuid().ToString("N")[..16]; // 16-char hex: "a1b2c3d4e5f6g7h8"
-                File.WriteAllText(siidPath, siid);
-
-                Logger.Info($"[MachineIdentity] SIID created: {siid[..6]}...");
-                return siid;
+                var existing = File.ReadAllText(siidPath).Trim();
+                if (existing.Length >= 16)
+                    return existing[..16];
             }
-            catch (Exception ex)
-            {
-                Logger.Error($"[MachineIdentity] SIID creation failed: {ex.Message}");
-                // Deterministic fallback tied to machine name + user – not ideal but functional
-                using var sha = SHA256.Create();
-                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(
-                    $"SIID_FALLBACK_{Environment.MachineName}_{Environment.UserName}"));
-                return BitConverter.ToString(hash).Replace("-", "")[..16].ToLowerInvariant();
-            }
-        }
 
-        // ──────────────────────── Diagnostic Helpers ────────────────────────────────
-
-        /// <summary>
-        /// Returns a summary string for display in the UI (truncated for security).
-        /// Example: "Machine: aBcDeF...  SIID: a1b2c3..."
-        /// </summary>
-        public static string GetDisplaySummary()
-        {
-            var mid = MachineId.Length > 6 ? MachineId[..6] + "..." : MachineId;
-            var sid = SIID.Length > 6 ? SIID[..6] + "..." : SIID;
-            return $"Machine: {mid}  SIID: {sid}";
-        }
-
-        /// <summary>
-        /// Returns full diagnostic info (for log files, NOT for UI display).
-        /// </summary>
-        public static string GetDiagnosticInfo()
-        {
-            return $"MachineId={MachineId} | SIID={SIID} | Combined={CombinedId} | Host={Environment.MachineName}";
+            // Generate new 16-char hex GUID
+            var siid = Guid.NewGuid().ToString("N")[..16];
+            File.WriteAllText(siidPath, siid);
+            return siid;
         }
     }
 }
