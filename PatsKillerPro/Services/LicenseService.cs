@@ -54,7 +54,7 @@ namespace PatsKillerPro.Services
 
         // ───────────────────────── State ─────────────────────────────
         private readonly HttpClient _http;
-        private Timer? _heartbeatTimer;
+        private System.Threading.Timer? _heartbeatTimer;
         private LicenseCacheData? _cache;
         private bool _disposed;
 
@@ -628,7 +628,7 @@ namespace PatsKillerPro.Services
         public int MachinesUsed { get; init; }
         public int GraceDaysRemaining { get; init; }
         public bool IsGracePeriod { get; init; }
-        public bool MustConnect { get; init; }
+        public bool RequiresReconnect { get; init; }
         public bool IsExpired { get; init; }
         public bool HasLicense { get; init; } = true;
 
@@ -665,7 +665,7 @@ namespace PatsKillerPro.Services
 
         public static LicenseValidationResult MustConnect() => new()
         {
-            IsValid = false, MustConnect = true,
+            IsValid = false, RequiresReconnect = true,
             Message = "Offline too long – must connect to internet to revalidate"
         };
 
