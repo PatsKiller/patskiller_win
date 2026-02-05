@@ -84,7 +84,7 @@ namespace PatsKillerPro
             
             // Close Button
             var btnClose = new Label { Text = "●", Font = new Font("Segoe UI", 16F), ForeColor = _colBorder, AutoSize = true, Location = new Point(490, 20), Cursor = Cursors.Hand };
-            btnClose.Click += (s, e) => Application.Exit();
+            btnClose.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
             btnClose.MouseEnter += (s, e) => btnClose.ForeColor = _colAccent;
             btnClose.MouseLeave += (s, e) => btnClose.ForeColor = _colBorder;
 
