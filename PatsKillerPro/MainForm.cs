@@ -1216,6 +1216,14 @@ namespace PatsKillerPro
             _authToken = Settings.GetString("auth_token", "") ?? "";
             _refreshToken = Settings.GetString("refresh_token", "") ?? "";
             _userEmail = Settings.GetString("user_email", "") ?? "";
+            
+            // CRITICAL: Set auth context for ProActivityLogger when restoring session
+            if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
+            {
+                ProActivityLogger.Instance.SetAuthContext(_authToken, _userEmail);
+                TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
+                Logger.Info($"[MainForm] Session restored for: {_userEmail}");
+            }
         }
 
         private void SaveSession()
@@ -1237,6 +1245,9 @@ namespace PatsKillerPro
             Settings.SetString("refresh_token", "");
             Settings.SetString("user_email", "");
             Settings.Save();
+            
+            // Clear logger auth context too
+            ProActivityLogger.Instance.ClearAuthContext();
         }
 
         private void ApplyAuthHeader()

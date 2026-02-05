@@ -74,10 +74,20 @@ namespace PatsKillerPro.Services
             AuthToken = authToken;
             UserEmail = userEmail;
             UserId = userId;
+            
+            if (!string.IsNullOrEmpty(authToken))
+            {
+                Logger.Info($"[ProActivityLogger] Auth context SET for user: {userEmail} (token: {authToken.Length} chars)");
+            }
+            else
+            {
+                Logger.Warning("[ProActivityLogger] SetAuthContext called with empty token!");
+            }
         }
 
         public void ClearAuthContext()
         {
+            Logger.Info($"[ProActivityLogger] Auth context CLEARED (was: {UserEmail})");
             AuthToken = null;
             UserEmail = null;
             UserId = null;
@@ -85,11 +95,16 @@ namespace PatsKillerPro.Services
 
         public async Task LogActivityAsync(ActivityLogEntry entry)
         {
+            // Debug: Log entry attempt
+            Logger.Info($"[ProActivityLogger] Attempting to log: {entry.Action}");
+            
             if (string.IsNullOrEmpty(AuthToken))
             {
-                Logger.Debug("[ProActivityLogger] No auth token, skipping log");
+                Logger.Warning("[ProActivityLogger] No auth token set - skipping log. Call SetAuthContext() after login!");
                 return;
             }
+
+            Logger.Debug($"[ProActivityLogger] Auth token present ({AuthToken.Length} chars), user: {UserEmail}");
 
             try
             {
@@ -112,28 +127,53 @@ namespace PatsKillerPro.Services
                     metadata = entry.Metadata
                 };
 
-                var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/log-pro-activity");
+                var url = $"{SUPABASE_URL}/functions/v1/log-pro-activity";
+                Logger.Debug($"[ProActivityLogger] POST to: {url}");
+                
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {AuthToken}");
                 request.Content = new StringContent(JsonSerializer.Serialize(logData), Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
                 
-                if (!response.IsSuccessStatusCode)
+                if (response.IsSuccessStatusCode)
                 {
-                    var error = await response.Content.ReadAsStringAsync();
-                    Logger.Warning($"[ProActivityLogger] Log failed: {response.StatusCode} - {error}");
+                    Logger.Info($"[ProActivityLogger] ✓ Logged '{entry.Action}' successfully (HTTP {(int)response.StatusCode})");
                 }
+                else
+                {
+                    Logger.Error($"[ProActivityLogger] ✗ Log failed: HTTP {(int)response.StatusCode} - {responseBody}");
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                Logger.Error($"[ProActivityLogger] Network error: {ex.Message}");
+            }
+            catch (TaskCanceledException ex)
+            {
+                Logger.Error($"[ProActivityLogger] Request timeout: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Logger.Warning($"[ProActivityLogger] Exception: {ex.Message}");
+                Logger.Error($"[ProActivityLogger] Exception: {ex.GetType().Name} - {ex.Message}");
             }
         }
 
         public void LogActivity(ActivityLogEntry entry)
         {
-            _ = Task.Run(() => LogActivityAsync(entry));
+            _ = Task.Run(async () => 
+            {
+                try
+                {
+                    await LogActivityAsync(entry);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"[ProActivityLogger] Background task error: {ex.Message}");
+                }
+            });
         }
 
         // ============ AUTH ============
