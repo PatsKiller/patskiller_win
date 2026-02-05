@@ -832,7 +832,7 @@ namespace PatsKillerPro
             LogS("Incode verified - Key operations unlocked!");
             _keyOpsPanel.Visible = true; _paramResetPanel.Visible = true;
             _btnEraseKeys.Enabled = true; _btnProgramKeys.Enabled = true; _btnParamReset.Enabled = true;
-            ProActivityLogger.Instance.LogIncodeVerification(_currentVin, _currentOutcode, _currentIncode, true, (int)sw.ElapsedMilliseconds);
+            ProActivityLogger.Instance.LogIncodeVerification(_currentVin, _currentYear, _currentModel, _currentOutcode, _currentIncode, true, (int)sw.ElapsedMilliseconds);
             SetStatus("Security access granted - Ready for operations");
         }
 
@@ -843,7 +843,7 @@ namespace PatsKillerPro
             if (MessageBox.Show("This will ERASE ALL programmed keys.\nAre you sure?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             var sw = System.Diagnostics.Stopwatch.StartNew(); LogI("Erasing all keys..."); _btnEraseKeys.Enabled = false;
             await Task.Delay(2000); LogS("All keys erased!"); _btnEraseKeys.Enabled = true;
-            ProActivityLogger.Instance.LogKeyOperation("erase_all", _currentVin, _currentYear, _currentModel, 0, true, (int)sw.ElapsedMilliseconds);
+            ProActivityLogger.Instance.LogEraseAllKeys(_currentVin, _currentYear, _currentModel, 0, true, 0, (int)sw.ElapsedMilliseconds);
         }
 
         private async void BtnProgramKeys_Click(object? s, EventArgs e)
@@ -851,7 +851,7 @@ namespace PatsKillerPro
             if (!RequireTokens()) return;
             var sw = System.Diagnostics.Stopwatch.StartNew(); LogI("Programming new key..."); _btnProgramKeys.Enabled = false;
             await Task.Delay(2000); LogS("Key programmed!"); _btnProgramKeys.Enabled = true;
-            ProActivityLogger.Instance.LogKeyOperation("program", _currentVin, _currentYear, _currentModel, 1, true, (int)sw.ElapsedMilliseconds);
+            ProActivityLogger.Instance.LogKeyProgrammed(_currentVin, _currentYear, _currentModel, 1, true, (int)sw.ElapsedMilliseconds);
         }
 
         // ── Param Reset ──
@@ -876,7 +876,7 @@ namespace PatsKillerPro
                 tokens++; LogI($"Resetting {m.Name} at {m.Address}..."); await Task.Delay(1500);
                 m.Outcode = _currentOutcode; m.Incode = _currentIncode; m.Status = "complete";
                 LogS($"✅ {m.Name} reset complete");
-                ProActivityLogger.Instance.LogParameterResetModule(m.Name, _currentVin, m.Outcode, m.Incode, true, -1, (int)mSw.ElapsedMilliseconds);
+                ProActivityLogger.Instance.LogParameterResetModule(_currentVin, _currentYear, _currentModel, m.Name, m.Outcode ?? "", m.Incode ?? "", true, -1, (int)mSw.ElapsedMilliseconds);
                 done.Add(m.Name); _paramProgress.Value++; _paramResetStep++;
             }
             _paramResetActive = false; _btnParamReset.Enabled = true; _paramProgress.Visible = false;

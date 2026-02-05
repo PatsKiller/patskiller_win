@@ -22,11 +22,6 @@ namespace PatsKillerPro.Services
         private static ProActivityLogger? _instance;
         private static readonly object _lock = new object();
         
-        /// <summary>
-        /// Event for UI logging - subscribe to show messages in the log panel
-        /// </summary>
-        public event Action<string, string>? OnLogMessage; // (type, message) - type: "info", "success", "warning", "error"
-        
         public static ProActivityLogger Instance
         {
             get
@@ -51,19 +46,27 @@ namespace PatsKillerPro.Services
         public string? UserId { get; set; }
         public string MachineId { get; private set; }
         public string? AppVersion { get; set; }
-        
-        private void LogToUI(string type, string message)
-        {
-            Logger.Log(type == "error" ? Logger.LogLevel.Error : type == "warning" ? Logger.LogLevel.Warning : Logger.LogLevel.Info, message);
-            try { OnLogMessage?.Invoke(type, message); } catch { /* ignore UI callback errors */ }
-        }
 
         private ProActivityLogger()
         {
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            MachineId = Utils.MachineIdentity.CombinedId; // Hardware + SIID (shared with LicenseService)
+            MachineId = GenerateMachineId();
             AppVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "2.0.0";
-            Logger.Info($"[ProActivityLogger] Using MachineIdentity.CombinedId: {MachineId[..Math.Min(12, MachineId.Length)]}...");
+        }
+
+        private static string GenerateMachineId()
+        {
+            try
+            {
+                var data = Environment.MachineName + Environment.UserName + Environment.OSVersion.ToString();
+                using var sha = System.Security.Cryptography.SHA256.Create();
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
+                return Convert.ToBase64String(hash)[..16];
+            }
+            catch
+            {
+                return Environment.MachineName;
+            }
         }
 
         public void SetAuthContext(string authToken, string userEmail, string? userId = null)
@@ -71,20 +74,10 @@ namespace PatsKillerPro.Services
             AuthToken = authToken;
             UserEmail = userEmail;
             UserId = userId;
-            
-            if (!string.IsNullOrEmpty(authToken))
-            {
-                LogToUI("info", $"[Activity] Auth set for {userEmail}");
-            }
-            else
-            {
-                LogToUI("warning", "[Activity] SetAuthContext called with empty token!");
-            }
         }
 
         public void ClearAuthContext()
         {
-            LogToUI("info", $"[Activity] Auth cleared (was: {UserEmail})");
             AuthToken = null;
             UserEmail = null;
             UserId = null;
@@ -94,7 +87,7 @@ namespace PatsKillerPro.Services
         {
             if (string.IsNullOrEmpty(AuthToken))
             {
-                LogToUI("warning", $"[Activity] Skipped '{entry.Action}' - not logged in");
+                Logger.Debug("[ProActivityLogger] No auth token, skipping log");
                 return;
             }
 
@@ -119,53 +112,28 @@ namespace PatsKillerPro.Services
                     metadata = entry.Metadata
                 };
 
-                var url = $"{SUPABASE_URL}/functions/v1/log-pro-activity";
-                
-                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/log-pro-activity");
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {AuthToken}");
                 request.Content = new StringContent(JsonSerializer.Serialize(logData), Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.SendAsync(request);
-                var responseBody = await response.Content.ReadAsStringAsync();
                 
-                if (response.IsSuccessStatusCode)
+                if (!response.IsSuccessStatusCode)
                 {
-                    LogToUI("success", $"[Activity] ✓ {entry.Action}");
+                    var error = await response.Content.ReadAsStringAsync();
+                    Logger.Warning($"[ProActivityLogger] Log failed: {response.StatusCode} - {error}");
                 }
-                else
-                {
-                    LogToUI("error", $"[Activity] ✗ {entry.Action} failed: HTTP {(int)response.StatusCode}");
-                    Logger.Error($"[ProActivityLogger] Response: {responseBody}");
-                }
-            }
-            catch (HttpRequestException ex)
-            {
-                LogToUI("error", $"[Activity] Network error: {ex.Message}");
-            }
-            catch (TaskCanceledException)
-            {
-                LogToUI("warning", $"[Activity] Timeout on '{entry.Action}'");
             }
             catch (Exception ex)
             {
-                LogToUI("error", $"[Activity] Error: {ex.Message}");
+                Logger.Warning($"[ProActivityLogger] Exception: {ex.Message}");
             }
         }
 
         public void LogActivity(ActivityLogEntry entry)
         {
-            _ = Task.Run(async () => 
-            {
-                try
-                {
-                    await LogActivityAsync(entry);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error($"[ProActivityLogger] Background task error: {ex.Message}");
-                }
-            });
+            _ = Task.Run(() => LogActivityAsync(entry));
         }
 
         // ============ AUTH ============
@@ -203,7 +171,6 @@ namespace PatsKillerPro.Services
         public void LogKeySessionStart(string vin, string? year, string? model, string outcode,
             bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
-            // SECURITY: outcode passed for server-side validation but NOT included in telemetry metadata
             LogActivity(new ActivityLogEntry
             {
                 Action = "key_session_start",
@@ -216,7 +183,26 @@ namespace PatsKillerPro.Services
                 ResponseTimeMs = responseTimeMs,
                 ErrorMessage = error,
                 Details = success ? $"Key session started for {vin}" : $"Session failed: {error}",
-                Metadata = new { } // SECURITY: No outcode in telemetry
+                Metadata = new { outcode }
+            });
+        }
+
+        public void LogIncodeVerification(string vin, string? year, string? model, string outcode,
+            string incode, bool success, int responseTimeMs, string? error = null)
+        {
+            LogActivity(new ActivityLogEntry
+            {
+                Action = "incode_verification",
+                ActionCategory = "key_programming",
+                Vin = vin,
+                VehicleYear = year,
+                VehicleModel = model,
+                Success = success,
+                TokenChange = 0, // Token already charged at session start
+                ResponseTimeMs = responseTimeMs,
+                ErrorMessage = error,
+                Details = success ? $"Incode verified for {vin}" : $"Incode verification failed: {error}",
+                Metadata = new { outcode, incode }
             });
         }
 
@@ -263,7 +249,6 @@ namespace PatsKillerPro.Services
         public void LogParameterResetModule(string vin, string? year, string? model, string moduleName,
             string outcode, string incode, bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
-            // SECURITY: Never include incode in telemetry - only mask for reference
             LogActivity(new ActivityLogEntry
             {
                 Action = $"param_reset_{moduleName.ToLowerInvariant()}",
@@ -276,7 +261,7 @@ namespace PatsKillerPro.Services
                 ResponseTimeMs = responseTimeMs,
                 ErrorMessage = error,
                 Details = success ? $"{moduleName} reset complete" : $"{moduleName} reset failed: {error}",
-                Metadata = new { module = moduleName } // SECURITY: No outcode/incode in telemetry
+                Metadata = new { module = moduleName, outcode, incode }
             });
         }
 

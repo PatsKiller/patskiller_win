@@ -24,7 +24,7 @@ namespace PatsKillerPro.Forms
     public class LicenseActivationForm : Form
     {
         // ══════════ Result ══════════
-        public bool Activated { get; private set; }
+        public new bool Activated { get; private set; }
         public LicenseValidationResult? ActivationResult { get; private set; }
 
         // ══════════ Dark Theme ══════════
