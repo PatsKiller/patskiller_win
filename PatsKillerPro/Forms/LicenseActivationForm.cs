@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.Services;
@@ -9,458 +10,426 @@ using PatsKillerPro.Utils;
 namespace PatsKillerPro.Forms
 {
     /// <summary>
-    /// Professional license activation form matching the v15 dark theme.
-    /// Four-segment key entry (XXXX-XXXX-XXXX-XXXX) with auto-advance,
-    /// machine identity display, and link to switch to Google SSO.
+    /// Modal dialog for license key activation.
+    /// Shows machine identity, accepts XXXX-XXXX-XXXX-XXXX keys,
+    /// activates via LicenseService, reports result.
+    ///
+    /// DialogResult meanings:
+    ///   OK     – license activated successfully
+    ///   Retry  – user clicked "Sign in with Google instead"
+    ///   Cancel – user dismissed
+    ///
+    /// Phase 2 deliverable per Licensing Integration Design Spec v1.0
     /// </summary>
     public class LicenseActivationForm : Form
     {
-        // ═══════════════ THEME (matches MainForm v15 palette) ═══════════
-        private static readonly Color BG       = Color.FromArgb(26, 26, 30);
-        private static readonly Color SURFACE  = Color.FromArgb(35, 35, 40);
-        private static readonly Color CARD     = Color.FromArgb(42, 42, 48);
-        private static readonly Color BORDER   = Color.FromArgb(58, 58, 66);
-        private static readonly Color TEXT     = Color.FromArgb(240, 240, 240);
-        private static readonly Color TEXT_DIM = Color.FromArgb(160, 160, 165);
-        private static readonly Color TEXT_MUTED = Color.FromArgb(112, 112, 117);
-        private static readonly Color ACCENT   = Color.FromArgb(59, 130, 246);
-        private static readonly Color SUCCESS  = Color.FromArgb(34, 197, 94);
-        private static readonly Color DANGER   = Color.FromArgb(239, 68, 68);
-        private static readonly Color WARNING  = Color.FromArgb(234, 179, 8);
+        // ══════════ Result ══════════
+        public new bool Activated { get; private set; }
+        public LicenseValidationResult? ActivationResult { get; private set; }
 
-        // ═══════════════ PUBLIC RESULT ══════════════════════════════════
-        /// <summary>True if user chose "Sign in with Google instead".</summary>
-        public bool SwitchToGoogle { get; private set; }
+        // ══════════ Dark Theme ══════════
+        private static readonly Color BgColor = Color.FromArgb(30, 30, 30);
+        private static readonly Color HeaderBg = Color.FromArgb(37, 37, 38);
+        private static readonly Color PanelBg = Color.FromArgb(45, 45, 48);
+        private static readonly Color InputBg = Color.FromArgb(60, 60, 60);
+        private static readonly Color BorderClr = Color.FromArgb(70, 70, 70);
+        private static readonly Color TextClr = Color.FromArgb(255, 255, 255);
+        private static readonly Color TextDim = Color.FromArgb(150, 150, 150);
+        private static readonly Color Red = Color.FromArgb(233, 69, 96);
+        private static readonly Color Green = Color.FromArgb(76, 175, 80);
+        private static readonly Color Blue = Color.FromArgb(59, 130, 246);
+        private static readonly Color Amber = Color.FromArgb(245, 158, 11);
 
-        // ═══════════════ CONTROLS ══════════════════════════════════════
-        private readonly TextBox[] _keyBoxes = new TextBox[4];
-        private Label _lblStatus = null!;
+        // ══════════ Controls ══════════
+        private Label _lblMachineName = null!;
+        private Label _lblMachineId = null!;
+        private Label _lblSiid = null!;
+
+        private TextBox _txtKey1 = null!;
+        private TextBox _txtKey2 = null!;
+        private TextBox _txtKey3 = null!;
+        private TextBox _txtKey4 = null!;
+
         private Button _btnActivate = null!;
         private Button _btnCancel = null!;
-        private LinkLabel _lnkGoogle = null!;
-        private Panel _card = null!;
+        private Button _btnUseSso = null!;
 
-        // ═══════════════ CONSTRUCTOR ═══════════════════════════════════
+        private Panel _statusPanel = null!;
+        private Label _lblStatus = null!;
+        private ProgressBar _progress = null!;
+
+        private Panel _resultPanel = null!;
+        private Label _lblResultIcon = null!;
+        private Label _lblResultMsg = null!;
+        private Label _lblResultDetail = null!;
+
+        private bool _activating;
+
+        // ══════════ Constructor ══════════
         public LicenseActivationForm()
         {
-            SetupForm();
-            BuildUI();
-            ApplyDarkTitleBar();
+            InitUI();
+            PopulateMachineInfo();
         }
 
-        // ═══════════════ FORM SETUP ═══════════════════════════════════
-        private void SetupForm()
+        // ================================================================
+        //  UI SETUP
+        // ================================================================
+        private void InitUI()
         {
             Text = "Activate License — PatsKiller Pro";
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            Size = new Size(530, 530);
+            MinimumSize = Size;
+            MaximumSize = Size;
             StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            BackColor = BG;
-            ForeColor = TEXT;
-            Font = new Font("Segoe UI", 10F);
-            ClientSize = new Size(520, 520);
-            DoubleBuffered = true;
-            AutoScaleMode = AutoScaleMode.None;
+            BackColor = BgColor;
+            Font = new Font("Segoe UI", 9F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+
+            // Dark title bar (Windows 10/11)
+            try { int a = 20, v = 1; DwmSetWindowAttribute(Handle, a, ref v, 4); } catch { }
+
+            BuildHeader();
+            BuildBody();
         }
 
-        private void ApplyDarkTitleBar()
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int s);
+
+        private void BuildHeader()
         {
-            try { int v = 1; DwmSetWindowAttribute(Handle, 20, ref v, 4); } catch { }
-        }
-
-        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
-
-        // ═══════════════ UI CONSTRUCTION ═══════════════════════════════
-        private void BuildUI()
-        {
-            // Card panel (centered with margin)
-            _card = new Panel
+            var header = new Panel
             {
-                Size = new Size(480, 480),
-                Location = new Point(20, 20),
-                BackColor = CARD
+                Dock = DockStyle.Top,
+                Height = 65,
+                BackColor = HeaderBg
             };
-            _card.Paint += (s, e) =>
-            {
-                using var pen = new Pen(BORDER, 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, _card.Width - 1, _card.Height - 1);
-            };
-            Controls.Add(_card);
 
-            int y = 28;
-            int cardW = _card.Width;
-            int contentW = cardW - 60;
-            int padL = 30;
-
-            // ── Icon + Title ──────────────────────────────────────────
-            var iconPanel = new Panel
+            header.Controls.Add(new Label
             {
-                Size = new Size(44, 44),
-                Location = new Point(padL, y),
-                BackColor = Color.Transparent
-            };
-            iconPanel.Paint += (s, e) =>
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using var pen = new Pen(SUCCESS, 2.5f);
-                var r = new Rectangle(4, 4, 36, 36);
-                e.Graphics.DrawEllipse(pen, r);
-                // Key icon (simplified)
-                using var brush = new SolidBrush(SUCCESS);
-                e.Graphics.FillEllipse(brush, 14, 12, 10, 10);
-                e.Graphics.FillRectangle(brush, 20, 20, 4, 14);
-                e.Graphics.FillRectangle(brush, 20, 28, 8, 3);
-                e.Graphics.FillRectangle(brush, 20, 32, 6, 3);
-            };
-            _card.Controls.Add(iconPanel);
-
-            var lblTitle = new Label
-            {
-                Text = "License Activation",
-                Font = new Font("Segoe UI", 20, FontStyle.Bold),
-                ForeColor = TEXT,
+                Text = "🔑 License Activation",
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                ForeColor = TextClr,
                 AutoSize = true,
-                Location = new Point(padL + 52, y + 6)
-            };
-            _card.Controls.Add(lblTitle);
-            y += 60;
-
-            var lblSub = new Label
+                Location = new Point(20, 12),
+                BackColor = Color.Transparent
+            });
+            header.Controls.Add(new Label
             {
                 Text = "Enter your license key to activate PatsKiller Pro",
-                Font = new Font("Segoe UI", 10),
-                ForeColor = TEXT_MUTED,
-                Size = new Size(contentW, 22),
-                Location = new Point(padL, y)
-            };
-            _card.Controls.Add(lblSub);
-            y += 38;
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = TextDim,
+                AutoSize = true,
+                Location = new Point(22, 38),
+                BackColor = Color.Transparent
+            });
 
-            // ── Machine Identity (card-style) ─────────────────────────
-            var machineCard = new Panel
+            Controls.Add(header);
+        }
+
+        private void BuildBody()
+        {
+            var body = new Panel
             {
-                Size = new Size(contentW, 72),
-                Location = new Point(padL, y),
-                BackColor = SURFACE
-            };
-            machineCard.Paint += (s, e) =>
-            {
-                using var pen = new Pen(BORDER, 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, machineCard.Width - 1, machineCard.Height - 1);
+                Dock = DockStyle.Fill,
+                Padding = new Padding(25, 15, 25, 15),
+                BackColor = BgColor
             };
 
-            var lblMachineTitle = new Label
+            int y = 10;
+
+            // ── Machine Info ──
+            body.Controls.Add(SectionLabel("Machine Identity", ref y));
+            y += 2;
+
+            var machinePanel = new Panel
             {
-                Text = "Machine Identity",
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                ForeColor = TEXT_DIM,
-                Location = new Point(14, 8),
-                AutoSize = true
-            };
-            machineCard.Controls.Add(lblMachineTitle);
-
-            var lblHwId = new Label
-            {
-                Text = $"Hardware ID:   {MachineIdentity.DisplayId}",
-                Font = new Font("Consolas", 9.5f),
-                ForeColor = TEXT_DIM,
-                Location = new Point(14, 30),
-                AutoSize = true
-            };
-            machineCard.Controls.Add(lblHwId);
-
-            var lblSiid = new Label
-            {
-                Text = $"Instance ID:     {MachineIdentity.DisplaySiid}",
-                Font = new Font("Consolas", 9.5f),
-                ForeColor = TEXT_DIM,
-                Location = new Point(14, 50),
-                AutoSize = true
-            };
-            machineCard.Controls.Add(lblSiid);
-
-            _card.Controls.Add(machineCard);
-            y += 88;
-
-            // ── License Key Label ─────────────────────────────────────
-            var lblKey = new Label
-            {
-                Text = "License Key",
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = TEXT_DIM,
-                Location = new Point(padL, y),
-                AutoSize = true
-            };
-            _card.Controls.Add(lblKey);
-            y += 28;
-
-            // ── Four-segment key input ────────────────────────────────
-            int boxW = 92;
-            int gap = 12;
-            int dashW = 16;
-            int totalW = (boxW * 4) + (dashW * 3) + (gap * 6);
-            int startX = padL + (contentW - totalW) / 2;
-
-            var keyPanel = new FlowLayoutPanel
-            {
-                Size = new Size(contentW, 52),
-                Location = new Point(padL, y),
-                BackColor = Color.Transparent,
-                WrapContents = false,
-                FlowDirection = FlowDirection.LeftToRight,
-                Padding = new Padding(0),
-                Margin = new Padding(0)
+                Location = new Point(0, y),
+                Size = new Size(465, 72),
+                BackColor = PanelBg
             };
 
-            for (int i = 0; i < 4; i++)
-            {
-                _keyBoxes[i] = new TextBox
-                {
-                    Size = new Size(boxW, 42),
-                    MaxLength = 4,
-                    TextAlign = HorizontalAlignment.Center,
-                    Font = new Font("Consolas", 16, FontStyle.Bold),
-                    BackColor = SURFACE,
-                    ForeColor = TEXT,
-                    BorderStyle = BorderStyle.FixedSingle,
-                    CharacterCasing = CharacterCasing.Upper,
-                    Margin = new Padding(0, 0, 0, 0)
-                };
+            _lblMachineName = new Label { Font = new Font("Segoe UI", 9F), ForeColor = TextClr, AutoSize = true, Location = new Point(12, 8) };
+            _lblMachineId = new Label { Font = new Font("Consolas", 8.5F), ForeColor = TextDim, AutoSize = true, Location = new Point(12, 28) };
+            _lblSiid = new Label { Font = new Font("Consolas", 8.5F), ForeColor = TextDim, AutoSize = true, Location = new Point(12, 48) };
+            machinePanel.Controls.AddRange(new Control[] { _lblMachineName, _lblMachineId, _lblSiid });
+            body.Controls.Add(machinePanel);
+            y += 84;
 
-                // Auto-advance on 4 chars
-                int idx = i;
-                _keyBoxes[i].TextChanged += (s, e) =>
-                {
-                    if (_keyBoxes[idx].Text.Length == 4 && idx < 3)
-                        _keyBoxes[idx + 1].Focus();
+            // ── Key Entry ──
+            body.Controls.Add(SectionLabel("License Key", ref y));
+            y += 2;
 
-                    // Update status when all boxes have 4 chars
-                    UpdateActivateState();
-                };
+            var keyPanel = new Panel { Location = new Point(0, y), Size = new Size(465, 48), BackColor = Color.Transparent };
+            BuildKeyFields(keyPanel);
+            body.Controls.Add(keyPanel);
+            y += 56;
 
-                // Handle paste: split across boxes
-                _keyBoxes[i].KeyDown += (s, e) =>
-                {
-                    if (e.Control && e.KeyCode == Keys.V)
-                    {
-                        e.SuppressKeyPress = true;
-                        PasteKey();
-                    }
-                    // Handle backspace to jump to previous box
-                    if (e.KeyCode == Keys.Back && _keyBoxes[idx].Text.Length == 0 && idx > 0)
-                    {
-                        _keyBoxes[idx - 1].Focus();
-                        _keyBoxes[idx - 1].SelectionStart = _keyBoxes[idx - 1].Text.Length;
-                    }
-                };
+            // ── Buttons ──
+            _btnActivate = MakeButton("✅ Activate License", Green, new Size(215, 40));
+            _btnActivate.Location = new Point(0, y);
+            _btnActivate.Enabled = false;
+            _btnActivate.Click += BtnActivate_Click;
+            body.Controls.Add(_btnActivate);
 
-                keyPanel.Controls.Add(_keyBoxes[i]);
+            _btnCancel = MakeButton("Cancel", BorderClr, new Size(100, 40));
+            _btnCancel.Location = new Point(225, y);
+            _btnCancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
+            body.Controls.Add(_btnCancel);
+            y += 52;
 
-                if (i < 3)
-                {
-                    var dash = new Label
-                    {
-                        Text = "–",
-                        Font = new Font("Segoe UI", 18, FontStyle.Bold),
-                        ForeColor = TEXT_MUTED,
-                        Size = new Size(dashW + 4, 42),
-                        TextAlign = ContentAlignment.MiddleCenter,
-                        Margin = new Padding(2, 0, 2, 0)
-                    };
-                    keyPanel.Controls.Add(dash);
-                }
-            }
+            // ── Status (during activation) ──
+            _statusPanel = new Panel { Location = new Point(0, y), Size = new Size(465, 50), Visible = false };
+            _progress = new ProgressBar { Location = new Point(0, 0), Size = new Size(465, 8), Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30 };
+            _lblStatus = new Label { Text = "Activating...", Font = new Font("Segoe UI", 9F), ForeColor = Amber, AutoSize = true, Location = new Point(0, 15) };
+            _statusPanel.Controls.AddRange(new Control[] { _progress, _lblStatus });
+            body.Controls.Add(_statusPanel);
 
-            _card.Controls.Add(keyPanel);
-            y += 62;
+            // ── Result (after activation) ──
+            _resultPanel = new Panel { Location = new Point(0, y), Size = new Size(465, 80), BackColor = PanelBg, Visible = false, Padding = new Padding(12) };
+            _lblResultIcon = new Label { Text = "✅", Font = new Font("Segoe UI", 20F), AutoSize = true, Location = new Point(12, 12), BackColor = Color.Transparent };
+            _lblResultMsg = new Label { Font = new Font("Segoe UI", 11F, FontStyle.Bold), ForeColor = Green, AutoSize = true, Location = new Point(55, 12), BackColor = Color.Transparent };
+            _lblResultDetail = new Label { Font = new Font("Segoe UI", 9F), ForeColor = TextDim, AutoSize = true, Location = new Point(55, 38), BackColor = Color.Transparent };
+            _resultPanel.Controls.AddRange(new Control[] { _lblResultIcon, _lblResultMsg, _lblResultDetail });
+            body.Controls.Add(_resultPanel);
 
-            // ── Status label ──────────────────────────────────────────
-            _lblStatus = new Label
-            {
-                Text = "",
-                Font = new Font("Segoe UI", 9.5f),
-                ForeColor = TEXT_MUTED,
-                Size = new Size(contentW, 20),
-                Location = new Point(padL, y),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            _card.Controls.Add(_lblStatus);
-            y += 30;
-
-            // ── Activate button ───────────────────────────────────────
-            _btnActivate = new Button
-            {
-                Text = "✓  Activate License",
-                Font = new Font("Segoe UI", 13, FontStyle.Bold),
-                Size = new Size(contentW, 50),
-                Location = new Point(padL, y),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = SUCCESS,
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand,
-                Enabled = false
-            };
-            _btnActivate.FlatAppearance.BorderSize = 0;
-            _btnActivate.Click += async (s, e) => await DoActivate();
-            _card.Controls.Add(_btnActivate);
-            y += 62;
-
-            // ── Cancel button ─────────────────────────────────────────
-            _btnCancel = new Button
-            {
-                Text = "Cancel",
-                Font = new Font("Segoe UI", 11, FontStyle.Bold),
-                Size = new Size(contentW, 42),
-                Location = new Point(padL, y),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = SURFACE,
-                ForeColor = TEXT_DIM,
-                Cursor = Cursors.Hand
-            };
-            _btnCancel.FlatAppearance.BorderColor = BORDER;
-            _btnCancel.FlatAppearance.BorderSize = 1;
-            _btnCancel.Click += (s, e) =>
-            {
-                DialogResult = DialogResult.Cancel;
-                Close();
-            };
-            _card.Controls.Add(_btnCancel);
-            y += 54;
-
-            // ── Google SSO link ───────────────────────────────────────
-            _lnkGoogle = new LinkLabel
+            // ── SSO fallback link ──
+            y += 92;
+            _btnUseSso = new Button
             {
                 Text = "← Sign in with Google instead",
-                Font = new Font("Segoe UI", 10),
-                LinkColor = ACCENT,
-                ActiveLinkColor = Color.FromArgb(100, 160, 255),
-                VisitedLinkColor = ACCENT,
-                Size = new Size(contentW, 24),
-                Location = new Point(padL, y),
-                TextAlign = ContentAlignment.MiddleCenter,
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Blue,
+                BackColor = Color.Transparent,
+                Font = new Font("Segoe UI", 9F, FontStyle.Underline),
+                AutoSize = true,
+                Location = new Point(0, y),
                 Cursor = Cursors.Hand
             };
-            _lnkGoogle.LinkClicked += (s, e) =>
-            {
-                SwitchToGoogle = true;
-                DialogResult = DialogResult.Retry; // Signal: switch to Google
-                Close();
-            };
-            _card.Controls.Add(_lnkGoogle);
+            _btnUseSso.FlatAppearance.BorderSize = 0;
+            _btnUseSso.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 40, 45);
+            _btnUseSso.Click += (_, _) => { DialogResult = DialogResult.Retry; Close(); };
+            body.Controls.Add(_btnUseSso);
 
-            // Focus first key box on load
-            Shown += (s, e) => _keyBoxes[0].Focus();
+            Controls.Add(body);
         }
 
-        // ═══════════════ KEY INPUT HELPERS ═════════════════════════════
-
-        private void PasteKey()
+        // ================================================================
+        //  KEY ENTRY FIELDS
+        // ================================================================
+        private void BuildKeyFields(Panel parent)
         {
-            try
-            {
-                var clip = Clipboard.GetText().Trim().ToUpperInvariant();
-                // Remove common separators
-                clip = clip.Replace("-", "").Replace(" ", "").Replace("_", "");
+            int x = 0;
+            const int boxW = 95, dashW = 20;
 
-                if (clip.Length >= 16)
+            _txtKey1 = MakeKeyBox(); _txtKey1.Location = new Point(x, 5); parent.Controls.Add(_txtKey1); x += boxW;
+            parent.Controls.Add(MakeDash(x, 10)); x += dashW;
+            _txtKey2 = MakeKeyBox(); _txtKey2.Location = new Point(x, 5); parent.Controls.Add(_txtKey2); x += boxW;
+            parent.Controls.Add(MakeDash(x, 10)); x += dashW;
+            _txtKey3 = MakeKeyBox(); _txtKey3.Location = new Point(x, 5); parent.Controls.Add(_txtKey3); x += boxW;
+            parent.Controls.Add(MakeDash(x, 10)); x += dashW;
+            _txtKey4 = MakeKeyBox(); _txtKey4.Location = new Point(x, 5); parent.Controls.Add(_txtKey4);
+
+            // Auto-tab forward
+            WireAutoTab(_txtKey1, _txtKey2);
+            WireAutoTab(_txtKey2, _txtKey3);
+            WireAutoTab(_txtKey3, _txtKey4);
+
+            // Backspace to previous
+            WireBackTab(_txtKey2, _txtKey1);
+            WireBackTab(_txtKey3, _txtKey2);
+            WireBackTab(_txtKey4, _txtKey3);
+
+            // Validate on change
+            foreach (var tb in new[] { _txtKey1, _txtKey2, _txtKey3, _txtKey4 })
+                tb.TextChanged += (_, _) => _btnActivate.Enabled = !_activating && FullKey.Length == 19;
+        }
+
+        private static TextBox MakeKeyBox() => new()
+        {
+            Size = new Size(95, 30),
+            Font = new Font("Consolas", 14F, FontStyle.Bold),
+            BackColor = InputBg,
+            ForeColor = TextClr,
+            BorderStyle = BorderStyle.FixedSingle,
+            MaxLength = 4,
+            CharacterCasing = CharacterCasing.Upper,
+            TextAlign = HorizontalAlignment.Center
+        };
+
+        private static Label MakeDash(int x, int y) => new()
+        {
+            Text = "—",
+            Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+            ForeColor = TextDim,
+            AutoSize = true,
+            Location = new Point(x, y)
+        };
+
+        private static void WireAutoTab(TextBox current, TextBox next)
+        {
+            current.TextChanged += (_, _) => { if (current.Text.Length == 4) next.Focus(); };
+        }
+
+        private static void WireBackTab(TextBox current, TextBox prev)
+        {
+            current.KeyDown += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Back && current.Text.Length == 0)
                 {
-                    for (int i = 0; i < 4; i++)
-                        _keyBoxes[i].Text = clip.Substring(i * 4, 4);
-                    _keyBoxes[3].Focus();
+                    prev.Focus();
+                    prev.SelectionStart = prev.Text.Length;
+                    e.SuppressKeyPress = true;
                 }
-                else if (clip.Length > 0)
+            };
+        }
+
+        /// <summary>Full key as "XXXX-XXXX-XXXX-XXXX" or "" if incomplete.</summary>
+        private string FullKey
+        {
+            get
+            {
+                var k1 = _txtKey1.Text.Trim(); var k2 = _txtKey2.Text.Trim();
+                var k3 = _txtKey3.Text.Trim(); var k4 = _txtKey4.Text.Trim();
+                return (k1.Length == 4 && k2.Length == 4 && k3.Length == 4 && k4.Length == 4)
+                    ? $"{k1}-{k2}-{k3}-{k4}" : "";
+            }
+        }
+
+        /// <summary>
+        /// Support Ctrl+V of full key "XXXX-XXXX-XXXX-XXXX" or "XXXXXXXXXXXXXXXX"
+        /// into the first box — auto-distributes across all four fields.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.V) && _txtKey1.Focused && Clipboard.ContainsText())
+            {
+                var clean = Clipboard.GetText().Trim().ToUpperInvariant().Replace("-", "").Replace(" ", "");
+                if (clean.Length == 16 && Regex.IsMatch(clean, "^[A-Z0-9]+$"))
                 {
-                    _keyBoxes[0].Text = clip.Length >= 4 ? clip[..4] : clip;
+                    _txtKey1.Text = clean[..4];
+                    _txtKey2.Text = clean[4..8];
+                    _txtKey3.Text = clean[8..12];
+                    _txtKey4.Text = clean[12..16];
+                    _txtKey4.Focus();
+                    return true;
                 }
             }
-            catch { }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
-        private string GetFullKey()
+        // ================================================================
+        //  MACHINE INFO
+        // ================================================================
+        private void PopulateMachineInfo()
         {
-            return $"{_keyBoxes[0].Text}-{_keyBoxes[1].Text}-{_keyBoxes[2].Text}-{_keyBoxes[3].Text}";
+            _lblMachineName.Text = $"Machine:     {MachineIdentity.MachineName}";
+            _lblMachineId.Text   = $"Hardware ID: {MachineIdentity.MachineId}";
+            _lblSiid.Text        = $"Instance ID: {MachineIdentity.SIID}";
         }
 
-        private bool IsKeyComplete()
+        // ================================================================
+        //  ACTIVATION
+        // ================================================================
+        private async void BtnActivate_Click(object? sender, EventArgs e)
         {
-            return _keyBoxes[0].Text.Length == 4 &&
-                   _keyBoxes[1].Text.Length == 4 &&
-                   _keyBoxes[2].Text.Length == 4 &&
-                   _keyBoxes[3].Text.Length == 4;
-        }
+            var key = FullKey;
+            if (string.IsNullOrEmpty(key)) return;
 
-        private void UpdateActivateState()
-        {
-            _btnActivate.Enabled = IsKeyComplete();
-            _btnActivate.BackColor = IsKeyComplete() ? SUCCESS : Color.FromArgb(50, 50, 56);
-        }
-
-        // ═══════════════ ACTIVATION LOGIC ═════════════════════════════
-
-        private async Task DoActivate()
-        {
-            if (!IsKeyComplete()) return;
-
-            var key = GetFullKey();
-            _btnActivate.Enabled = false;
-            _btnActivate.Text = "Activating…";
-            _btnActivate.BackColor = Color.FromArgb(50, 50, 56);
-            _lblStatus.Text = "Contacting license server…";
-            _lblStatus.ForeColor = ACCENT;
-            SetKeyBoxesEnabled(false);
+            _activating = true;
+            SetBusy(true);
+            _lblStatus.Text = "Contacting license server...";
+            _lblStatus.ForeColor = Amber;
 
             try
             {
                 var result = await LicenseService.Instance.ActivateAsync(key);
+                ActivationResult = result;
 
                 if (result.IsValid)
                 {
-                    _lblStatus.Text = $"✓ {result.Message}";
-                    _lblStatus.ForeColor = SUCCESS;
-                    _btnActivate.Text = "✓ Activated!";
-                    _btnActivate.BackColor = SUCCESS;
+                    Activated = true;
+                    ShowResult(true,
+                        $"Licensed to {result.LicensedTo}",
+                        $"Type: {(result.LicenseType ?? "standard").ToUpperInvariant()} " +
+                        $"• Expires: {(result.ExpiresAt?.ToString("yyyy-MM-dd") ?? "never")} " +
+                        $"• Machines: {result.MachinesUsed}/{result.MaxMachines}");
 
-                    await Task.Delay(800);
+                    // Auto-close after brief success display
+                    await Task.Delay(2000);
                     DialogResult = DialogResult.OK;
                     Close();
                 }
                 else
                 {
-                    _lblStatus.Text = result.Message;
-                    _lblStatus.ForeColor = DANGER;
-                    _btnActivate.Text = "✓  Activate License";
-                    _btnActivate.Enabled = true;
-                    _btnActivate.BackColor = SUCCESS;
-                    SetKeyBoxesEnabled(true);
-                    _keyBoxes[0].Focus();
+                    ShowResult(false, "Activation Failed", result.Message);
+                    _activating = false;
+                    SetBusy(false);
                 }
             }
             catch (Exception ex)
             {
-                _lblStatus.Text = $"Error: {ex.Message}";
-                _lblStatus.ForeColor = DANGER;
-                _btnActivate.Text = "✓  Activate License";
-                _btnActivate.Enabled = true;
-                _btnActivate.BackColor = SUCCESS;
-                SetKeyBoxesEnabled(true);
+                ShowResult(false, "Activation Error", ex.Message);
+                _activating = false;
+                SetBusy(false);
             }
         }
 
-        private void SetKeyBoxesEnabled(bool enabled)
+        private void SetBusy(bool busy)
         {
-            foreach (var box in _keyBoxes)
+            _btnActivate.Enabled = !busy;
+            _btnCancel.Enabled = !busy;
+            foreach (var tb in new[] { _txtKey1, _txtKey2, _txtKey3, _txtKey4 })
+                tb.Enabled = !busy;
+
+            _statusPanel.Visible = busy;
+            _resultPanel.Visible = false;
+        }
+
+        private void ShowResult(bool success, string message, string detail)
+        {
+            _statusPanel.Visible = false;
+            _resultPanel.Visible = true;
+
+            _lblResultIcon.Text = success ? "✅" : "❌";
+            _lblResultMsg.Text = message;
+            _lblResultMsg.ForeColor = success ? Green : Red;
+            _lblResultDetail.Text = detail;
+        }
+
+        // ════════ Helpers ════════
+        private static Label SectionLabel(string text, ref int y)
+        {
+            var lbl = new Label
             {
-                box.Enabled = enabled;
-                box.BackColor = enabled ? SURFACE : Color.FromArgb(30, 30, 34);
-            }
+                Text = text,
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = TextDim,
+                AutoSize = true,
+                Location = new Point(0, y)
+            };
+            y += 20;
+            return lbl;
         }
 
-        protected override void Dispose(bool disposing)
+        private static Button MakeButton(string text, Color bg, Size size)
         {
-            base.Dispose(disposing);
+            var btn = new Button
+            {
+                Text = text,
+                BackColor = bg,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Size = size,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderColor = bg;
+            return btn;
         }
     }
 }
