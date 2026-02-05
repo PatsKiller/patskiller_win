@@ -61,23 +61,9 @@ namespace PatsKillerPro.Services
         private ProActivityLogger()
         {
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            MachineId = GenerateMachineId();
+            MachineId = Utils.MachineIdentity.CombinedId; // Hardware + SIID (shared with LicenseService)
             AppVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "2.0.0";
-        }
-
-        private static string GenerateMachineId()
-        {
-            try
-            {
-                var data = Environment.MachineName + Environment.UserName + Environment.OSVersion.ToString();
-                using var sha = System.Security.Cryptography.SHA256.Create();
-                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
-                return Convert.ToBase64String(hash)[..16];
-            }
-            catch
-            {
-                return Environment.MachineName;
-            }
+            Logger.Info($"[ProActivityLogger] Using MachineIdentity.CombinedId: {MachineId[..Math.Min(12, MachineId.Length)]}...");
         }
 
         public void SetAuthContext(string authToken, string userEmail, string? userId = null)
