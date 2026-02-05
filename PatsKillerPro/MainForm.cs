@@ -324,10 +324,14 @@ namespace PatsKillerPro
             }
         }
 
-        private void OnLicenseChanged(bool isValid)
+        private void OnLicenseChanged(LicenseValidationResult result)
         {
-            if (InvokeRequired) { BeginInvoke(() => OnLicenseChanged(isValid)); return; }
-            if (!isValid)
+            if (InvokeRequired) { BeginInvoke(() => OnLicenseChanged(result)); return; }
+            if (result.IsValid || result.IsGracePeriod)
+            {
+                UpdateLicenseHeader(result);
+            }
+            else
             {
                 _lblLicBadge.Visible = false;
                 _lblLicStatus.Visible = false;
