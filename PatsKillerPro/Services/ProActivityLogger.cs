@@ -22,6 +22,11 @@ namespace PatsKillerPro.Services
         private static ProActivityLogger? _instance;
         private static readonly object _lock = new object();
         
+        /// <summary>
+        /// Event for UI logging - subscribe to show messages in the log panel
+        /// </summary>
+        public event Action<string, string>? OnLogMessage; // (type, message) - type: "info", "success", "warning", "error"
+        
         public static ProActivityLogger Instance
         {
             get
@@ -46,6 +51,12 @@ namespace PatsKillerPro.Services
         public string? UserId { get; set; }
         public string MachineId { get; private set; }
         public string? AppVersion { get; set; }
+        
+        private void LogToUI(string type, string message)
+        {
+            Logger.Log(type == "error" ? Logger.LogLevel.Error : type == "warning" ? Logger.LogLevel.Warning : Logger.LogLevel.Info, message);
+            try { OnLogMessage?.Invoke(type, message); } catch { /* ignore UI callback errors */ }
+        }
 
         private ProActivityLogger()
         {
@@ -74,10 +85,20 @@ namespace PatsKillerPro.Services
             AuthToken = authToken;
             UserEmail = userEmail;
             UserId = userId;
+            
+            if (!string.IsNullOrEmpty(authToken))
+            {
+                LogToUI("info", $"[Activity] Auth set for {userEmail}");
+            }
+            else
+            {
+                LogToUI("warning", "[Activity] SetAuthContext called with empty token!");
+            }
         }
 
         public void ClearAuthContext()
         {
+            LogToUI("info", $"[Activity] Auth cleared (was: {UserEmail})");
             AuthToken = null;
             UserEmail = null;
             UserId = null;
@@ -87,7 +108,7 @@ namespace PatsKillerPro.Services
         {
             if (string.IsNullOrEmpty(AuthToken))
             {
-                Logger.Debug("[ProActivityLogger] No auth token, skipping log");
+                LogToUI("warning", $"[Activity] Skipped '{entry.Action}' - not logged in");
                 return;
             }
 
@@ -112,28 +133,53 @@ namespace PatsKillerPro.Services
                     metadata = entry.Metadata
                 };
 
-                var request = new HttpRequestMessage(HttpMethod.Post, $"{SUPABASE_URL}/functions/v1/log-pro-activity");
+                var url = $"{SUPABASE_URL}/functions/v1/log-pro-activity";
+                
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
                 request.Headers.Add("Authorization", $"Bearer {AuthToken}");
                 request.Content = new StringContent(JsonSerializer.Serialize(logData), Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
                 
-                if (!response.IsSuccessStatusCode)
+                if (response.IsSuccessStatusCode)
                 {
-                    var error = await response.Content.ReadAsStringAsync();
-                    Logger.Warning($"[ProActivityLogger] Log failed: {response.StatusCode} - {error}");
+                    LogToUI("success", $"[Activity] ✓ {entry.Action}");
                 }
+                else
+                {
+                    LogToUI("error", $"[Activity] ✗ {entry.Action} failed: HTTP {(int)response.StatusCode}");
+                    Logger.Error($"[ProActivityLogger] Response: {responseBody}");
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                LogToUI("error", $"[Activity] Network error: {ex.Message}");
+            }
+            catch (TaskCanceledException)
+            {
+                LogToUI("warning", $"[Activity] Timeout on '{entry.Action}'");
             }
             catch (Exception ex)
             {
-                Logger.Warning($"[ProActivityLogger] Exception: {ex.Message}");
+                LogToUI("error", $"[Activity] Error: {ex.Message}");
             }
         }
 
         public void LogActivity(ActivityLogEntry entry)
         {
-            _ = Task.Run(() => LogActivityAsync(entry));
+            _ = Task.Run(async () => 
+            {
+                try
+                {
+                    await LogActivityAsync(entry);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"[ProActivityLogger] Background task error: {ex.Message}");
+                }
+            });
         }
 
         // ============ AUTH ============
@@ -171,6 +217,7 @@ namespace PatsKillerPro.Services
         public void LogKeySessionStart(string vin, string? year, string? model, string outcode,
             bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
+            // SECURITY: outcode passed for server-side validation but NOT included in telemetry metadata
             LogActivity(new ActivityLogEntry
             {
                 Action = "key_session_start",
@@ -183,26 +230,7 @@ namespace PatsKillerPro.Services
                 ResponseTimeMs = responseTimeMs,
                 ErrorMessage = error,
                 Details = success ? $"Key session started for {vin}" : $"Session failed: {error}",
-                Metadata = new { outcode }
-            });
-        }
-
-        public void LogIncodeVerification(string vin, string? year, string? model, string outcode,
-            string incode, bool success, int responseTimeMs, string? error = null)
-        {
-            LogActivity(new ActivityLogEntry
-            {
-                Action = "incode_verification",
-                ActionCategory = "key_programming",
-                Vin = vin,
-                VehicleYear = year,
-                VehicleModel = model,
-                Success = success,
-                TokenChange = 0, // Token already charged at session start
-                ResponseTimeMs = responseTimeMs,
-                ErrorMessage = error,
-                Details = success ? $"Incode verified for {vin}" : $"Incode verification failed: {error}",
-                Metadata = new { outcode, incode }
+                Metadata = new { } // SECURITY: No outcode in telemetry
             });
         }
 
@@ -249,6 +277,7 @@ namespace PatsKillerPro.Services
         public void LogParameterResetModule(string vin, string? year, string? model, string moduleName,
             string outcode, string incode, bool success, int tokenChange, int responseTimeMs, string? error = null)
         {
+            // SECURITY: Never include incode in telemetry - only mask for reference
             LogActivity(new ActivityLogEntry
             {
                 Action = $"param_reset_{moduleName.ToLowerInvariant()}",
@@ -261,7 +290,7 @@ namespace PatsKillerPro.Services
                 ResponseTimeMs = responseTimeMs,
                 ErrorMessage = error,
                 Details = success ? $"{moduleName} reset complete" : $"{moduleName} reset failed: {error}",
-                Metadata = new { module = moduleName, outcode, incode }
+                Metadata = new { module = moduleName } // SECURITY: No outcode/incode in telemetry
             });
         }
 
