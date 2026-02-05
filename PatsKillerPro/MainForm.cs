@@ -57,7 +57,7 @@ namespace PatsKillerPro
         private Panel _header = null!, _tabBar = null!, _content = null!, _logPanel = null!, _loginPanel = null!;
         private Panel _patsTab = null!, _diagTab = null!, _freeTab = null!;
         private Button _btnTab1 = null!, _btnTab2 = null!, _btnTab3 = null!, _btnLogout = null!;
-        private Label _lblTokens = null!, _lblUser = null!, _lblLicense = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
+        private Label _lblTokens = null!, _lblUser = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
@@ -99,14 +99,6 @@ namespace PatsKillerPro
             // License status: keep header in sync
             try
             {
-                // Stream license validation/activation telemetry into the Activity Log.
-                // (No secrets; LicenseService already masks key output.)
-                LicenseService.Instance.OnLogMessage += (type, msg) =>
-                {
-                    if (IsDisposed) return;
-                    try { BeginInvoke(new Action(() => Log(type, msg))); } catch { /* ignore */ }
-                };
-
                 LicenseService.Instance.OnLicenseChanged += res =>
                 {
                     if (IsDisposed) return;
@@ -452,11 +444,10 @@ namespace PatsKillerPro
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 2,
                 Margin = new Padding(Dpi(10), 0, Dpi(20), 0),
                 Anchor = AnchorStyles.Right
             };
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
@@ -483,25 +474,8 @@ namespace PatsKillerPro
                 Visible = false
             };
 
-            _lblLicense = new Label
-            {
-                Font = new Font("Segoe UI", 9),
-                ForeColor = TEXT_MUTED,
-                AutoSize = true,
-                AutoEllipsis = true,
-                MaximumSize = new Size(Dpi(420), 0),
-                TextAlign = ContentAlignment.MiddleRight,
-                Anchor = AnchorStyles.Right,
-                Margin = new Padding(0, Dpi(2), 0, 0),
-                Cursor = Cursors.Hand,
-                Visible = false
-            };
-            _toolTip.SetToolTip(_lblLicense, "Manage license\nClick to view / activate / deactivate");
-            _lblLicense.Click += async (s, e) => await OpenLicenseManagerAsync();
-
             meta.Controls.Add(_lblTokens, 0, 0);
-            meta.Controls.Add(_lblLicense, 0, 1);
-            meta.Controls.Add(_lblUser, 0, 2);
+            meta.Controls.Add(_lblUser, 0, 1);
 
             _btnLogout = AutoBtn("Logout", BTN_BG);
             _btnLogout.Margin = new Padding(0);
@@ -1275,8 +1249,6 @@ namespace PatsKillerPro
             // Hide token/user UI while logged out.
             _lblTokens.Visible = false;
             _lblTokens.Text = string.Empty;
-            _lblLicense.Visible = false;
-            _lblLicense.Text = string.Empty;
             _lblUser.Visible = false;
             _btnLogout.Visible = false;
         }
@@ -1381,24 +1353,6 @@ namespace PatsKillerPro
                 _lblTokens.Text = $"Tokens: {_tokenBalance}";
                 _lblTokens.Visible = true;
 
-                // Always surface licensing state even when SSO is active.
-                if (IsLicensed)
-                {
-                    var typ = LicenseService.Instance.LicenseType ?? "Active";
-                    var exp = LicenseService.Instance.ExpiresAt;
-                    var grace = LicenseService.Instance.InGracePeriod;
-                    _lblLicense.ForeColor = grace ? WARNING : TEXT_MUTED;
-                    _lblLicense.Text = exp.HasValue
-                        ? $"License: {typ} (exp {exp.Value:yyyy-MM-dd})"
-                        : $"License: {typ}";
-                }
-                else
-                {
-                    _lblLicense.ForeColor = TEXT_MUTED;
-                    _lblLicense.Text = "License: Not activated (click to activate)";
-                }
-                _lblLicense.Visible = true;
-
                 _btnLogout.Visible = true;
                 return;
             }
@@ -1407,8 +1361,6 @@ namespace PatsKillerPro
             {
                 var who = LicenseService.Instance.LicensedTo;
                 var typ = LicenseService.Instance.LicenseType;
-                var exp = LicenseService.Instance.ExpiresAt;
-                var grace = LicenseService.Instance.InGracePeriod;
 
                 _lblUser.Text = string.IsNullOrWhiteSpace(who) ? "Licensed" : who;
                 _lblUser.Visible = true;
@@ -1416,50 +1368,13 @@ namespace PatsKillerPro
                 _lblTokens.Text = string.IsNullOrWhiteSpace(typ) ? "License: Active" : $"License: {typ}";
                 _lblTokens.Visible = true;
 
-                _lblLicense.ForeColor = grace ? WARNING : TEXT_MUTED;
-                _lblLicense.Text = exp.HasValue
-                    ? $"Expires: {exp.Value:yyyy-MM-dd}" + (grace ? $" • Offline grace: {LicenseService.Instance.GraceDaysRemaining}d" : "")
-                    : (grace ? $"Offline grace: {LicenseService.Instance.GraceDaysRemaining}d" : "Offline ready");
-                _lblLicense.Visible = true;
-
                 _btnLogout.Visible = false;
                 return;
             }
 
             _lblTokens.Visible = false;
             _lblUser.Visible = false;
-            _lblLicense.Visible = false;
             _btnLogout.Visible = false;
-        }
-
-        /// <summary>
-        /// Opens the License manager dialog from within the authenticated app.
-        /// Supports activate, revalidate, and deactivate actions.
-        /// </summary>
-        private async System.Threading.Tasks.Task OpenLicenseManagerAsync()
-        {
-            using var lic = new LicenseActivationForm();
-            var dr = lic.ShowDialog(this);
-
-            if (dr == DialogResult.OK)
-            {
-                try { await LicenseService.Instance.ValidateAsync(); } catch { /* best effort */ }
-                ApplyAuthHeader();
-                return;
-            }
-
-            if (dr == DialogResult.Retry)
-            {
-                // Optional: user wants to switch to Google SSO for token operations.
-                using var login = new GoogleLoginForm();
-                var ldr = login.ShowDialog(this);
-                if (ldr == DialogResult.OK && !string.IsNullOrWhiteSpace(login.AuthToken))
-                {
-                    await CompleteLoginAsync(login.AuthToken ?? "", login.RefreshToken ?? "", login.UserEmail ?? "");
-                    ShowMain();
-                }
-                ApplyAuthHeader();
-            }
         }
 
         private async System.Threading.Tasks.Task<bool> PromptAuthModalAsync()
