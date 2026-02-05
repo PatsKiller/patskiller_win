@@ -54,7 +54,7 @@ namespace PatsKillerPro.Services
         
         private void LogToUI(string type, string message)
         {
-            Logger.Log(type == "error" ? LogLevel.Error : type == "warning" ? LogLevel.Warning : LogLevel.Info, message);
+            Logger.Log(type == "error" ? Logger.LogLevel.Error : type == "warning" ? Logger.LogLevel.Warning : Logger.LogLevel.Info, message);
             try { OnLogMessage?.Invoke(type, message); } catch { /* ignore UI callback errors */ }
         }
 
