@@ -435,7 +435,7 @@ namespace PatsKillerPro.Services
         private void StartHeartbeat()
         {
             if (_heartbeatTimer != null) return;
-            _heartbeatTimer = new Timer(async _ =>
+            _heartbeatTimer = new System.Threading.Timer(async _ =>
             {
                 try { await HeartbeatAsync(); }
                 catch (Exception ex) { Logger.Debug($"[LicenseService] Heartbeat timer error: {ex.Message}"); }
