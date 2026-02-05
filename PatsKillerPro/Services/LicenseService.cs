@@ -43,7 +43,10 @@ namespace PatsKillerPro.Services
         private const string LICENSE_API = "https://kmpnplpijuzzbftsjacx.supabase.co/functions/v1/bridge-license";
         private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyNjc0MDUsImV4cCI6MjA3OTg0MzQwNX0.RLX0e1FAq7AlKIpVXhaw7J3ILY_yc0FJDoAzxQDy24E";
         private const string APP_FOLDER = "PatsKillerPro";
-        private const string LICENSE_FILE = "license.dat";  // encrypted cache
+        // Spec calls this out as "license.key" (encrypted JSON). Keep backward compatibility
+        // for early builds that used "license.dat".
+        private const string LICENSE_FILE = "license.key";  // encrypted cache
+        private const string LEGACY_LICENSE_FILE = "license.dat";
         private const int REVALIDATION_DAYS = 7;   // online check every 7 days
         private const int GRACE_PERIOD_DAYS = 3;    // 3 extra days if offline
         private const int HEARTBEAT_HOURS = 4;      // background heartbeat interval
@@ -64,6 +67,8 @@ namespace PatsKillerPro.Services
         public string? CustomerEmail => _cache?.CustomerEmail;
         public string? LicenseType => _cache?.LicenseType;
         public DateTime? ExpiresAt => _cache?.ExpiresAt;
+        public DateTime? ActivatedAt => _cache?.ActivatedAt;
+        public DateTime? LastValidatedAt => _cache?.LastValidatedAt;
         public int MaxMachines => _cache?.MaxMachines ?? 0;
         public int MachinesUsed => _cache?.MachinesUsed ?? 0;
         public string? LicenseKey => _cache?.LicenseKey;
@@ -451,7 +456,7 @@ namespace PatsKillerPro.Services
         // ═══════════════════════════════════════════════════════════════
         //  CACHE (encrypted local storage)
         // ═══════════════════════════════════════════════════════════════
-        private static string CachePath
+        private static string CacheFolder
         {
             get
             {
@@ -459,17 +464,22 @@ namespace PatsKillerPro.Services
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     APP_FOLDER);
                 Directory.CreateDirectory(folder);
-                return Path.Combine(folder, LICENSE_FILE);
+                return folder;
             }
         }
+
+        private static string CachePath => Path.Combine(CacheFolder, LICENSE_FILE);
+        private static string LegacyCachePath => Path.Combine(CacheFolder, LEGACY_LICENSE_FILE);
 
         private LicenseCacheData? LoadCache()
         {
             try
             {
-                if (!File.Exists(CachePath)) return null;
+                // Prefer spec file name (license.key), but fall back to older builds (license.dat)
+                var path = File.Exists(CachePath) ? CachePath : (File.Exists(LegacyCachePath) ? LegacyCachePath : null);
+                if (path == null) return null;
 
-                var encrypted = File.ReadAllBytes(CachePath);
+                var encrypted = File.ReadAllBytes(path);
                 var json = DecryptData(encrypted);
                 if (string.IsNullOrEmpty(json)) return null;
 
@@ -500,12 +510,8 @@ namespace PatsKillerPro.Services
         private void ClearCache()
         {
             _cache = null;
-            try
-            {
-                if (File.Exists(CachePath))
-                    File.Delete(CachePath);
-            }
-            catch { /* best effort */ }
+            try { if (File.Exists(CachePath)) File.Delete(CachePath); } catch { /* best effort */ }
+            try { if (File.Exists(LegacyCachePath)) File.Delete(LegacyCachePath); } catch { /* best effort */ }
         }
 
         // ───────────── Encryption (DPAPI + AES, machine-bound) ──────
