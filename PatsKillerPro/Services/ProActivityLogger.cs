@@ -22,6 +22,11 @@ namespace PatsKillerPro.Services
         private static ProActivityLogger? _instance;
         private static readonly object _lock = new object();
         
+        /// <summary>
+        /// Event for UI logging - subscribe to show messages in the log panel
+        /// </summary>
+        public event Action<string, string>? OnLogMessage; // (type, message) - type: "info", "success", "warning", "error"
+        
         public static ProActivityLogger Instance
         {
             get
@@ -46,6 +51,12 @@ namespace PatsKillerPro.Services
         public string? UserId { get; set; }
         public string MachineId { get; private set; }
         public string? AppVersion { get; set; }
+        
+        private void LogToUI(string type, string message)
+        {
+            Logger.Log(type == "error" ? LogLevel.Error : type == "warning" ? LogLevel.Warning : LogLevel.Info, message);
+            try { OnLogMessage?.Invoke(type, message); } catch { /* ignore UI callback errors */ }
+        }
 
         private ProActivityLogger()
         {
@@ -77,17 +88,17 @@ namespace PatsKillerPro.Services
             
             if (!string.IsNullOrEmpty(authToken))
             {
-                Logger.Info($"[ProActivityLogger] Auth context SET for user: {userEmail} (token: {authToken.Length} chars)");
+                LogToUI("info", $"[Activity] Auth set for {userEmail}");
             }
             else
             {
-                Logger.Warning("[ProActivityLogger] SetAuthContext called with empty token!");
+                LogToUI("warning", "[Activity] SetAuthContext called with empty token!");
             }
         }
 
         public void ClearAuthContext()
         {
-            Logger.Info($"[ProActivityLogger] Auth context CLEARED (was: {UserEmail})");
+            LogToUI("info", $"[Activity] Auth cleared (was: {UserEmail})");
             AuthToken = null;
             UserEmail = null;
             UserId = null;
@@ -95,16 +106,11 @@ namespace PatsKillerPro.Services
 
         public async Task LogActivityAsync(ActivityLogEntry entry)
         {
-            // Debug: Log entry attempt
-            Logger.Info($"[ProActivityLogger] Attempting to log: {entry.Action}");
-            
             if (string.IsNullOrEmpty(AuthToken))
             {
-                Logger.Warning("[ProActivityLogger] No auth token set - skipping log. Call SetAuthContext() after login!");
+                LogToUI("warning", $"[Activity] Skipped '{entry.Action}' - not logged in");
                 return;
             }
-
-            Logger.Debug($"[ProActivityLogger] Auth token present ({AuthToken.Length} chars), user: {UserEmail}");
 
             try
             {
@@ -128,7 +134,6 @@ namespace PatsKillerPro.Services
                 };
 
                 var url = $"{SUPABASE_URL}/functions/v1/log-pro-activity";
-                Logger.Debug($"[ProActivityLogger] POST to: {url}");
                 
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Add("apikey", SUPABASE_ANON_KEY);
@@ -140,24 +145,25 @@ namespace PatsKillerPro.Services
                 
                 if (response.IsSuccessStatusCode)
                 {
-                    Logger.Info($"[ProActivityLogger] ✓ Logged '{entry.Action}' successfully (HTTP {(int)response.StatusCode})");
+                    LogToUI("success", $"[Activity] ✓ {entry.Action}");
                 }
                 else
                 {
-                    Logger.Error($"[ProActivityLogger] ✗ Log failed: HTTP {(int)response.StatusCode} - {responseBody}");
+                    LogToUI("error", $"[Activity] ✗ {entry.Action} failed: HTTP {(int)response.StatusCode}");
+                    Logger.Error($"[ProActivityLogger] Response: {responseBody}");
                 }
             }
             catch (HttpRequestException ex)
             {
-                Logger.Error($"[ProActivityLogger] Network error: {ex.Message}");
+                LogToUI("error", $"[Activity] Network error: {ex.Message}");
             }
-            catch (TaskCanceledException ex)
+            catch (TaskCanceledException)
             {
-                Logger.Error($"[ProActivityLogger] Request timeout: {ex.Message}");
+                LogToUI("warning", $"[Activity] Timeout on '{entry.Action}'");
             }
             catch (Exception ex)
             {
-                Logger.Error($"[ProActivityLogger] Exception: {ex.GetType().Name} - {ex.Message}");
+                LogToUI("error", $"[Activity] Error: {ex.Message}");
             }
         }
 

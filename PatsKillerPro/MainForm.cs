@@ -88,6 +88,13 @@ namespace PatsKillerPro
             };
 
             LoadSession();
+            
+            // Wire up ProActivityLogger to show messages in UI log panel
+            ProActivityLogger.Instance.OnLogMessage += (type, msg) =>
+            {
+                if (IsDisposed) return;
+                try { BeginInvoke(new Action(() => Log(type, msg))); } catch { /* ignore */ }
+            };
 
             // Dispose cached images cleanly
             this.FormClosed += (_, __) => { try { _logoImage?.Dispose(); } catch { } };
