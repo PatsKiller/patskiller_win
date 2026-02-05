@@ -12,104 +12,96 @@ namespace PatsKillerPro
 {
     public partial class MainForm : Form
     {
-        // ============ V15 DARK THEME PALETTE ============
-        private static class AppColors
-        {
-            public static readonly Color Background = ColorTranslator.FromHtml("#0F172A"); // Dark Navy
-            public static readonly Color Surface    = ColorTranslator.FromHtml("#1E293B"); // Slate
-            public static readonly Color Border     = ColorTranslator.FromHtml("#334155"); // Lighter Slate
-            public static readonly Color Accent     = ColorTranslator.FromHtml("#E94796"); // PatsKiller Pink
-            public static readonly Color AccentHover= ColorTranslator.FromHtml("#DB2777");
-            public static readonly Color TextMain   = Color.White;
-            public static readonly Color TextMuted  = ColorTranslator.FromHtml("#94A3B8");
-            public static readonly Color Success    = ColorTranslator.FromHtml("#10B981"); // Green
-            public static readonly Color Warning    = ColorTranslator.FromHtml("#F59E0B"); // Amber
-            public static readonly Color Danger     = ColorTranslator.FromHtml("#EF4444"); // Red
-        }
+        // ============ V15 THEME CONSTANTS ============
+        private readonly Color _colBackground = ColorTranslator.FromHtml("#0F172A"); // Dark Navy
+        private readonly Color _colSurface    = ColorTranslator.FromHtml("#1E293B"); // Slate
+        private readonly Color _colBorder     = ColorTranslator.FromHtml("#334155"); // Lighter Slate
+        private readonly Color _colAccent     = ColorTranslator.FromHtml("#E94796"); // Pink
+        private readonly Color _colText       = Color.White;
+        private readonly Color _colTextMuted  = ColorTranslator.FromHtml("#94A3B8");
+        private readonly Color _colSuccess    = ColorTranslator.FromHtml("#10B981");
+        private readonly Color _colDanger     = ColorTranslator.FromHtml("#EF4444");
 
-        // ============ AUTH STATE ============
-        private string? _authToken;
+        // ============ STATE ============
         private bool IsLicensed => LicenseService.Instance.IsLicensed;
-        private bool HasSSO => !string.IsNullOrWhiteSpace(_authToken);
+        private bool HasSSO => !string.IsNullOrWhiteSpace(TokenBalanceService.Instance.UserEmail);
         private bool IsAuthorized => IsLicensed || HasSSO;
-        private bool CanUseTokens => HasSSO;
 
         // ============ UI CONTROLS ============
-        private Panel _headerPanel = null!;
-        private Label _lblStatusBadge = null!;
-        private Label _lblUser = null!;
-        private Label _lblTokens = null!;
-        private TabControl _tabs = null!;
-        private RichTextBox _logBox = null!;
+        private Panel _header;
+        private Label _lblStatus;
+        private Label _lblUser;
+        private TabControl _tabs;
+        private RichTextBox _logBox;
 
-        // ============ CONSTRUCTOR ============
         public MainForm()
         {
-            // Form Setup
+            // 1. Window Setup (Fixed Size to prevent layout collapse)
             this.Text = "PatsKiller Pro v2.1";
-            this.Size = new Size(1000, 700);
-            this.MinimumSize = new Size(800, 600);
-            this.BackColor = AppColors.Background;
-            this.ForeColor = AppColors.TextMain;
-            this.Font = new Font("Segoe UI", 9F);
+            this.Size = new Size(1024, 768);
+            this.MinimumSize = new Size(1024, 768);
             this.StartPosition = FormStartPosition.CenterScreen;
+            this.BackColor = _colBackground;
+            this.ForeColor = _colText;
+            this.Font = new Font("Segoe UI", 9F);
 
-            // Events
+            // 2. Events & Services
             this.Shown += MainForm_Shown;
             this.FormClosing += MainForm_FormClosing;
             
-            // Services
-            LicenseService.Instance.OnLicenseChanged += OnLicenseChanged;
-            LicenseService.Instance.OnLogMessage += (t, m) => Log(m, t == "error" ? AppColors.Danger : AppColors.Success);
             TokenBalanceService.Instance.BalanceChanged += (s, e) => UpdateHeader();
+            LicenseService.Instance.OnLicenseChanged += (r) => UpdateHeader();
 
             InitializeUI();
         }
 
-        private async void MainForm_Shown(object? sender, EventArgs e)
+        private async void MainForm_Shown(object sender, EventArgs e)
         {
-            // 1. Validate License (Offline/Cache)
+            Log("Initializing system...");
+            
+            // 1. License Check
             var lic = await LicenseService.Instance.ValidateAsync();
             
-            // 2. Load SSO Session
+            // 2. SSO Session Check
             LoadSession();
 
-            // 3. Auth Check
-            if (IsAuthorized)
+            // 3. Auth Gate
+            if (!IsAuthorized)
+            {
+                this.Hide();
+                await PromptLoginAsync();
+            }
+            else
             {
                 if (HasSSO) await TokenBalanceService.Instance.RefreshBalanceAsync();
                 UpdateHeader();
-                Log("System Ready. Connect J2534 device.", AppColors.Success);
-                return;
+                Log("System Ready. Connect J2534 interface.", _colSuccess);
             }
-
-            // 4. Force Login
-            await PerformLoginFlow();
         }
 
-        private async Task PerformLoginFlow()
+        private async Task PromptLoginAsync()
         {
-            this.Hide();
             using var login = new GoogleLoginForm();
             var result = login.ShowDialog();
 
-            if (result == DialogResult.OK)
+            if (result == DialogResult.OK && !string.IsNullOrEmpty(login.AuthToken))
             {
-                // SSO Success
-                _authToken = login.AuthToken;
-                SaveSession(login.AuthToken, login.RefreshToken, login.UserEmail);
-                TokenBalanceService.Instance.SetAuthContext(login.AuthToken, login.UserEmail ?? "");
+                // Login Success
+                TokenBalanceService.Instance.SetAuthContext(login.AuthToken, login.UserEmail);
+                SaveSession(login.AuthToken, login.UserEmail);
                 this.Show();
                 UpdateHeader();
-                Log($"Signed in as {login.UserEmail}", AppColors.Success);
+                Log($"Signed in as {login.UserEmail}", _colSuccess);
             }
-            else if (result == DialogResult.Retry) // "Use License Key"
+            else if (result == DialogResult.Retry)
             {
+                // Switch to License Key
                 using var licForm = new LicenseActivationForm();
                 if (licForm.ShowDialog() == DialogResult.OK)
                 {
                     this.Show();
                     UpdateHeader();
+                    Log("License activated successfully", _colSuccess);
                 }
                 else
                 {
@@ -125,158 +117,187 @@ namespace PatsKillerPro
         // ============ UI CONSTRUCTION ============
         private void InitializeUI()
         {
-            // 1. Header
-            _headerPanel = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = AppColors.Surface, Padding = new Padding(20, 0, 20, 0) };
-            _headerPanel.Paint += (s, e) => ControlPaint.DrawBorder(e.Graphics, _headerPanel.ClientRectangle, AppColors.Border, ButtonBorderStyle.Solid);
+            // -- HEADER --
+            _header = new Panel { Dock = DockStyle.Top, Height = 70, BackColor = _colSurface, Padding = new Padding(20) };
+            _header.Paint += (s, e) => ControlPaint.DrawBorder(e.Graphics, _header.ClientRectangle, _colBorder, ButtonBorderStyle.Solid);
 
-            var title = new Label { Text = "PatsKiller Pro", Font = new Font("Segoe UI", 16F, FontStyle.Bold), ForeColor = AppColors.Accent, AutoSize = true, Location = new Point(20, 15) };
+            var title = new Label { Text = "PatsKiller Pro", Font = new Font("Segoe UI", 18F, FontStyle.Bold), ForeColor = _colAccent, AutoSize = true, Location = new Point(20, 18) };
             
-            _lblStatusBadge = new Label { Text = "UNLICENSED", Font = new Font("Segoe UI", 8F, FontStyle.Bold), ForeColor = Color.White, BackColor = AppColors.Danger, AutoSize = true, Padding = new Padding(5), Location = new Point(200, 20) };
-            
-            _lblUser = new Label { Text = "Not Signed In", ForeColor = AppColors.TextMuted, AutoSize = true, Location = new Point(600, 22) };
-            _lblTokens = new Label { Text = "Tokens: -", ForeColor = AppColors.Success, Font = new Font("Segoe UI", 10F, FontStyle.Bold), AutoSize = true, Location = new Point(800, 20) };
+            _lblStatus = new Label { Font = new Font("Segoe UI", 9F, FontStyle.Bold), AutoSize = true, Location = new Point(220, 26) };
+            _lblUser = new Label { Font = new Font("Segoe UI", 9F), ForeColor = _colTextMuted, AutoSize = true, Location = new Point(220, 44) };
 
-            var btnLogout = CreateButton("Logout", 80, 30);
-            btnLogout.Location = new Point(900, 15);
+            var btnLogout = CreateButton("Logout", _colBorder, new Size(80, 30));
+            btnLogout.Location = new Point(900, 20);
             btnLogout.Click += (s, e) => Logout();
 
-            _headerPanel.Controls.AddRange(new Control[] { title, _lblStatusBadge, _lblUser, _lblTokens, btnLogout });
-            this.Controls.Add(_headerPanel);
+            _header.Controls.AddRange(new Control[] { title, _lblStatus, _lblUser, btnLogout });
+            this.Controls.Add(_header);
 
-            // 2. Logs (Bottom)
-            var pnlLog = new Panel { Dock = DockStyle.Bottom, Height = 150, BackColor = Color.Black };
-            _logBox = new RichTextBox { Dock = DockStyle.Fill, BackColor = Color.Black, ForeColor = AppColors.TextMuted, BorderStyle = BorderStyle.None, ReadOnly = true, Font = new Font("Consolas", 9F) };
+            // -- LOGS (Bottom) --
+            var pnlLog = new Panel { Dock = DockStyle.Bottom, Height = 180, BackColor = Color.Black, Padding = new Padding(10) };
+            _logBox = new RichTextBox { Dock = DockStyle.Fill, BackColor = Color.Black, ForeColor = _colTextMuted, BorderStyle = BorderStyle.None, ReadOnly = true, Font = new Font("Consolas", 10F) };
             pnlLog.Controls.Add(_logBox);
             this.Controls.Add(pnlLog);
 
-            // 3. Tabs (Center)
-            _tabs = new TabControl { Dock = DockStyle.Fill, Appearance = TabAppearance.FlatButtons, ItemSize = new Size(0, 1), SizeMode = TabSizeMode.Fixed };
+            // -- TABS (Center) --
+            _tabs = new TabControl { Dock = DockStyle.Fill, ItemSize = new Size(120, 30), SizeMode = TabSizeMode.Fixed };
             _tabs.TabPages.Add(CreateDashboardTab());
+            // Additional tabs for Diagnostics/Utility can be added here
             this.Controls.Add(_tabs);
         }
 
         private TabPage CreateDashboardTab()
         {
-            var tab = new TabPage { BackColor = AppColors.Background, Text = "Dashboard" };
+            var tab = new TabPage { Text = "Dashboard", BackColor = _colBackground };
             
-            // Layout Flow
-            var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), AutoScroll = true };
+            // Using a manual layout panel to ensure cards don't collapse
+            var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(30) };
 
-            // J2534 Connection Card
-            flow.Controls.Add(CreateActionCard("🔌 J2534 Connection", "Connect VCM II or compatible device", "Connect", async () => {
-                Log("Scanning for devices...", AppColors.TextMain);
-                await Task.Delay(1000);
-                Log("Connected to VCM II", AppColors.Success);
-            }));
+            // 1. J2534 Card
+            var cardJ2534 = CreateCard("🔌 J2534 Connection", "Connect VCM II or compatible device", 0);
+            var btnScan = CreateButton("Scan Devices", _colAccent, new Size(120, 35));
+            btnScan.Location = new Point(20, 60);
+            btnScan.Click += async (s, e) => {
+                Log("Scanning J2534 bus...", _colText);
+                await Task.Delay(800);
+                Log("Found: Ford VCM II (J2534-1)", _colSuccess);
+            };
+            cardJ2534.Controls.Add(btnScan);
+            panel.Controls.Add(cardJ2534);
 
-            // Key Programming Card
-            flow.Controls.Add(CreateActionCard("🔑 Key Programming", "Erase or Add Keys (1 Token)", "Start Session", () => {
+            // 2. Key Programming Card
+            var cardKeys = CreateCard("🔑 Key Programming", "Add/Erase Keys (1 Token per session)", 160);
+            var btnKeys = CreateButton("Start Session", _colSuccess, new Size(140, 35));
+            btnKeys.Location = new Point(20, 60);
+            btnKeys.Click += (s, e) => {
                 if (!CheckTokenAccess()) return;
-                Log("Starting Key Programming Session...", AppColors.Accent);
-            }));
+                Log("Starting Key Programming session...", _colAccent);
+                // Real logic calls TokenBalanceService here
+            };
+            cardKeys.Controls.Add(btnKeys);
+            panel.Controls.Add(cardKeys);
 
-            // Parameter Reset Card
-            flow.Controls.Add(CreateActionCard("🔄 Parameter Reset", "Sync BCM/PCM/ABS (3 Tokens)", "Reset Params", () => {
+            // 3. Parameter Reset Card
+            var cardParam = CreateCard("🔄 Parameter Reset", "Sync BCM/PCM/ABS (1 Token/module)", 320);
+            var btnParam = CreateButton("Reset Modules", _colAccent, new Size(140, 35));
+            btnParam.Location = new Point(20, 60);
+            btnParam.Click += (s, e) => {
                 if (!CheckTokenAccess()) return;
-                Log("Initializing Parameter Reset...", AppColors.Accent);
-            }));
+                Log("Analyzing vehicle modules...", _colAccent);
+            };
+            cardParam.Controls.Add(btnParam);
+            panel.Controls.Add(cardParam);
 
-            // License Management
-            var btnLic = CreateButton("Activate License", 150, 40);
-            btnLic.Click += (s,e) => new LicenseActivationForm().ShowDialog();
-            flow.Controls.Add(btnLic);
-
-            tab.Controls.Add(flow);
+            tab.Controls.Add(panel);
             return tab;
         }
 
-        // ============ HELPERS ============
-        private Panel CreateActionCard(string title, string desc, string btnText, Action onClick)
+        // ============ CUSTOM CONTROLS ============
+        private Panel CreateCard(string title, string subtitle, int yPos)
         {
-            var p = new Panel { Size = new Size(400, 120), BackColor = AppColors.Surface, Margin = new Padding(0, 0, 20, 20) };
+            var p = new Panel 
+            { 
+                Location = new Point(30, 30 + yPos), 
+                Size = new Size(600, 130), 
+                BackColor = _colSurface 
+            };
+            
             p.Paint += (s, e) => {
-                ControlPaint.DrawBorder(e.Graphics, p.ClientRectangle, AppColors.Border, ButtonBorderStyle.Solid);
-                using var pen = new Pen(AppColors.Accent, 2);
-                e.Graphics.DrawLine(pen, 0, 0, 0, p.Height); // Left accent line
+                ControlPaint.DrawBorder(e.Graphics, p.ClientRectangle, _colBorder, ButtonBorderStyle.Solid);
+                e.Graphics.FillRectangle(new SolidBrush(_colAccent), 0, 0, 4, p.Height); // Pink accent line
             };
 
-            var lblT = new Label { Text = title, Font = new Font("Segoe UI", 12F, FontStyle.Bold), ForeColor = AppColors.TextMain, Location = new Point(20, 15), AutoSize = true };
-            var lblD = new Label { Text = desc, Font = new Font("Segoe UI", 9F), ForeColor = AppColors.TextMuted, Location = new Point(20, 45), AutoSize = true };
+            var lblT = new Label { Text = title, Font = new Font("Segoe UI", 14F, FontStyle.Bold), ForeColor = _colText, Location = new Point(20, 15), AutoSize = true };
+            var lblS = new Label { Text = subtitle, Font = new Font("Segoe UI", 10F), ForeColor = _colTextMuted, Location = new Point(20, 42), AutoSize = true };
             
-            var btn = CreateButton(btnText, 120, 35);
-            btn.Location = new Point(260, 70);
-            btn.Click += (s, e) => onClick();
-
-            p.Controls.AddRange(new Control[] { lblT, lblD, btn });
+            p.Controls.Add(lblT);
+            p.Controls.Add(lblS);
             return p;
         }
 
-        private Button CreateButton(string text, int w, int h)
+        private Button CreateButton(string text, Color bg, Size sz)
         {
-            var btn = new Button
+            var b = new Button
             {
                 Text = text,
-                Size = new Size(w, h),
-                BackColor = AppColors.Accent,
+                Size = sz,
+                BackColor = bg,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
-            btn.FlatAppearance.BorderSize = 0;
-            return btn;
+            b.FlatAppearance.BorderSize = 0;
+            return b;
+        }
+
+        // ============ LOGIC ============
+        private void UpdateHeader()
+        {
+            if (IsLicensed)
+            {
+                _lblStatus.Text = "PROFESSIONAL LICENSE";
+                _lblStatus.ForeColor = _colSuccess;
+                _lblUser.Text = $"Licensed to: {LicenseService.Instance.LicensedTo}";
+            }
+            else
+            {
+                _lblStatus.Text = "UNLICENSED / FREE MODE";
+                _lblStatus.ForeColor = _colDanger;
+                _lblUser.Text = HasSSO ? TokenBalanceService.Instance.UserEmail : "Not signed in";
+            }
+
+            if (HasSSO)
+            {
+                _lblUser.Text += $" | Tokens: {TokenBalanceService.Instance.TotalTokens}";
+            }
         }
 
         private bool CheckTokenAccess()
         {
-            if (CanUseTokens) return true;
-            if (MessageBox.Show("Tokens require Google Sign-in. Sign in now?", "Auth Required", MessageBoxButtons.YesNo) == DialogResult.Yes)
+            if (HasSSO) return true;
+            if (MessageBox.Show("This feature requires Tokens.\nPlease sign in with Google.", "Auth Required", MessageBoxButtons.OKCancel) == DialogResult.OK)
             {
-                PerformLoginFlow();
+                _ = PromptLoginAsync();
             }
             return false;
         }
 
-        private void Log(string msg, Color c)
+        private void Log(string msg, Color? c = null)
         {
             if (InvokeRequired) { Invoke(() => Log(msg, c)); return; }
             _logBox.SelectionStart = _logBox.TextLength;
-            _logBox.SelectionColor = c;
+            _logBox.SelectionColor = c ?? _colTextMuted;
             _logBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {msg}\n");
             _logBox.ScrollToCaret();
         }
 
-        private void UpdateHeader()
+        // ============ SESSION MGMT ============
+        private void LoadSession()
         {
-            if (IsLicensed) {
-                _lblStatusBadge.Text = "PROFESSIONAL";
-                _lblStatusBadge.BackColor = AppColors.Success;
-            } else {
-                _lblStatusBadge.Text = "FREE MODE";
-                _lblStatusBadge.BackColor = AppColors.TextMuted;
-            }
+            try {
+                if (File.Exists("session.dat")) {
+                    var parts = File.ReadAllText("session.dat").Split('|');
+                    if (parts.Length >= 2) TokenBalanceService.Instance.SetAuthContext(parts[0], parts[1]);
+                }
+            } catch {}
+        }
 
-            if (HasSSO) {
-                _lblUser.Text = TokenBalanceService.Instance.UserEmail;
-                _lblTokens.Text = $"Tokens: {TokenBalanceService.Instance.TotalTokens}";
-            } else {
-                _lblUser.Text = "Offline";
-                _lblTokens.Text = "";
-            }
+        private void SaveSession(string token, string email)
+        {
+            try { File.WriteAllText("session.dat", $"{token}|{email}"); } catch {}
         }
 
         private void Logout()
         {
-            _authToken = null;
-            if (File.Exists("session.json")) File.Delete("session.json");
+            if (File.Exists("session.dat")) File.Delete("session.dat");
             TokenBalanceService.Instance.ClearAuthContext();
             Application.Restart();
         }
 
-        // ============ STUBS FOR SESSION ============
-        private void LoadSession() { /* Implementation identical to v21 */ }
-        private void SaveSession(string t, string r, string e) { /* Implementation identical to v21 */ }
-        private void MainForm_FormClosing(object s, FormClosingEventArgs e) { LicenseService.Instance.Dispose(); }
-        private void OnLicenseChanged(LicenseValidationResult r) { UpdateHeader(); }
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            LicenseService.Instance.Dispose();
+        }
     }
 }
