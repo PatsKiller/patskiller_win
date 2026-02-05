@@ -11,7 +11,7 @@ namespace PatsKillerPro.Forms
         // Dark Theme (V15 Navy)
         private static readonly Color BgColor = ColorTranslator.FromHtml("#0F172A");
         private static readonly Color Surface = ColorTranslator.FromHtml("#1E293B");
-        private static readonly Color Accent  = ColorTranslator.FromHtml("#E94796");
+        private static readonly Color Accent  = ColorTranslator.FromHtml("#EC4899");
         private static readonly Color TextMain= Color.White;
         private static readonly Color TextDim = ColorTranslator.FromHtml("#94A3B8");
 

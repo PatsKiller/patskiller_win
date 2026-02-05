@@ -242,6 +242,22 @@ namespace PatsKillerPro
             };
             btnSign.Click += (s, e) => MessageBox.Show("Please use Google Sign In.");
             _mainContainer.Controls.Add(btnSign);
+
+            // License activation shortcut (Desktop license mode)
+            var lnkLicense = new Label
+            {
+                Text = "Have a license key? Activate it here",
+                Font = _fontLabel,
+                ForeColor = _colAccent,
+                AutoSize = true,
+                Cursor = Cursors.Hand,
+            };
+            // Center under the button
+            lnkLicense.Location = new Point((width - lnkLicense.PreferredWidth) / 2, btnSign.Bottom + 18);
+            lnkLicense.Click += (s, e) => { this.DialogResult = DialogResult.Retry; this.Close(); };
+            lnkLicense.MouseEnter += (s, e) => lnkLicense.ForeColor = _colTextMain;
+            lnkLicense.MouseLeave += (s, e) => lnkLicense.ForeColor = _colAccent;
+            _mainContainer.Controls.Add(lnkLicense);
         }
 
         private Panel CreateFloatingLabelInput(string label, string placeholder, bool isPassword)
