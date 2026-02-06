@@ -54,4 +54,10 @@
     <EmbeddedResource Include="Resources\logo.png" />
   </ItemGroup>
 
+
+  <!-- Build fix: avoid duplicate GoogleLoginForm definitions when both files exist -->
+  <ItemGroup>
+    <Compile Remove="GoogleLoginForm.cs" />
+  </ItemGroup>
+
 </Project>
