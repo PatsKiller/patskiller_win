@@ -1246,13 +1246,10 @@ namespace PatsKillerPro
 
             if (!LicenseService.Instance.IsLicensed)
             {
-                var msg = "An active license is required to use paid features.
-
-Click the License status in the header to activate your key.";
+                var msg = "An active license is required to use paid features." + Environment.NewLine + Environment.NewLine +
+                          "Click the License status in the header to activate your key.";
                 if (!string.IsNullOrWhiteSpace(lic.Message))
-                    msg = $"{lic.Message}
-
-{msg}";
+                    msg = $"{lic.Message}{Environment.NewLine}{Environment.NewLine}{msg}";
 
                 MessageBox.Show(msg, "License Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
@@ -1274,10 +1271,8 @@ Click the License status in the header to activate your key.";
                 return false;
             }
 
-            return MessageBox.Show($"{op}
-Cost: {cost} token(s)
-
-Proceed?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+            var confirmMsg = $"{op}{Environment.NewLine}Cost: {cost} token(s){Environment.NewLine}{Environment.NewLine}Proceed?";
+            return MessageBox.Show(confirmMsg, "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
         }
         #endregion
 
