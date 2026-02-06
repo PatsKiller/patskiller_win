@@ -468,7 +468,8 @@ namespace PatsKillerPro.Forms
                 _lblLicenseLine.ForeColor = Success;
 
                 var exp = LicenseService.Instance.ExpiresAt?.ToString("yyyy-MM-dd") ?? "Never";
-                var who = LicenseService.Instance.CustomerName ?? "—";
+					// LicenseService exposes the customer display name as LicensedTo
+                var who = LicenseService.Instance.LicensedTo ?? "—";
                 var em = LicenseService.Instance.CustomerEmail ?? "—";
                 var typ = LicenseService.Instance.LicenseType ?? "—";
                 var used = $"{LicenseService.Instance.MachinesUsed}/{LicenseService.Instance.MaxMachines}";

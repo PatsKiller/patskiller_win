@@ -65,6 +65,9 @@ namespace PatsKillerPro.Services
         // ───────────────────────── Public Properties ─────────────────
         public bool IsLicensed => HasSsoIdentity && _cache?.IsCurrentlyValid(MachineIdentity.MachineId, MachineIdentity.SIID) == true &&
             (string.IsNullOrWhiteSpace(_cache?.CustomerEmail) || string.Equals(_cache!.CustomerEmail, _userEmail, StringComparison.OrdinalIgnoreCase));
+        // Back-compat alias (some UI code expects CustomerName)
+        public string? CustomerName => LicensedTo;
+
         public string? LicensedTo => _cache?.CustomerName;
         public string? CustomerEmail => _cache?.CustomerEmail;
         public string? LicenseType => _cache?.LicenseType;
