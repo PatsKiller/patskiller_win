@@ -71,7 +71,20 @@ namespace PatsKillerPro.Services
         /// </summary>
         public async Task<IncodeResult> CalculateIncodeAsync(string outcode, string? vin = null, string? moduleType = null, int? year = null, string? make = null, string? model = null)
         {
-            try
+            
+// Hard enforcement: BOTH SSO + valid license required for all token operations.
+if (string.IsNullOrEmpty(AuthToken) || string.IsNullOrEmpty(UserEmail))
+{
+    return new IncodeResult { Success = false, Error = "SSO session required. Please sign in with Google." };
+}
+
+// LicenseService performs strict binding (machine + email). Treat missing license as a hard stop.
+if (!LicenseService.Instance.IsLicensed)
+{
+    return new IncodeResult { Success = false, Error = "Active license required. Please activate your license key." };
+}
+
+try
             {
                 // Build request in correct format for provider-router
                 var request = new ProviderRouterRequest

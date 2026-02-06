@@ -9,418 +9,561 @@ using PatsKillerPro.Utils;
 namespace PatsKillerPro.Forms
 {
     /// <summary>
-    /// License activation & management dialog.
-    /// Hybrid auth rules:
-    ///   - License OR SSO can unlock the app
-    ///   - Token-consuming features still require Google SSO
+    /// License Management (Phase 3).
+    /// Strict policy: License activation/validation requires Google SSO identity (email + Bearer token),
+    /// and token operations require BOTH SSO + valid license.
     /// </summary>
-    public sealed class LicenseActivationForm : Form
+    public class LicenseActivationForm : Form
     {
-        // Match MainForm V15 dark theme
-        private readonly Color BG = Color.FromArgb(26, 26, 30);
-        private readonly Color SURFACE = Color.FromArgb(35, 35, 40);
-        private readonly Color CARD = Color.FromArgb(42, 42, 48);
-        private readonly Color BORDER = Color.FromArgb(58, 58, 66);
-        private readonly Color TEXT = Color.FromArgb(240, 240, 240);
-        private readonly Color TEXT_DIM = Color.FromArgb(160, 160, 165);
-        private readonly Color TEXT_MUTED = Color.FromArgb(112, 112, 117);
-        private readonly Color ACCENT = Color.FromArgb(59, 130, 246);
-        private readonly Color SUCCESS = Color.FromArgb(34, 197, 94);
-        private readonly Color WARNING = Color.FromArgb(234, 179, 8);
-        private readonly Color DANGER = Color.FromArgb(239, 68, 68);
+        // V15 Navy theme
+        private static readonly Color BgColor  = ColorTranslator.FromHtml("#0F172A");
+        private static readonly Color Surface  = ColorTranslator.FromHtml("#1E293B");
+        private static readonly Color Border   = ColorTranslator.FromHtml("#334155");
+        private static readonly Color Accent   = ColorTranslator.FromHtml("#EC4899");
+        private static readonly Color Success  = ColorTranslator.FromHtml("#22C55E");
+        private static readonly Color Warning  = ColorTranslator.FromHtml("#EAB308");
+        private static readonly Color Danger   = ColorTranslator.FromHtml("#EF4444");
+        private static readonly Color TextMain = Color.White;
+        private static readonly Color TextDim  = ColorTranslator.FromHtml("#94A3B8");
 
-        private readonly ToolTip _tip = new ToolTip { AutoPopDelay = 10000, InitialDelay = 400, ReshowDelay = 200, ShowAlways = true };
-
-        private Label _lblState = null!;
-        private Label _lblDetails = null!;
-        private TextBox[] _keyBoxes = null!;
+        private readonly TextBox[] _keyParts = new TextBox[4];
+        private Label _lblSignedIn = null!;
+        private Label _lblLicenseLine = null!;
+        private Label _lblLicenseDetail = null!;
         private Button _btnActivate = null!;
         private Button _btnRevalidate = null!;
         private Button _btnDeactivate = null!;
+        private RichTextBox _log = null!;
+        private LinkLabel _lnkSignIn = null!;
 
         public LicenseActivationForm()
         {
-            Text = "License";
+            Text = "License Management";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
-            BackColor = BG;
-            ForeColor = TEXT;
+            BackColor = BgColor;
+            ForeColor = TextMain;
             Font = new Font("Segoe UI", 10F);
-            ClientSize = new Size(640, 520);
-            AutoScaleMode = AutoScaleMode.None;
+            ClientSize = new Size(820, 620);
 
             BuildUI();
-
-            Shown += async (_, __) => await RefreshStatusAsync();
+            Shown += async (_, __) => await RefreshUiAsync();
         }
 
         private void BuildUI()
         {
-            var root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(18) };
-            Controls.Add(root);
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = BgColor,
+                Padding = new Padding(22),
+                ColumnCount = 1,
+                RowCount = 6,
+                AutoSize = false
+            };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // title
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // identity + status
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // machine
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // key entry
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // log
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
 
-            var contentWidth = ClientSize.Width - (root.Padding.Left + root.Padding.Right);
-
+            // Title
             var title = new Label
             {
                 Text = "License Management",
-                Font = new Font("Segoe UI", 18, FontStyle.Bold),
-                ForeColor = TEXT,
+                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                ForeColor = Accent,
                 AutoSize = true,
-                Location = new Point(0, 0)
+                Margin = new Padding(0, 0, 0, 6)
             };
-            root.Controls.Add(title);
-
-            _lblState = new Label
+            var subtitle = new Label
             {
-                Text = "Checking license…",
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = TEXT_DIM,
+                Text = "Licenses are bound to this computer and the signed-in email (SSO).",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = TextDim,
                 AutoSize = true,
-                Location = new Point(0, 38)
+                Margin = new Padding(0, 0, 0, 14)
             };
-            root.Controls.Add(_lblState);
+            root.Controls.Add(title, 0, 0);
+            root.Controls.Add(subtitle, 0, 0);
+            root.SetCellPosition(subtitle, new TableLayoutPanelCellPosition(0, 0));
+            subtitle.Location = new Point(subtitle.Location.X, subtitle.Location.Y + 40);
 
-            // Machine identity card
-            var cardMachine = MakeCard("Machine Binding");
-            cardMachine.Location = new Point(0, 70);
-            cardMachine.Size = new Size(contentWidth, 140);
-            cardMachine.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            root.Controls.Add(cardMachine);
-
-            var machineLines = new[]
+            // Identity / Status card
+            var identityCard = CardPanel();
+            var identityLayout = new TableLayoutPanel
             {
-                ("Machine Name", MachineIdentity.MachineName),
-                ("Machine ID", MachineIdentity.MachineId),
-                ("Instance ID (SIID)", MachineIdentity.SIID),
-                ("Combined ID", MachineIdentity.CombinedId),
+                Dock = DockStyle.Fill,
+                BackColor = Surface,
+                ColumnCount = 2,
+                RowCount = 3,
+                Padding = new Padding(14)
             };
-            var y = 32;
-            foreach (var (k, v) in machineLines)
+            identityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            identityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            identityLayout.Controls.Add(MakeKey("Signed-in Email:"), 0, 0);
+            _lblSignedIn = MakeVal("--");
+            identityLayout.Controls.Add(_lblSignedIn, 1, 0);
+
+            identityLayout.Controls.Add(MakeKey("License Status:"), 0, 1);
+            _lblLicenseLine = MakeVal("Checking...");
+            _lblLicenseLine.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            identityLayout.Controls.Add(_lblLicenseLine, 1, 1);
+
+            _lblLicenseDetail = new Label
             {
-                var lblK = new Label { Text = k + ":", ForeColor = TEXT_MUTED, AutoSize = true, Location = new Point(14, y) };
-                var txtV = new TextBox
-                {
-                    Text = v,
-                    ReadOnly = true,
-                    BorderStyle = BorderStyle.FixedSingle,
-                    BackColor = SURFACE,
-                    ForeColor = TEXT,
-                    Font = new Font("Consolas", 10),
-                    Location = new Point(150, y - 4),
-                    Width = 360,
-                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-                };
-                var btnCopy = new Button
-                {
-                    Text = "Copy",
-                    BackColor = CARD,
-                    ForeColor = TEXT,
-                    FlatStyle = FlatStyle.Flat,
-                    Location = new Point(cardMachine.Width - 92, y - 6),
-                    Size = new Size(72, 26),
-                    Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                };
-                btnCopy.FlatAppearance.BorderColor = BORDER;
-                btnCopy.FlatAppearance.BorderSize = 1;
-                btnCopy.Click += (_, __) => { try { Clipboard.SetText(v); } catch { } };
-                _tip.SetToolTip(btnCopy, "Copy to clipboard");
-
-                cardMachine.Controls.Add(lblK);
-                cardMachine.Controls.Add(txtV);
-                cardMachine.Controls.Add(btnCopy);
-                y += 28;
-            }
-
-            // License details card
-            var cardDetails = MakeCard("License Status");
-            cardDetails.Location = new Point(0, 220);
-            cardDetails.Size = new Size(contentWidth, 110);
-            cardDetails.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            root.Controls.Add(cardDetails);
-
-            _lblDetails = new Label
-            {
-                Text = "—",
-                ForeColor = TEXT_DIM,
-                AutoSize = false,
-                Location = new Point(14, 32),
-                Size = new Size(cardDetails.Width - 28, 70),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                AutoSize = true,
+                ForeColor = TextDim,
+                Font = new Font("Segoe UI", 9F),
+                Margin = new Padding(0, 8, 0, 0)
             };
-            cardDetails.Controls.Add(_lblDetails);
+            identityLayout.Controls.Add(_lblLicenseDetail, 1, 2);
 
-            // Activation card
-            var cardActivate = MakeCard("Activate / Replace Key");
-            cardActivate.Location = new Point(0, 340);
-            cardActivate.Size = new Size(contentWidth, 118);
-            cardActivate.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            root.Controls.Add(cardActivate);
+            _lnkSignIn = new LinkLabel
+            {
+                Text = "Sign in with Google",
+                LinkColor = Accent,
+                ActiveLinkColor = Accent,
+                VisitedLinkColor = Accent,
+                AutoSize = true,
+                Margin = new Padding(0, 8, 12, 0),
+                Visible = false
+            };
+            _lnkSignIn.Click += (_, __) =>
+            {
+                DialogResult = DialogResult.Retry;
+                Close();
+            };
+            identityLayout.Controls.Add(_lnkSignIn, 0, 2);
 
-            _keyBoxes = new TextBox[4];
-            var x0 = 14;
+            identityCard.Controls.Add(identityLayout);
+            root.Controls.Add(identityCard, 0, 1);
+
+            // Machine binding card
+            var machineCard = CardPanel();
+            var m = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Surface,
+                ColumnCount = 3,
+                RowCount = 5,
+                Padding = new Padding(14)
+            };
+            m.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            m.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            m.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            var hdr = new Label
+            {
+                Text = "Machine Binding",
+                ForeColor = TextMain,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 10)
+            };
+            m.Controls.Add(hdr, 0, 0);
+            m.SetColumnSpan(hdr, 3);
+
+            AddCopyRow(m, 1, "Machine Name", Environment.MachineName);
+            AddCopyRow(m, 2, "HW Machine ID", MachineIdentity.MachineId);
+            AddCopyRow(m, 3, "SIID", MachineIdentity.SIID);
+            AddCopyRow(m, 4, "Combined ID", MachineIdentity.CombinedId);
+
+            machineCard.Controls.Add(m);
+            root.Controls.Add(machineCard, 0, 2);
+
+            // Key entry card
+            var keyCard = CardPanel();
+            var k = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Surface,
+                ColumnCount = 1,
+                RowCount = 4,
+                Padding = new Padding(14)
+            };
+
+            var keyHdr = new Label
+            {
+                Text = "Activate / Replace License Key",
+                ForeColor = TextMain,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 10)
+            };
+            var keyHint = new Label
+            {
+                Text = "Enter the 16-character key from your email (format: XXXX-XXXX-XXXX-XXXX).",
+                ForeColor = TextDim,
+                Font = new Font("Segoe UI", 9F),
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 10)
+            };
+            k.Controls.Add(keyHdr, 0, 0);
+            k.Controls.Add(keyHint, 0, 1);
+
+            var keyRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+
             for (var i = 0; i < 4; i++)
             {
-                var tb = new TextBox
+                _keyParts[i] = new TextBox
                 {
                     Width = 92,
-                    Location = new Point(x0 + i * 110, 42),
-                    BackColor = SURFACE,
-                    ForeColor = TEXT,
+                    Height = 34,
+                    BackColor = BgColor,
+                    ForeColor = TextMain,
                     BorderStyle = BorderStyle.FixedSingle,
-                    Font = new Font("Consolas", 14, FontStyle.Bold),
+                    Font = new Font("Consolas", 16F, FontStyle.Bold),
                     MaxLength = 4,
                     TextAlign = HorizontalAlignment.Center,
-                    CharacterCasing = CharacterCasing.Upper
+                    CharacterCasing = CharacterCasing.Upper,
+                    Margin = new Padding(i == 0 ? 0 : 10, 0, 0, 0)
                 };
-                var idx = i;
-                tb.TextChanged += (_, __) =>
-                {
-                    if (tb.Text.Length == 4 && idx < 3)
-                        _keyBoxes[idx + 1].Focus();
-                };
-                cardActivate.Controls.Add(tb);
-                _keyBoxes[i] = tb;
 
+                var idx = i;
+                _keyParts[i].TextChanged += (_, __) =>
+                {
+                    if (_keyParts[idx].Text.Length == 4 && idx < 3)
+                        _keyParts[idx + 1].Focus();
+                };
+
+                _keyParts[i].KeyDown += (_, e) =>
+                {
+                    if (e.KeyCode == Keys.Back && _keyParts[idx].SelectionStart == 0 && idx > 0 && _keyParts[idx].TextLength == 0)
+                    {
+                        _keyParts[idx - 1].Focus();
+                        _keyParts[idx - 1].SelectionStart = _keyParts[idx - 1].TextLength;
+                        e.SuppressKeyPress = true;
+                    }
+                };
+
+                keyRow.Controls.Add(_keyParts[i]);
                 if (i < 3)
                 {
-                    var dash = new Label
+                    keyRow.Controls.Add(new Label
                     {
                         Text = "-",
-                        ForeColor = TEXT_MUTED,
-                        Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                        ForeColor = TextDim,
                         AutoSize = true,
-                        Location = new Point(tb.Right + 6, 44)
-                    };
-                    cardActivate.Controls.Add(dash);
+                        Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                        Margin = new Padding(6, 6, 0, 0)
+                    });
                 }
             }
 
-            _btnActivate = MakeBtn("Activate", ACCENT);
-            _btnActivate.Location = new Point(cardActivate.Width - 140, 40);
-            _btnActivate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            _btnActivate = PrimaryButton("Activate / Replace");
+            _btnActivate.Width = 260;
             _btnActivate.Click += async (_, __) => await ActivateAsync();
-            cardActivate.Controls.Add(_btnActivate);
+
+            var keyActions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0, 12, 0, 0)
+            };
+            keyActions.Controls.Add(_btnActivate);
+
+            k.Controls.Add(keyRow, 0, 2);
+            k.Controls.Add(keyActions, 0, 3);
+
+            keyCard.Controls.Add(k);
+            root.Controls.Add(keyCard, 0, 3);
+
+            // Log panel
+            _log = new RichTextBox
+            {
+                Dock = DockStyle.Fill,
+                BackColor = BgColor,
+                ForeColor = TextMain,
+                Font = new Font("Consolas", 10F),
+                BorderStyle = BorderStyle.FixedSingle,
+                ReadOnly = true,
+                Margin = new Padding(0, 12, 0, 12)
+            };
+            root.Controls.Add(_log, 0, 4);
 
             // Footer buttons
-            _btnRevalidate = MakeBtn("Revalidate", CARD);
-            _btnRevalidate.Location = new Point(0, 0);
-            _btnRevalidate.Click += async (_, __) => await RevalidateAsync();
+            var footer = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
 
-            _btnDeactivate = MakeBtn("Deactivate", CARD);
-            _btnDeactivate.Location = new Point(0, 0);
-            _btnDeactivate.Click += async (_, __) => await DeactivateAsync();
-
-            var btnClose = MakeBtn("Close", CARD);
+            var btnClose = SecondaryButton("Close");
             btnClose.Click += (_, __) => { DialogResult = DialogResult.Cancel; Close(); };
 
-            var lnkSso = new Label
-            {
-                Text = "Need tokens? Sign in with Google",
-                ForeColor = TEXT_MUTED,
-                AutoSize = true,
-                Cursor = Cursors.Hand,
-                Location = new Point(0, 0)
-            };
-            lnkSso.Click += (_, __) => { DialogResult = DialogResult.Retry; Close(); };
-            _tip.SetToolTip(lnkSso, "Token-consuming actions require Google SSO");
+            _btnDeactivate = SecondaryButton("Deactivate This Machine");
+            _btnDeactivate.Click += async (_, __) => await DeactivateAsync();
 
-            var footer = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 44,
-                BackColor = Color.Transparent
-            };
-            root.Controls.Add(footer);
+            _btnRevalidate = SecondaryButton("Revalidate Now");
+            _btnRevalidate.Click += async (_, __) => await RevalidateAsync();
 
-            // Layout footer left → right
-            _btnRevalidate.Parent = footer;
-            _btnDeactivate.Parent = footer;
-            btnClose.Parent = footer;
-            lnkSso.Parent = footer;
+            footer.Controls.Add(btnClose);
+            footer.Controls.Add(_btnDeactivate);
+            footer.Controls.Add(_btnRevalidate);
 
-            _btnRevalidate.Location = new Point(0, 8);
-            _btnDeactivate.Location = new Point(_btnRevalidate.Right + 10, 8);
-            lnkSso.Location = new Point(_btnDeactivate.Right + 14, 14);
-            btnClose.Location = new Point(footer.Width - 110, 8);
-            btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            root.Controls.Add(footer, 0, 5);
 
-            footer.Resize += (_, __) =>
-            {
-                btnClose.Location = new Point(footer.Width - btnClose.Width, 8);
-            };
+            Controls.Add(root);
         }
 
-        private Panel MakeCard(string header)
+        private Panel CardPanel()
         {
-            var p = new Panel { BackColor = CARD };
+            var p = new Panel
+            {
+                Dock = DockStyle.Top,
+                BackColor = Surface,
+                Margin = new Padding(0, 0, 0, 14),
+                Padding = new Padding(1)
+            };
             p.Paint += (_, e) =>
             {
-                using var pen = new Pen(BORDER);
+                using var pen = new Pen(Border);
                 e.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
             };
-
-            var lbl = new Label
-            {
-                Text = header.ToUpperInvariant(),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                ForeColor = TEXT_DIM,
-                AutoSize = true,
-                Location = new Point(14, 10)
-            };
-            p.Controls.Add(lbl);
             return p;
         }
 
-        private Button MakeBtn(string text, Color bg)
+        private Label MakeKey(string text) => new Label
+        {
+            Text = text,
+            AutoSize = true,
+            ForeColor = TextDim,
+            Font = new Font("Segoe UI", 9F),
+            Margin = new Padding(0, 0, 12, 0)
+        };
+
+        private Label MakeVal(string text) => new Label
+        {
+            Text = text,
+            AutoSize = true,
+            ForeColor = TextMain,
+            Font = new Font("Segoe UI", 10F),
+            MaximumSize = new Size(520, 0)
+        };
+
+        private Button PrimaryButton(string text)
         {
             var b = new Button
             {
                 Text = text,
-                BackColor = bg,
-                ForeColor = TEXT,
+                Height = 40,
+                BackColor = Accent,
+                ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Size = new Size(110, 28),
-                Cursor = Cursors.Hand
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 10, 0)
             };
-            b.FlatAppearance.BorderColor = BORDER;
+            b.FlatAppearance.BorderSize = 0;
+            return b;
+        }
+
+        private Button SecondaryButton(string text)
+        {
+            var b = new Button
+            {
+                Text = text,
+                Height = 40,
+                BackColor = BgColor,
+                ForeColor = TextMain,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 10, 0)
+            };
+            b.FlatAppearance.BorderColor = Border;
             b.FlatAppearance.BorderSize = 1;
             return b;
         }
 
-        private string ComposeKey()
+        private void AddCopyRow(TableLayoutPanel t, int row, string label, string value)
         {
-            var parts = _keyBoxes.Select(x => (x.Text ?? "").Trim()).ToArray();
-            if (parts.Any(p => p.Length != 4)) return "";
-            return string.Join("-", parts).ToUpperInvariant();
+            // row 0 is header
+            var targetRow = row;
+
+            while (t.RowStyles.Count <= targetRow)
+                t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var k = MakeKey(label + ":");
+            var v = new TextBox
+            {
+                Text = value,
+                ReadOnly = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = BgColor,
+                ForeColor = TextMain,
+                Font = new Font("Consolas", 10F),
+                Width = 520
+            };
+            var copy = SecondaryButton("Copy");
+            copy.Width = 90;
+            copy.Height = 30;
+            copy.Margin = new Padding(10, 0, 0, 0);
+            copy.Click += (_, __) =>
+            {
+                try { Clipboard.SetText(value); } catch { }
+                AppendLog("success", $"Copied {label}");
+            };
+
+            t.Controls.Add(k, 0, targetRow);
+            t.Controls.Add(v, 1, targetRow);
+            t.Controls.Add(copy, 2, targetRow);
         }
 
-        private async Task RefreshStatusAsync()
+        private void AppendLog(string type, string message)
         {
-            // Ensure cache is loaded for display.
-            try { await LicenseService.Instance.ValidateAsync(); } catch { /* best effort */ }
+            var c = type == "success" ? Success : type == "warning" ? Warning : type == "error" ? Danger : TextDim;
+            _log.SelectionColor = TextDim;
+            _log.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+            _log.SelectionColor = c;
+            _log.AppendText($"{message}\n");
+            _log.ScrollToCaret();
+        }
 
-            var ls = LicenseService.Instance;
-            var licensed = ls.IsLicensed;
-            var grace = ls.InGracePeriod;
+        private async Task RefreshUiAsync()
+        {
+            var email = LicenseService.Instance.UserEmail ?? "";
+            _lblSignedIn.Text = string.IsNullOrWhiteSpace(email) ? "Not signed in" : email;
+            _lblSignedIn.ForeColor = string.IsNullOrWhiteSpace(email) ? Warning : TextMain;
 
-            if (licensed)
+            // Strict mode: show sign-in link if missing identity
+            _lnkSignIn.Visible = !LicenseService.Instance.HasSsoIdentity;
+
+            var res = await LicenseService.Instance.ValidateAsync();
+            RenderStatus(res);
+        }
+
+        private void RenderStatus(LicenseValidationResult res)
+        {
+            if (!LicenseService.Instance.HasSsoIdentity)
             {
-                _lblState.ForeColor = grace ? WARNING : SUCCESS;
-                _lblState.Text = grace
-                    ? $"ACTIVE (offline grace: {ls.GraceDaysRemaining} days)"
-                    : "ACTIVE";
+                _lblLicenseLine.Text = "SSO required (sign in to validate)";
+                _lblLicenseLine.ForeColor = Warning;
+                _lblLicenseDetail.Text = "Licensing is enforced per-user. Sign in with Google, then activate your key.";
+                _btnActivate.Enabled = false;
+                _btnRevalidate.Enabled = false;
+                _btnDeactivate.Enabled = false;
+                return;
+            }
 
-                var exp = ls.ExpiresAt?.ToString("yyyy-MM-dd") ?? "—";
-                var last = ls.LastValidatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—";
-                var who = string.IsNullOrWhiteSpace(ls.LicensedTo) ? "—" : ls.LicensedTo;
-                var typ = string.IsNullOrWhiteSpace(ls.LicenseType) ? "standard" : ls.LicenseType;
-                var slots = (ls.MaxMachines > 0) ? $"{ls.MachinesUsed}/{ls.MaxMachines}" : "—";
+            if (res.IsValid)
+            {
+                _lblLicenseLine.Text = "Active";
+                _lblLicenseLine.ForeColor = Success;
 
-                _lblDetails.Text =
-                    $"Licensed To: {who}\n" +
-                    $"Type: {typ}    Expires: {exp}\n" +
-                    $"Machines: {slots}    Last Check: {last}";
+                var exp = LicenseService.Instance.ExpiresAt?.ToString("yyyy-MM-dd") ?? "Never";
+                var who = LicenseService.Instance.CustomerName ?? "—";
+                var em = LicenseService.Instance.CustomerEmail ?? "—";
+                var typ = LicenseService.Instance.LicenseType ?? "—";
+                var used = $"{LicenseService.Instance.MachinesUsed}/{LicenseService.Instance.MaxMachines}";
 
-                _btnDeactivate.Enabled = true;
+                _lblLicenseDetail.Text = $"Licensed To: {who}\nEmail: {em}\nType: {typ}\nExpires: {exp}\nMachines: {used}";
+                _btnActivate.Enabled = true;
                 _btnRevalidate.Enabled = true;
-                _btnActivate.Text = "Replace";
+                _btnDeactivate.Enabled = true;
+            }
+            else if (res.HasLicense)
+            {
+                _lblLicenseLine.Text = "Attention needed";
+                _lblLicenseLine.ForeColor = Warning;
+                _lblLicenseDetail.Text = res.Message ?? "License exists but is not valid for this machine/account.";
+                _btnActivate.Enabled = true;
+                _btnRevalidate.Enabled = true;
+                _btnDeactivate.Enabled = true;
             }
             else
             {
-                _lblState.ForeColor = TEXT_DIM;
-                _lblState.Text = "NOT ACTIVATED";
-                _lblDetails.Text = "No valid license found on this machine.\nEnter a license key below to activate offline mode.";
-
+                _lblLicenseLine.Text = "Not activated";
+                _lblLicenseLine.ForeColor = TextDim;
+                _lblLicenseDetail.Text = "No license on this machine. Enter your key to activate.";
+                _btnActivate.Enabled = true;
+                _btnRevalidate.Enabled = false;
                 _btnDeactivate.Enabled = false;
-                _btnRevalidate.Enabled = true;
-                _btnActivate.Text = "Activate";
             }
+        }
+
+        private string BuildKey()
+        {
+            var parts = _keyParts.Select(x => (x.Text ?? "").Trim().ToUpperInvariant()).ToArray();
+            if (parts.Any(p => p.Length != 4))
+                return "";
+            return string.Join("-", parts);
         }
 
         private async Task ActivateAsync()
         {
-            var key = ComposeKey();
+            var key = BuildKey();
             if (string.IsNullOrWhiteSpace(key))
             {
-                MessageBox.Show("Enter a full key in the format XXXX-XXXX-XXXX-XXXX.", "License", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Please enter a full license key (XXXX-XXXX-XXXX-XXXX).", "Invalid Key", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             SetBusy(true);
-            try
-            {
-                var res = await LicenseService.Instance.ActivateAsync(key);
-                if (res.IsValid)
-                {
-                    await RefreshStatusAsync();
-                    MessageBox.Show("License activated on this machine.", "License", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    DialogResult = DialogResult.OK; // signal state change
-                }
-                else
-                {
-                    MessageBox.Show(res.Message, "License", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-            finally
-            {
-                SetBusy(false);
-            }
+            AppendLog("info", $"Activating key on {Environment.MachineName}...");
+
+            var res = await LicenseService.Instance.ActivateAsync(key);
+
+            AppendLog(res.IsValid ? "success" : "error", res.Message ?? (res.IsValid ? "Activation successful." : "Activation failed."));
+            RenderStatus(res);
+
+            if (res.IsValid)
+                DialogResult = DialogResult.OK;
+
+            SetBusy(false);
         }
 
         private async Task RevalidateAsync()
         {
             SetBusy(true);
-            try
-            {
-                var res = await LicenseService.Instance.ValidateAsync();
-                await RefreshStatusAsync();
-                MessageBox.Show(res.Message, "License", MessageBoxButtons.OK,
-                    res.IsValid ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-                DialogResult = DialogResult.OK;
-            }
-            finally
-            {
-                SetBusy(false);
-            }
+            AppendLog("info", "Revalidating license with server...");
+            var res = await LicenseService.Instance.ValidateAsync();
+            AppendLog(res.IsValid ? "success" : "warning", res.Message ?? "Revalidation complete.");
+            RenderStatus(res);
+            SetBusy(false);
         }
 
         private async Task DeactivateAsync()
         {
-            if (!LicenseService.Instance.IsLicensed)
+            if (string.IsNullOrWhiteSpace(LicenseService.Instance.LicenseKey))
+            {
+                MessageBox.Show("No license is currently stored on this machine.", "Nothing to Deactivate", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
+            }
 
-            var ok = MessageBox.Show(
-                "Deactivate this license on this machine?\n\nThis frees up a machine slot, but offline access will be removed until you activate again.",
-                "Confirm Deactivation",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question) == DialogResult.Yes;
-
-            if (!ok) return;
+            var dr = MessageBox.Show("Deactivate this machine from the license?\n\nThis will free up a machine slot on your license.", "Confirm Deactivation", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (dr != DialogResult.Yes) return;
 
             SetBusy(true);
-            try
-            {
-                await LicenseService.Instance.DeactivateAsync();
-                await RefreshStatusAsync();
-                MessageBox.Show("License deactivated from this machine.", "License", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                DialogResult = DialogResult.OK;
-            }
-            finally
-            {
-                SetBusy(false);
-            }
+            AppendLog("info", "Deactivating this machine...");
+            var ok = await LicenseService.Instance.DeactivateAsync();
+            AppendLog(ok ? "success" : "error", ok ? "Machine deactivated." : "Deactivation failed.");
+            await RefreshUiAsync();
+            SetBusy(false);
         }
 
         private void SetBusy(bool busy)
         {
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
-            _btnActivate.Enabled = !busy;
-            _btnRevalidate.Enabled = !busy;
-            _btnDeactivate.Enabled = !busy && LicenseService.Instance.IsLicensed;
-            foreach (var tb in _keyBoxes) tb.Enabled = !busy;
+            _btnActivate.Enabled = !busy && _btnActivate.Enabled;
+            _btnRevalidate.Enabled = !busy && _btnRevalidate.Enabled;
+            _btnDeactivate.Enabled = !busy && _btnDeactivate.Enabled;
         }
     }
 }

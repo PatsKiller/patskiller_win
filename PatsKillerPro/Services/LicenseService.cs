@@ -16,10 +16,10 @@ namespace PatsKillerPro.Services
     /// Manages PatsKiller Pro license validation, activation, and periodic heartbeat.
     ///
     /// Design choices (per Licensing Integration Design Spec v1):
-    ///   • Hybrid Auth – license OR SSO grants app access; tokens always need SSO.
+    ///   • Strict Auth – license checks require Google SSO identity; token operations require BOTH SSO + License.
     ///   • Machine binding – MachineIdentity.CombinedId (hardware + SIID).
     ///   • Offline strategy – validate online weekly; 3-day grace; 10-day hard lock.
-    ///   • Cache – AES-encrypted JSON in %LocalAppData%\PatsKillerPro\license.dat
+    ///   • Cache – AES-encrypted JSON in %LocalAppData%\PatsKillerPro\license.key
     ///            with HMAC tamper detection.
     ///   • Heartbeat – every 4 h while running (background timer).
     /// </summary>
@@ -43,35 +43,38 @@ namespace PatsKillerPro.Services
         private const string LICENSE_API = "https://kmpnplpijuzzbftsjacx.supabase.co/functions/v1/bridge-license";
         private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyNjc0MDUsImV4cCI6MjA3OTg0MzQwNX0.RLX0e1FAq7AlKIpVXhaw7J3ILY_yc0FJDoAzxQDy24E";
         private const string APP_FOLDER = "PatsKillerPro";
-        // Spec calls this out as "license.key" (encrypted JSON). Keep backward compatibility
-        // for early builds that used "license.dat".
         private const string LICENSE_FILE = "license.key";  // encrypted cache
-        private const string LEGACY_LICENSE_FILE = "license.dat";
+        private const string LICENSE_FILE_LEGACY = "license.dat";  // legacy cache file (v15/v21)
         private const int REVALIDATION_DAYS = 7;   // online check every 7 days
         private const int GRACE_PERIOD_DAYS = 3;    // 3 extra days if offline
         private const int HEARTBEAT_HOURS = 4;      // background heartbeat interval
 
         // AES encryption key derived from a stable machine secret.
-        // This prevents copying the license.dat to another machine.
+        // This prevents copying the license.key to another machine.
         private static readonly byte[] _encSalt = Encoding.UTF8.GetBytes("PatsKillerPro_LicCache_2026");
 
         // ───────────────────────── State ─────────────────────────────
         private readonly HttpClient _http;
+        private string? _authToken;
+        private string? _userEmail;
+
         private System.Threading.Timer? _heartbeatTimer;
         private LicenseCacheData? _cache;
         private bool _disposed;
 
         // ───────────────────────── Public Properties ─────────────────
-        public bool IsLicensed => _cache?.IsCurrentlyValid(MachineIdentity.MachineId, MachineIdentity.SIID) == true;
+        public bool IsLicensed => HasSsoIdentity && _cache?.IsCurrentlyValid(MachineIdentity.MachineId, MachineIdentity.SIID) == true &&
+            (string.IsNullOrWhiteSpace(_cache?.CustomerEmail) || string.Equals(_cache!.CustomerEmail, _userEmail, StringComparison.OrdinalIgnoreCase));
         public string? LicensedTo => _cache?.CustomerName;
         public string? CustomerEmail => _cache?.CustomerEmail;
         public string? LicenseType => _cache?.LicenseType;
         public DateTime? ExpiresAt => _cache?.ExpiresAt;
-        public DateTime? ActivatedAt => _cache?.ActivatedAt;
-        public DateTime? LastValidatedAt => _cache?.LastValidatedAt;
         public int MaxMachines => _cache?.MaxMachines ?? 0;
         public int MachinesUsed => _cache?.MachinesUsed ?? 0;
         public string? LicenseKey => _cache?.LicenseKey;
+
+        public string? UserEmail => _userEmail;
+        public bool HasSsoIdentity => !string.IsNullOrWhiteSpace(_authToken) && !string.IsNullOrWhiteSpace(_userEmail);
 
         /// <summary>True if the cached license needs online revalidation (>7 days).</summary>
         public bool NeedsRevalidation => _cache != null &&
@@ -116,6 +119,34 @@ namespace PatsKillerPro.Services
             _http.DefaultRequestHeaders.Add("apikey", SUPABASE_ANON_KEY);
         }
 
+
+/// <summary>
+/// Sets the current Google SSO identity for strict license enforcement.
+/// Required for activate/validate/heartbeat/deactivate (Option A - Strict).
+/// </summary>
+public void SetAuthContext(string authToken, string userEmail)
+{
+    _authToken = authToken;
+    _userEmail = userEmail;
+}
+
+public void ClearAuthContext()
+{
+    _authToken = null;
+    _userEmail = null;
+}
+
+private bool EnsureSsoIdentity(out LicenseValidationResult failure)
+{
+    if (!HasSsoIdentity)
+    {
+        failure = LicenseValidationResult.Fail("Google sign-in required to validate/activate license.");
+        return false;
+    }
+    failure = LicenseValidationResult.Fail("");
+    return true;
+}
+
         // ═══════════════════════════════════════════════════════════════
         //  VALIDATE  (called on startup, checks cache → online if needed)
         // ═══════════════════════════════════════════════════════════════
@@ -134,6 +165,22 @@ namespace PatsKillerPro.Services
                 LogUI("info", "[License] No cached license found");
                 return Emit(LicenseValidationResult.NoLicense());
             }
+
+            // 2. Strict mode: SSO identity is required for license validation
+            if (!EnsureSsoIdentity(out var ssoFail))
+            {
+                LogUI("warning", "[License] SSO required – sign in to validate license");
+                return Emit(LicenseValidationResult.Fail(ssoFail.Message));
+            }
+
+
+// 2b. Email binding check (strict): license must match the signed-in account
+if (!string.IsNullOrWhiteSpace(_cache.CustomerEmail) &&
+    !string.Equals(_cache.CustomerEmail, _userEmail, StringComparison.OrdinalIgnoreCase))
+{
+    LogUI("warning", "[License] Email mismatch – wrong Google account");
+    return Emit(LicenseValidationResult.Fail($"License is active for {_cache.CustomerEmail}, but you are signed in as {_userEmail}."));
+}
 
             // 2. Machine binding check
             if (_cache.MachineId != MachineIdentity.MachineId)
@@ -203,22 +250,25 @@ namespace PatsKillerPro.Services
                 return Emit(LicenseValidationResult.Fail("License key cannot be empty"));
 
             licenseKey = licenseKey.Trim().ToUpperInvariant();
+            if (!EnsureSsoIdentity(out var ssoFail))
+                return Emit(LicenseValidationResult.Fail(ssoFail.Message));
             LogUI("info", $"[License] Activating key: {licenseKey[..Math.Min(4, licenseKey.Length)]}...");
 
             try
             {
                 var request = new
                 {
-                    action = "validate",
+                    action = "activate",
                     license_key = licenseKey,
                     machine_id = MachineIdentity.CombinedId,
                     siid = MachineIdentity.SIID,
                     machine_name = Environment.MachineName,
-                    version = GetAppVersion()
+                    version = GetAppVersion(),
+                    user_email = _userEmail
                 };
 
-                var response = await _http.PostAsync(LICENSE_API,
-                    new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json"));
+                var jsonBody = JsonSerializer.Serialize(request);
+                var response = await _http.SendAsync(BuildHttpRequest(jsonBody));
 
                 var json = await response.Content.ReadAsStringAsync();
                 Logger.Debug($"[LicenseService] Activate response: HTTP {(int)response.StatusCode} – {json}");
@@ -259,6 +309,9 @@ namespace PatsKillerPro.Services
                     "machine_limit" => $"Machine limit reached ({api.MachinesUsed}/{api.MaxMachines}). Deactivate another machine first.",
                     "expired" => $"License expired on {api.ExpiresAt:d}",
                     "disabled" => api.Message ?? "License has been disabled",
+                    "auth_required" => "Google sign-in required",
+                    "email_mismatch" => api.Message ?? "License is bound to a different email",
+                    "invalid_email" => api.Message ?? "Email invalid",
                     _ => api.Message ?? "Activation failed"
                 };
 
@@ -295,17 +348,24 @@ namespace PatsKillerPro.Services
 
             LogUI("info", "[License] Deactivating...");
 
+            if (!EnsureSsoIdentity(out var ssoFail))
+            {
+                LogUI("error", "[License] ✗ Sign-in required");
+                return false;
+            }
+
             try
             {
                 var request = new
                 {
                     action = "deactivate",
                     license_key = _cache.LicenseKey,
-                    machine_id = MachineIdentity.CombinedId
+                    machine_id = MachineIdentity.CombinedId,
+                    user_email = _userEmail
                 };
 
-                var response = await _http.PostAsync(LICENSE_API,
-                    new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json"));
+                var jsonBody = JsonSerializer.Serialize(request);
+                var response = await _http.SendAsync(BuildHttpRequest(jsonBody));
 
                 var json = await response.Content.ReadAsStringAsync();
                 Logger.Debug($"[LicenseService] Deactivate response: HTTP {(int)response.StatusCode} – {json}");
@@ -334,6 +394,9 @@ namespace PatsKillerPro.Services
             if (_cache == null || string.IsNullOrEmpty(_cache.LicenseKey))
                 return false;
 
+            if (!EnsureSsoIdentity(out var ssoFail))
+                return false;
+
             try
             {
                 var request = new
@@ -341,11 +404,12 @@ namespace PatsKillerPro.Services
                     action = "heartbeat",
                     license_key = _cache.LicenseKey,
                     machine_id = MachineIdentity.CombinedId,
-                    version = GetAppVersion()
+                    version = GetAppVersion(),
+                    user_email = _userEmail
                 };
 
-                var response = await _http.PostAsync(LICENSE_API,
-                    new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json"));
+                var jsonBody = JsonSerializer.Serialize(request);
+                var response = await _http.SendAsync(BuildHttpRequest(jsonBody));
 
                 var json = await response.Content.ReadAsStringAsync();
                 var api = JsonSerializer.Deserialize<LicenseApiResponse>(json, _jsonOpts);
@@ -383,6 +447,9 @@ namespace PatsKillerPro.Services
         {
             if (_cache == null) return LicenseValidationResult.NoLicense();
 
+            if (!EnsureSsoIdentity(out var ssoFail))
+                return Emit(LicenseValidationResult.Fail(ssoFail.Message));
+
             try
             {
                 var request = new
@@ -392,11 +459,12 @@ namespace PatsKillerPro.Services
                     machine_id = MachineIdentity.CombinedId,
                     siid = MachineIdentity.SIID,
                     machine_name = Environment.MachineName,
-                    version = GetAppVersion()
+                    version = GetAppVersion(),
+                    user_email = _userEmail
                 };
 
-                var response = await _http.PostAsync(LICENSE_API,
-                    new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json"));
+                var jsonBody = JsonSerializer.Serialize(request);
+                var response = await _http.SendAsync(BuildHttpRequest(jsonBody));
 
                 var json = await response.Content.ReadAsStringAsync();
                 var api = JsonSerializer.Deserialize<LicenseApiResponse>(json, _jsonOpts);
@@ -418,14 +486,25 @@ namespace PatsKillerPro.Services
                     return Emit(LicenseValidationResult.Valid(_cache));
                 }
 
-                // Server rejected – license revoked/expired
-                if (api != null)
-                {
-                    LogUI("error", $"[License] Server rejected: {api.Message ?? api.Error}");
-                    return Emit(LicenseValidationResult.Fail(api.Message ?? "License no longer valid"));
-                }
+                
+// Server rejected – map error to user-friendly message
+if (api != null)
+{
+    var msg = api.Error switch
+    {
+        "invalid_key" => "License key not found",
+        "machine_limit" => $"Machine limit reached ({api.MachinesUsed}/{api.MaxMachines}). Deactivate another machine first.",
+        "expired" => $"License expired on {api.ExpiresAt:d}",
+        "disabled" => api.Message ?? "License has been disabled",
+        "auth_required" => "Google sign-in required",
+        "email_mismatch" => api.Message ?? "License is bound to a different email",
+        "invalid_email" => api.Message ?? "Email invalid",
+        _ => api.Message ?? "License no longer valid"
+    };
 
-                // Could not parse response – treat as offline
+    LogUI("error", $"[License] Server rejected: {msg}");
+    return Emit(LicenseValidationResult.Fail(msg));
+}// Could not parse response – treat as offline
                 return LicenseValidationResult.Fail("Invalid server response");
             }
             catch (Exception ex)
@@ -456,7 +535,7 @@ namespace PatsKillerPro.Services
         // ═══════════════════════════════════════════════════════════════
         //  CACHE (encrypted local storage)
         // ═══════════════════════════════════════════════════════════════
-        private static string CacheFolder
+        private static string CachePath
         {
             get
             {
@@ -464,22 +543,38 @@ namespace PatsKillerPro.Services
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     APP_FOLDER);
                 Directory.CreateDirectory(folder);
-                return folder;
+                return Path.Combine(folder, LICENSE_FILE);
             }
         }
 
-        private static string CachePath => Path.Combine(CacheFolder, LICENSE_FILE);
-        private static string LegacyCachePath => Path.Combine(CacheFolder, LEGACY_LICENSE_FILE);
+
+private static string LegacyCachePath
+{
+    get
+    {
+        var folder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            APP_FOLDER);
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, LICENSE_FILE_LEGACY);
+    }
+}
 
         private LicenseCacheData? LoadCache()
         {
             try
             {
-                // Prefer spec file name (license.key), but fall back to older builds (license.dat)
-                var path = File.Exists(CachePath) ? CachePath : (File.Exists(LegacyCachePath) ? LegacyCachePath : null);
-                if (path == null) return null;
+                if (!File.Exists(CachePath))
+                {
+                    // backward compat: migrate legacy license.dat to license.key
+                    if (File.Exists(LegacyCachePath))
+                    {
+                        try { File.Copy(LegacyCachePath, CachePath, true); } catch { }
+                    }
+                    if (!File.Exists(CachePath)) return null;
+                }
 
-                var encrypted = File.ReadAllBytes(path);
+                var encrypted = File.ReadAllBytes(CachePath);
                 var json = DecryptData(encrypted);
                 if (string.IsNullOrEmpty(json)) return null;
 
@@ -510,8 +605,12 @@ namespace PatsKillerPro.Services
         private void ClearCache()
         {
             _cache = null;
-            try { if (File.Exists(CachePath)) File.Delete(CachePath); } catch { /* best effort */ }
-            try { if (File.Exists(LegacyCachePath)) File.Delete(LegacyCachePath); } catch { /* best effort */ }
+            try
+            {
+                if (File.Exists(CachePath))
+                    File.Delete(CachePath);
+            }
+            catch { /* best effort */ }
         }
 
         // ───────────── Encryption (DPAPI + AES, machine-bound) ──────
@@ -549,7 +648,22 @@ namespace PatsKillerPro.Services
             return data.ValidationHash == ComputeHash(data);
         }
 
-        // ───────────────────────── Helpers ───────────────────────────
+        
+private HttpRequestMessage BuildHttpRequest(string jsonBody)
+{
+    var req = new HttpRequestMessage(HttpMethod.Post, LICENSE_API)
+    {
+        Content = new StringContent(jsonBody, Encoding.UTF8, "application/json")
+    };
+
+    // Supabase functions accept apikey + Authorization (Bearer user token).
+    if (!string.IsNullOrWhiteSpace(_authToken))
+        req.Headers.Add("Authorization", $"Bearer {_authToken}");
+
+    return req;
+}
+
+// ───────────────────────── Helpers ───────────────────────────
         private void LogUI(string type, string message)
         {
             Logger.Log(type == "error" ? Logger.LogLevel.Error :
@@ -589,7 +703,7 @@ namespace PatsKillerPro.Services
     //  MODELS
     // ═══════════════════════════════════════════════════════════════════
 
-    /// <summary>Encrypted cache stored in %LocalAppData%\PatsKillerPro\license.dat</summary>
+    /// <summary>Encrypted cache stored in %LocalAppData%\PatsKillerPro\license.key</summary>
     public class LicenseCacheData
     {
         public string LicenseKey { get; set; } = "";
@@ -698,6 +812,7 @@ namespace PatsKillerPro.Services
         public int? MaxMachines { get; set; }
         public int? MachinesUsed { get; set; }
         public string? Error { get; set; }
+        public string? Code { get; set; }
         public string? Message { get; set; }
         public string? ServerTime { get; set; }
         public string? NextCheckBy { get; set; }
