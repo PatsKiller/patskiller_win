@@ -54,10 +54,14 @@
     <EmbeddedResource Include="Resources\logo.png" />
   </ItemGroup>
 
-
-
-  <!-- Prevent duplicate GoogleLoginForm compilation if an older root-level file still exists -->
+  <!--
+    Guardrail: make sure only one GoogleLoginForm is compiled.
+    The canonical implementation lives in PatsKillerPro/Forms/GoogleLoginForm.cs.
+    If an older file exists at PatsKillerPro/GoogleLoginForm.cs, exclude it to avoid
+    duplicate type definition build failures.
+  -->
   <ItemGroup>
     <Compile Remove="GoogleLoginForm.cs" />
   </ItemGroup>
+
 </Project>

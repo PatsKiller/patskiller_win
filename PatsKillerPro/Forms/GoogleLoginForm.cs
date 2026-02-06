@@ -428,12 +428,13 @@ namespace PatsKillerPro
 
                 if (!res.IsSuccessStatusCode)
                 {
+                    // IMPORTANT: Do not embed literal newlines in a normal C# string.
+                    // Use Environment.NewLine so this compiles reliably.
+                    var nl = Environment.NewLine;
                     MessageBox.Show(
-                        $"Failed to start Google sign-in.
-
-HTTP {(int)res.StatusCode} ({res.ReasonPhrase})
-
-{raw}",
+                        $"Failed to start Google sign-in.{nl}{nl}" +
+                        $"HTTP {(int)res.StatusCode} ({res.ReasonPhrase}){nl}{nl}" +
+                        raw,
                         "Authentication Error",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error
