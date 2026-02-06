@@ -55,9 +55,9 @@
   </ItemGroup>
 
 
-  <!-- Build fix: avoid duplicate GoogleLoginForm definitions when both files exist -->
+
+  <!-- Prevent duplicate GoogleLoginForm compilation if an older root-level file still exists -->
   <ItemGroup>
     <Compile Remove="GoogleLoginForm.cs" />
   </ItemGroup>
-
 </Project>
