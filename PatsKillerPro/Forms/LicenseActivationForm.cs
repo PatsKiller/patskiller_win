@@ -30,6 +30,8 @@ namespace PatsKillerPro.Forms
         private Label _lblSignedIn = null!;
         private Label _lblLicenseLine = null!;
         private Label _lblLicenseDetail = null!;
+        private ListView _lstAccountLicenses = null!;
+        private Label _lblAccountLicensesNote = null!;
         private Button _btnActivate = null!;
         private Button _btnRevalidate = null!;
         private Button _btnDeactivate = null!;
@@ -99,7 +101,7 @@ namespace PatsKillerPro.Forms
                 Dock = DockStyle.Fill,
                 BackColor = Surface,
                 ColumnCount = 2,
-                RowCount = 3,
+                RowCount = 6,
                 Padding = new Padding(14)
             };
             identityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -139,6 +141,49 @@ namespace PatsKillerPro.Forms
                 Close();
             };
             identityLayout.Controls.Add(_lnkSignIn, 0, 2);
+
+            // Account licenses (masked keys only)
+            var acctHdr = new Label
+            {
+                Text = "Account Licenses (masked)",
+                ForeColor = TextMain,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                AutoSize = true,
+                Margin = new Padding(0, 12, 0, 6)
+            };
+            identityLayout.Controls.Add(acctHdr, 0, 3);
+            identityLayout.SetColumnSpan(acctHdr, 2);
+
+            _lblAccountLicensesNote = new Label
+            {
+                Text = "Keys are masked for security. Use the full key from your purchase email to activate.",
+                ForeColor = TextDim,
+                Font = new Font("Segoe UI", 8.5F),
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            identityLayout.Controls.Add(_lblAccountLicensesNote, 0, 4);
+            identityLayout.SetColumnSpan(_lblAccountLicensesNote, 2);
+
+            _lstAccountLicenses = new ListView
+            {
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                BackColor = BgColor,
+                ForeColor = TextMain,
+                BorderStyle = BorderStyle.FixedSingle,
+                Height = 120,
+                Dock = DockStyle.Fill
+            };
+            _lstAccountLicenses.Columns.Add("Masked Key", 170);
+            _lstAccountLicenses.Columns.Add("Type", 130);
+            _lstAccountLicenses.Columns.Add("Expires", 110);
+            _lstAccountLicenses.Columns.Add("Seats", 70);
+            _lstAccountLicenses.Columns.Add("Used", 70);
+
+            identityLayout.Controls.Add(_lstAccountLicenses, 0, 5);
+            identityLayout.SetColumnSpan(_lstAccountLicenses, 2);
 
             identityCard.Controls.Add(identityLayout);
             root.Controls.Add(identityCard, 0, 1);
@@ -445,8 +490,60 @@ namespace PatsKillerPro.Forms
             // Strict mode: show sign-in link if missing identity
             _lnkSignIn.Visible = !LicenseService.Instance.HasSsoIdentity;
 
+            // Best-effort pull of account licenses (masked) for UI selection.
+            try { await LicenseService.Instance.RefreshAccountLicensesAsync(); } catch { }
+            RenderAccountLicenses();
+
             var res = await LicenseService.Instance.ValidateAsync();
             RenderStatus(res);
+        }
+
+        private void RenderAccountLicenses()
+        {
+            try
+            {
+                _lstAccountLicenses.BeginUpdate();
+                _lstAccountLicenses.Items.Clear();
+
+                var list = LicenseService.Instance.AccountLicenses;
+                if (list == null || list.Count == 0)
+                {
+                    var it = new ListViewItem("No account licenses found");
+                    it.SubItems.Add("—");
+                    it.SubItems.Add("—");
+                    it.SubItems.Add("—");
+                    it.SubItems.Add("—");
+                    _lstAccountLicenses.Items.Add(it);
+                }
+                else
+                {
+                    foreach (var l in list.OrderByDescending(x => x.CreatedAt))
+                    {
+                        var exp = l.ExpiresAt?.ToString("yyyy-MM-dd") ?? "Never";
+                        var seats = l.MaxMachines > 0 ? l.MaxMachines.ToString() : "—";
+                        var used = l.MachinesUsed >= 0 ? l.MachinesUsed.ToString() : "—";
+
+                        var it = new ListViewItem(l.LicenseKeyMasked);
+                        it.SubItems.Add(l.LicenseType ?? "—");
+                        it.SubItems.Add(exp);
+                        it.SubItems.Add(seats);
+                        it.SubItems.Add(used);
+
+                        if (!l.IsActive)
+                            it.ForeColor = TextDim;
+
+                        _lstAccountLicenses.Items.Add(it);
+                    }
+                }
+            }
+            catch
+            {
+                // ignore UI rendering errors
+            }
+            finally
+            {
+                try { _lstAccountLicenses.EndUpdate(); } catch { }
+            }
         }
 
         private void RenderStatus(LicenseValidationResult res)
