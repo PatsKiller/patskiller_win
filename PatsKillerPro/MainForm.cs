@@ -87,7 +87,7 @@ namespace PatsKillerPro
                 try { BeginInvoke(new Action(() => SetUiBusy(busy))); } catch { /* ignore */ }
             };
 
-            LoadSession();
+            // Session restore handled in MainForm_Shown.
             
             // Wire up ProActivityLogger to show messages in UI log panel
             ProActivityLogger.Instance.OnLogMessage += (type, msg) =>
@@ -1322,6 +1322,9 @@ private async void MainForm_Shown(object? sender, EventArgs e)
         // Validate license (strict: requires SSO identity), but do not block app startup if missing.
         try { await LicenseService.Instance.ValidateAsync(); } catch { /* best effort */ }
 
+        // Fetch account licenses (masked) so the header can show availability.
+        try { await LicenseService.Instance.RefreshAccountLicensesAsync(); } catch { /* best effort */ }
+
         await RefreshTokenBalanceAsync();
         ShowMain();
         ApplyAuthHeader();
@@ -1405,7 +1408,10 @@ private void ApplyAuthHeader()
         }
         else
         {
-            _lblLicense.Text = "License: Not activated";
+            var available = LicenseService.Instance.AccountLicenseCount;
+            _lblLicense.Text = available > 0
+                ? $"License: Not activated ({available} available)"
+                : "License: Not activated";
             _lblLicense.ForeColor = TEXT_MUTED;
         }
         _lblLicense.Visible = true;
@@ -1498,6 +1504,18 @@ private void ApplyAuthHeader()
             // Strict license validation now has the Bearer token
             try { await LicenseService.Instance.ValidateAsync(); } catch { /* best effort */ }
 
+            // Fetch account licenses (masked keys only) to drive UI selection without leaking full keys.
+            try
+            {
+                var lr = await LicenseService.Instance.RefreshAccountLicensesAsync();
+                if (lr.Success)
+                {
+                    if (!LicenseService.Instance.IsLicensed && string.IsNullOrWhiteSpace(LicenseService.Instance.LicenseKey) && lr.Count > 0)
+                        Log("info", $"{lr.Count} license(s) found in your account. Click 'License' to activate on this machine.");
+                }
+            }
+            catch { /* best effort */ }
+
             await RefreshTokenBalanceAsync();
             
             // Log successful login
@@ -1512,7 +1530,6 @@ private void ApplyAuthHeader()
             try
             {
                 TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
-                ProActivityLogger.Instance.SetAuthContext(_authToken, _userEmail);
                 await TokenBalanceService.Instance.RefreshBalanceAsync();
                 _tokenBalance = TokenBalanceService.Instance.TotalTokens;
             }
@@ -1544,11 +1561,8 @@ private void ApplyAuthHeader()
                 ProActivityLogger.Instance.LogLogout(_userEmail);
             }
             
+            // ClearSession already clears auth context across services.
             ClearSession();
-            ProActivityLogger.Instance.ClearAuthContext();
-            TokenBalanceService.Instance.ClearAuthContext();
-            IncodeService.Instance.ClearAuthContext();
-            LicenseService.Instance.ClearAuthContext();
             ApplyAuthHeader();
 
             // Optional: immediately present the modal login again (switch user).
