@@ -167,13 +167,91 @@ namespace PatsKillerPro.Services
             }
         }
 
+        /// <summary>
+        /// Snapshot-safe logger used for background fire-and-forget logging.
+        /// This prevents "logout → clear auth → background log uses null token" (HTTP 401 noise).
+        /// </summary>
+        private async Task LogActivityWithSnapshotAsync(ActivityLogEntry entry, string? authTokenSnapshot, string? userEmailSnapshot, string? userIdSnapshot)
+        {
+            if (string.IsNullOrEmpty(authTokenSnapshot))
+            {
+                LogToUI("warning", $"[Activity] Skipped '{entry.Action}' - not logged in");
+                return;
+            }
+
+            try
+            {
+                var logData = new
+                {
+                    user_email = userEmailSnapshot ?? entry.UserEmail,
+                    user_id = userIdSnapshot,
+                    action = entry.Action,
+                    action_category = entry.ActionCategory,
+                    details = entry.Details,
+                    token_change = entry.TokenChange,
+                    machine_id = MachineId,
+                    vin = entry.Vin,
+                    vehicle_year = entry.VehicleYear,
+                    vehicle_model = entry.VehicleModel,
+                    success = entry.Success,
+                    error_message = entry.ErrorMessage,
+                    response_time_ms = entry.ResponseTimeMs,
+                    app_version = AppVersion,
+                    metadata = entry.Metadata
+                };
+
+                var url = $"{SUPABASE_URL}/functions/v1/log-pro-activity";
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                request.Headers.Add("apikey", SUPABASE_ANON_KEY);
+                request.Headers.Add("Authorization", $"Bearer {authTokenSnapshot}");
+                request.Content = new StringContent(JsonSerializer.Serialize(logData), Encoding.UTF8, "application/json");
+
+                var response = await _httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    LogToUI("success", $"[Activity] ✓ {entry.Action}");
+                }
+                else
+                {
+                    // Treat 401 during logout as non-fatal noise.
+                    if (entry.Action == "logout" && (int)response.StatusCode == 401)
+                    {
+                        LogToUI("info", "[Activity] Logout already expired (401) – ignoring");
+                        return;
+                    }
+
+                    LogToUI("error", $"[Activity] ✗ {entry.Action} failed: HTTP {(int)response.StatusCode}");
+                    Logger.Error($"[ProActivityLogger] Response: {responseBody}");
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                LogToUI("error", $"[Activity] Network error: {ex.Message}");
+            }
+            catch (TaskCanceledException)
+            {
+                LogToUI("warning", $"[Activity] Timeout on '{entry.Action}'");
+            }
+            catch (Exception ex)
+            {
+                LogToUI("error", $"[Activity] Error: {ex.Message}");
+            }
+        }
+
         public void LogActivity(ActivityLogEntry entry)
         {
-            _ = Task.Run(async () => 
+            // Snapshot critical auth context BEFORE the background task runs.
+            var tokenSnapshot = AuthToken;
+            var emailSnapshot = UserEmail;
+            var userIdSnapshot = UserId;
+
+            _ = Task.Run(async () =>
             {
                 try
                 {
-                    await LogActivityAsync(entry);
+                    await LogActivityWithSnapshotAsync(entry, tokenSnapshot, emailSnapshot, userIdSnapshot);
                 }
                 catch (Exception ex)
                 {
