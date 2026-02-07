@@ -1,59 +1,60 @@
 using System;
 using System.Diagnostics;
-using System.Drawing;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace PatsKillerPro.Forms
+namespace PatsKillerPro
 {
     /// <summary>
-    /// Desktop Google sign-in bootstrap.
+    /// Desktop sign-in dialog (Google OAuth).
     ///
-    /// Expected behavior (used by MainForm):
-    /// - DialogResult.OK    => AuthToken/RefreshToken/UserEmail are populated
-    /// - DialogResult.Retry => user wants license key activation instead
-    /// - DialogResult.Cancel=> user cancelled
+    /// This dialog uses a session-code polling flow:
+    /// 1) Desktop calls Supabase Edge Function `create-desktop-auth-session` -> gets a one-time session code.
+    /// 2) Desktop opens the browser to PUBLIC_SITE_URL + `/api/desktop-auth?session=<code>`.
+    /// 3) The web page completes OAuth and calls `complete-desktop-auth-session`.
+    /// 4) Desktop polls `check-desktop-auth-session` until status=complete, then receives tokens.
     /// </summary>
-    public partial class GoogleLoginForm : Form
+    public sealed class GoogleLoginForm : Form
     {
-        // --- Results consumed by MainForm ---
-        public string AuthToken { get; private set; } = string.Empty;
-        public string RefreshToken { get; private set; } = string.Empty;
-        public string UserEmail { get; private set; } = string.Empty;
+        // ---- Public results (MainForm expects these) ----
+        public string? AuthToken { get; private set; }
+        public string? RefreshToken { get; private set; }
+        public string? UserEmail { get; private set; }
 
-        // --- Backend config (matches your current project values) ---
-        private const string SUPABASE_URL = "https://kmpnplpijuzzgtforyls.supabase.co";
-        private const string API_KEY_PART1 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
-        private const string API_KEY_PART2 = ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpand1enpndGZvcnlscyIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzU4NjM0NDQyLCJleHAiOjIwNzQyMTA0NDJ9.oqldgEpQ70a1Dd8EdPQOpQnOjvYzVvZt1xJWW5dT9pw";
+        // ---- Config (override via env vars for production) ----
+        private static string SupabaseUrl =>
+            Environment.GetEnvironmentVariable("PATSKILLER_SUPABASE_URL")
+            ?? "https://kmpnplpijuzzbftsjacx.supabase.co";
 
-        // Your production web route (v2.12) for desktop auth
-        private const string AUTH_URL_BASE = "https://patskiller.com/api/desktop-auth?code=";
+        // Supabase anon key (public). Override via PATSKILLER_SUPABASE_ANON_KEY if you rotated keys.
+        private static string SupabaseAnonKey =>
+            Environment.GetEnvironmentVariable("PATSKILLER_SUPABASE_ANON_KEY")
+            ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA5ODgwMTgsImV4cCI6MjA0NjU2NDAxOH0.iqKMFa_Ye7LCG-n7F1a1rgdsVBPkz3TmT_x0lMm8TT8";
 
-        // Edge functions
-        private const string CREATE_SESSION_FN = "/functions/v1/create-desktop-auth-session";
-        private const string CHECK_SESSION_FN = "/functions/v1/check-desktop-auth-session";
+        // Website base URL (Lovable custom domain). Override via PATSKILLER_PUBLIC_SITE_URL.
+        private static string PublicSiteUrl =>
+            (Environment.GetEnvironmentVariable("PATSKILLER_PUBLIC_SITE_URL") ?? "https://patskiller.com").TrimEnd('/');
 
-        // Polling
-        private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1.5);
-        private static readonly TimeSpan PollTimeout = TimeSpan.FromMinutes(3);
+        // v2.12 style route (must support ?session=...)
+        private static string AuthUrlBase => $"{PublicSiteUrl}/api/desktop-auth?session=";
 
-        private readonly HttpClient _http = new HttpClient();
-        private CancellationTokenSource? _cts;
+        // ---- Internal ----
+        private readonly HttpClient _http = new();
+        private readonly Timer _pollTimer = new();
+        private string? _sessionCode;
+        private bool _pollInProgress;
 
-        // UI
-        private readonly Button _btnGoogle;
-        private readonly Button _btnLicense;
-        private readonly Button _btnCancel;
-        private readonly Label _lblStatus;
-        private readonly ProgressBar _progress;
-        private readonly LinkLabel _lnkOpenAgain;
-
-        private string _lastAuthUrl = string.Empty;
-        private string _sessionCode = string.Empty;
+        // ---- UI ----
+        private readonly Button _btnGoogle = new();
+        private readonly Button _btnLicenseKey = new();
+        private readonly Button _btnCancel = new();
+        private readonly Label _lblTitle = new();
+        private readonly Label _lblBody = new();
+        private readonly Label _lblStatus = new();
 
         public GoogleLoginForm()
         {
@@ -63,213 +64,112 @@ namespace PatsKillerPro.Forms
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(520, 320);
-            Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            ClientSize = new System.Drawing.Size(460, 210);
 
-            var title = new Label
-            {
-                Text = "Sign in to PatsKiller Pro",
-                AutoSize = true,
-                Font = new Font(Font, FontStyle.Bold),
-                Dock = DockStyle.Top,
-                Padding = new Padding(0, 0, 0, 8)
-            };
+            _lblTitle.Text = "Sign in to PatsKiller Pro";
+            _lblTitle.AutoSize = true;
+            _lblTitle.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold);
+            _lblTitle.Location = new System.Drawing.Point(18, 16);
 
-            var subtitle = new Label
-            {
-                Text = "Use Google to unlock Pro features. If you purchased a license key, you can activate it instead.",
-                AutoSize = false,
-                Dock = DockStyle.Top,
-                Height = 46
-            };
+            _lblBody.Text = "Use Google to unlock Pro features. If you already have a license key, you can activate it instead.";
+            _lblBody.AutoSize = false;
+            _lblBody.Width = ClientSize.Width - 36;
+            _lblBody.Height = 40;
+            _lblBody.Location = new System.Drawing.Point(18, 44);
 
-            _btnGoogle = new Button
-            {
-                Text = "Continue with Google",
-                Height = 44,
-                Dock = DockStyle.Top
-            };
+            _btnGoogle.Text = "Continue with Google";
+            _btnGoogle.Width = ClientSize.Width - 36;
+            _btnGoogle.Height = 30;
+            _btnGoogle.Location = new System.Drawing.Point(18, 90);
             _btnGoogle.Click += async (_, __) => await StartGoogleAuthAsync();
 
-            _btnLicense = new Button
-            {
-                Text = "I have a license key",
-                Height = 40,
-                Dock = DockStyle.Top
-            };
-            _btnLicense.Click += (_, __) =>
+            _btnLicenseKey.Text = "I have a license key";
+            _btnLicenseKey.Width = ClientSize.Width - 36;
+            _btnLicenseKey.Height = 30;
+            _btnLicenseKey.Location = new System.Drawing.Point(18, 126);
+            _btnLicenseKey.Click += (_, __) =>
             {
                 DialogResult = DialogResult.Retry;
                 Close();
             };
 
-            _lblStatus = new Label
-            {
-                Text = "",
-                AutoSize = false,
-                Dock = DockStyle.Top,
-                Height = 44
-            };
-
-            _progress = new ProgressBar
-            {
-                Style = ProgressBarStyle.Marquee,
-                MarqueeAnimationSpeed = 30,
-                Visible = false,
-                Dock = DockStyle.Top,
-                Height = 12
-            };
-
-            _lnkOpenAgain = new LinkLabel
-            {
-                Text = "Browser didn't open? Click here to open it again.",
-                AutoSize = true,
-                Dock = DockStyle.Top,
-                Visible = false
-            };
-            _lnkOpenAgain.LinkClicked += (_, __) =>
-            {
-                if (!string.IsNullOrWhiteSpace(_lastAuthUrl))
-                {
-                    TryOpenBrowser(_lastAuthUrl);
-                }
-            };
-
-            _btnCancel = new Button
-            {
-                Text = "Cancel",
-                Height = 36,
-                Dock = DockStyle.Right,
-                Width = 110
-            };
+            _btnCancel.Text = "Cancel";
+            _btnCancel.Width = 90;
+            _btnCancel.Height = 28;
+            _btnCancel.Location = new System.Drawing.Point(ClientSize.Width - 18 - 90, 166);
             _btnCancel.Click += (_, __) =>
             {
                 DialogResult = DialogResult.Cancel;
                 Close();
             };
 
-            var buttonsRow = new Panel { Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(0, 8, 0, 0) };
-            buttonsRow.Controls.Add(_btnCancel);
+            _lblStatus.Text = "";
+            _lblStatus.AutoSize = false;
+            _lblStatus.Width = ClientSize.Width - 18 - 18 - _btnCancel.Width - 8;
+            _lblStatus.Height = 40;
+            _lblStatus.Location = new System.Drawing.Point(18, 162);
 
-            var content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(18) };
-            content.Controls.Add(buttonsRow);
+            Controls.AddRange(new Control[] { _lblTitle, _lblBody, _btnGoogle, _btnLicenseKey, _btnCancel, _lblStatus });
 
-            // Stack in reverse order because DockStyle.Top
-            content.Controls.Add(_lnkOpenAgain);
-            content.Controls.Add(_progress);
-            content.Controls.Add(_lblStatus);
-            content.Controls.Add(Spacer(12));
-            content.Controls.Add(_btnLicense);
-            content.Controls.Add(Spacer(10));
-            content.Controls.Add(_btnGoogle);
-            content.Controls.Add(Spacer(10));
-            content.Controls.Add(subtitle);
-            content.Controls.Add(title);
+            // Http defaults
+            _http.Timeout = TimeSpan.FromSeconds(15);
+            _http.DefaultRequestHeaders.Add("apikey", SupabaseAnonKey);
+            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", SupabaseAnonKey);
 
-            Controls.Add(content);
-
-            // Ensure the button is truly clickable (WinForms edge cases with disabled parents, etc.)
-            _btnGoogle.TabStop = true;
-            _btnGoogle.Enabled = true;
-            ActiveControl = _btnGoogle;
+            // Poll timer
+            _pollTimer.Interval = 2000;
+            _pollTimer.Tick += async (_, __) => await PollOnceAsync();
         }
 
-        protected override void OnFormClosed(FormClosedEventArgs e)
+        private void SetBusy(bool busy)
         {
-            try
-            {
-                _cts?.Cancel();
-                _cts?.Dispose();
-            }
-            catch { /* ignore */ }
-
-            _http.Dispose();
-            base.OnFormClosed(e);
+            _btnGoogle.Enabled = !busy;
+            _btnLicenseKey.Enabled = !busy;
+            _btnCancel.Enabled = true;
+            UseWaitCursor = busy;
         }
-
-        private static Control Spacer(int height) => new Panel { Dock = DockStyle.Top, Height = height };
-
-        private static string GetAnonKey() => API_KEY_PART1 + API_KEY_PART2;
 
         private async Task StartGoogleAuthAsync()
         {
-            if (_progress.Visible)
-                return; // already running
-
-            SetBusy(true, "Starting Google sign-in...");
-
             try
             {
-                _cts?.Cancel();
-                _cts?.Dispose();
-                _cts = new CancellationTokenSource();
+                SetBusy(true);
+                _lblStatus.Text = "Creating sign-in session…";
 
-                // 1) Create session
-                var machineId = Environment.MachineName;
-                var sessionCode = await CreateDesktopAuthSessionAsync(machineId, _cts.Token);
-                _sessionCode = sessionCode;
+                _sessionCode = await CreateDesktopAuthSessionAsync();
+                if (string.IsNullOrWhiteSpace(_sessionCode))
+                    throw new Exception("create-desktop-auth-session returned an empty session code.");
 
-                // 2) Open browser
-                _lastAuthUrl = AUTH_URL_BASE + Uri.EscapeDataString(sessionCode);
-                if (!TryOpenBrowser(_lastAuthUrl))
-                {
-                    // Show link as fallback
-                    _lnkOpenAgain.Visible = true;
-                }
+                var authUrl = AuthUrlBase + Uri.EscapeDataString(_sessionCode);
 
-                // 3) Poll until complete
-                SetBusy(true, "Browser opened. Complete Google sign-in, then return here...");
-                var result = await PollForCompletionAsync(sessionCode, machineId, _cts.Token);
+                _lblStatus.Text = "Opening browser…";
+                TryOpenBrowser(authUrl);
 
-                if (!result.IsComplete)
-                {
-                    SetBusy(false, "");
-                    MessageBox.Show(this,
-                        result.Message,
-                        "Sign-in not complete",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                    return;
-                }
-
-                // Success
-                AuthToken = result.AccessToken;
-                RefreshToken = result.RefreshToken;
-                UserEmail = result.Email;
-
-                DialogResult = DialogResult.OK;
-                Close();
-            }
-            catch (OperationCanceledException)
-            {
-                SetBusy(false, "");
+                _lblStatus.Text = "Waiting for sign-in in your browser…";
+                _pollTimer.Start();
             }
             catch (Exception ex)
             {
-                SetBusy(false, "");
-                MessageBox.Show(this,
-                    "Could not start Google sign-in.\n\n" + ex.Message,
+                _pollTimer.Stop();
+                _sessionCode = null;
+                SetBusy(false);
+
+                MessageBox.Show(
+                    this,
+                    "Could not start Google sign-in.\n\n" +
+                    ex.Message +
+                    "\n\n" +
+                    "Check your Supabase settings:\n" +
+                    $"SUPABASE_URL: {SupabaseUrl}\n" +
+                    "(You can override via PATSKILLER_SUPABASE_URL / PATSKILLER_SUPABASE_ANON_KEY.)",
                     "Sign-in error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
         }
 
-        private void SetBusy(bool busy, string status)
-        {
-            _btnGoogle.Enabled = !busy;
-            _btnLicense.Enabled = !busy;
-            _progress.Visible = busy;
-            _lblStatus.Text = status;
-
-            if (!busy)
-            {
-                _lnkOpenAgain.Visible = false;
-                _lastAuthUrl = string.Empty;
-            }
-        }
-
-        private static bool TryOpenBrowser(string url)
+        private static void TryOpenBrowser(string url)
         {
             try
             {
@@ -278,197 +178,115 @@ namespace PatsKillerPro.Forms
                     FileName = url,
                     UseShellExecute = true
                 });
-                return true;
             }
             catch
             {
-                return false;
+                // As a fallback, try cmd /c start
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "cmd",
+                    Arguments = $"/c start \"\" \"{url}\"",
+                    CreateNoWindow = true
+                });
             }
         }
 
-        private async Task<string> CreateDesktopAuthSessionAsync(string machineId, CancellationToken ct)
+        private async Task<string> CreateDesktopAuthSessionAsync()
         {
-            var endpoint = SUPABASE_URL.TrimEnd('/') + CREATE_SESSION_FN;
+            var endpoint = $"{SupabaseUrl.TrimEnd('/')}/functions/v1/create-desktop-auth-session";
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-            request.Headers.Add("apikey", GetAnonKey());
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GetAnonKey());
-
-            var payload = new
+            using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
             {
-                machineId = machineId,
-                app = "PatsKillerPro"
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
             };
 
-            var json = JsonSerializer.Serialize(payload);
-            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var resp = await _http.SendAsync(req);
+            var json = await resp.Content.ReadAsStringAsync();
 
-            using var response = await _http.SendAsync(request, ct);
-            var body = await response.Content.ReadAsStringAsync(ct);
-
-            if (!response.IsSuccessStatusCode)
+            if (!resp.IsSuccessStatusCode)
             {
-                throw new InvalidOperationException($"Create session failed ({(int)response.StatusCode}): {body}");
+                throw new Exception($"create-desktop-auth-session failed ({(int)resp.StatusCode}) {resp.ReasonPhrase}. Body: {json}");
             }
 
-            // Expected: {"sessionCode":"..."} (but tolerate different shapes)
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-
-            if (TryGetString(root, "sessionCode", out var code))
-                return code;
-            if (TryGetString(root, "code", out var code2))
-                return code2;
-            if (TryGetString(root, "session_code", out var code3))
-                return code3;
-
-            throw new InvalidOperationException("Create session succeeded but did not return a session code.");
+            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var data = JsonSerializer.Deserialize<CreateSessionResponse>(json, opts);
+            return data?.SessionCode ?? data?.session_code ?? "";
         }
 
-        private async Task<AuthPollResult> PollForCompletionAsync(string sessionCode, string machineId, CancellationToken ct)
+        private async Task PollOnceAsync()
         {
-            var endpoint = SUPABASE_URL.TrimEnd('/') + CHECK_SESSION_FN;
+            if (_pollInProgress) return;
+            if (string.IsNullOrWhiteSpace(_sessionCode)) return;
 
-            var deadline = DateTime.UtcNow + PollTimeout;
-            while (DateTime.UtcNow < deadline)
+            _pollInProgress = true;
+            try
             {
-                ct.ThrowIfCancellationRequested();
+                var endpoint = $"{SupabaseUrl.TrimEnd('/')}/functions/v1/check-desktop-auth-session";
+                var payload = JsonSerializer.Serialize(new { sessionCode = _sessionCode });
 
-                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-                request.Headers.Add("apikey", GetAnonKey());
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GetAnonKey());
-
-                var payload = new
+                using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
                 {
-                    sessionCode = sessionCode,
-                    machineId = machineId
+                    Content = new StringContent(payload, Encoding.UTF8, "application/json")
                 };
 
-                request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                using var resp = await _http.SendAsync(req);
+                var json = await resp.Content.ReadAsStringAsync();
 
-                using var response = await _http.SendAsync(request, ct);
-                var body = await response.Content.ReadAsStringAsync(ct);
-
-                if (!response.IsSuccessStatusCode)
+                if (!resp.IsSuccessStatusCode)
                 {
-                    // Keep polling on transient failures, but surface last error if we time out.
-                    await Task.Delay(PollInterval, ct);
-                    continue;
+                    // keep polling, but show last error unobtrusively
+                    _lblStatus.Text = $"Waiting for sign-in… (server {(int)resp.StatusCode})";
+                    return;
                 }
 
-                using var doc = JsonDocument.Parse(body);
-                var root = doc.RootElement;
+                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var data = JsonSerializer.Deserialize<CheckSessionResponse>(json, opts);
 
-                var status = "";
-                if (TryGetString(root, "status", out var s)) status = s;
-
-                // Common statuses: pending / complete / expired / error
-                if (string.Equals(status, "complete", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(status, "authenticated", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
+                var status = (data?.status ?? "").Trim().ToLowerInvariant();
+                if (status == "complete")
                 {
-                    // Tokens might be top-level or nested under "data"
-                    if (TryGetTokens(root, out var email, out var at, out var rt))
-                    {
-                        return AuthPollResult.Complete(email, at, rt);
-                    }
+                    AuthToken = data?.accessToken;
+                    RefreshToken = data?.refreshToken;
+                    UserEmail = data?.email;
 
-                    return AuthPollResult.NotComplete("Sign-in completed, but the server did not return tokens.");
+                    _pollTimer.Stop();
+                    DialogResult = DialogResult.OK;
+                    Close();
+                    return;
                 }
 
-                if (string.Equals(status, "expired", StringComparison.OrdinalIgnoreCase))
-                    return AuthPollResult.NotComplete("This sign-in session expired. Please try again.");
-
-                if (string.Equals(status, "error", StringComparison.OrdinalIgnoreCase))
+                if (status == "expired" || status == "failed")
                 {
-                    if (TryGetString(root, "message", out var msg))
-                        return AuthPollResult.NotComplete(msg);
-                    return AuthPollResult.NotComplete("The server reported an error during sign-in.");
+                    _pollTimer.Stop();
+                    SetBusy(false);
+                    _lblStatus.Text = "";
+                    MessageBox.Show(this, data?.message ?? "Sign-in session expired. Please try again.", "Sign-in", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
-
-                // Otherwise pending / unknown
-                await Task.Delay(PollInterval, ct);
             }
-
-            return AuthPollResult.NotComplete("Timed out waiting for sign-in. Please try again.");
+            catch
+            {
+                // transient error: don't crash the UI; keep polling
+                _lblStatus.Text = "Waiting for sign-in… (network hiccup)";
+            }
+            finally
+            {
+                _pollInProgress = false;
+            }
         }
 
-        private static bool TryGetString(JsonElement root, string prop, out string value)
+        private sealed class CreateSessionResponse
         {
-            value = string.Empty;
-            if (root.ValueKind != JsonValueKind.Object)
-                return false;
-
-            if (!root.TryGetProperty(prop, out var el))
-                return false;
-
-            if (el.ValueKind == JsonValueKind.String)
-            {
-                value = el.GetString() ?? string.Empty;
-                return !string.IsNullOrWhiteSpace(value);
-            }
-
-            return false;
+            public string? SessionCode { get; set; }
+            public string? session_code { get; set; }
         }
 
-        private static bool TryGetTokens(JsonElement root, out string email, out string accessToken, out string refreshToken)
+        private sealed class CheckSessionResponse
         {
-            email = string.Empty;
-            accessToken = string.Empty;
-            refreshToken = string.Empty;
-
-            // top-level
-            if (TryGetString(root, "email", out var e)) email = e;
-            if (TryGetString(root, "accessToken", out var at)) accessToken = at;
-            if (TryGetString(root, "refreshToken", out var rt)) refreshToken = rt;
-            if (!string.IsNullOrWhiteSpace(accessToken) && !string.IsNullOrWhiteSpace(refreshToken) && !string.IsNullOrWhiteSpace(email))
-                return true;
-
-            // snake_case
-            if (string.IsNullOrWhiteSpace(email) && TryGetString(root, "user_email", out var e2)) email = e2;
-            if (string.IsNullOrWhiteSpace(accessToken) && TryGetString(root, "access_token", out var at2)) accessToken = at2;
-            if (string.IsNullOrWhiteSpace(refreshToken) && TryGetString(root, "refresh_token", out var rt2)) refreshToken = rt2;
-            if (!string.IsNullOrWhiteSpace(accessToken) && !string.IsNullOrWhiteSpace(refreshToken) && !string.IsNullOrWhiteSpace(email))
-                return true;
-
-            // nested "data"
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
-            {
-                if (TryGetString(data, "email", out var de)) email = de;
-                if (TryGetString(data, "accessToken", out var dat)) accessToken = dat;
-                if (TryGetString(data, "refreshToken", out var drt)) refreshToken = drt;
-
-                if (string.IsNullOrWhiteSpace(accessToken) && TryGetString(data, "access_token", out var dat2)) accessToken = dat2;
-                if (string.IsNullOrWhiteSpace(refreshToken) && TryGetString(data, "refresh_token", out var drt2)) refreshToken = drt2;
-
-                return !string.IsNullOrWhiteSpace(accessToken) && !string.IsNullOrWhiteSpace(refreshToken) && !string.IsNullOrWhiteSpace(email);
-            }
-
-            return false;
-        }
-
-        private readonly struct AuthPollResult
-        {
-            public bool IsComplete { get; }
-            public string Message { get; }
-            public string Email { get; }
-            public string AccessToken { get; }
-            public string RefreshToken { get; }
-
-            private AuthPollResult(bool isComplete, string message, string email, string accessToken, string refreshToken)
-            {
-                IsComplete = isComplete;
-                Message = message;
-                Email = email;
-                AccessToken = accessToken;
-                RefreshToken = refreshToken;
-            }
-
-            public static AuthPollResult Complete(string email, string accessToken, string refreshToken) =>
-                new AuthPollResult(true, string.Empty, email, accessToken, refreshToken);
-
-            public static AuthPollResult NotComplete(string message) =>
-                new AuthPollResult(false, message, string.Empty, string.Empty, string.Empty);
+            public string? status { get; set; }
+            public string? accessToken { get; set; }
+            public string? refreshToken { get; set; }
+            public string? email { get; set; }
+            public string? message { get; set; }
         }
     }
 }

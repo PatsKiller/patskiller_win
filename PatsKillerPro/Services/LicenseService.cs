@@ -40,8 +40,8 @@ namespace PatsKillerPro.Services
         }
 
         // ───────────────────────── Constants ─────────────────────────
-        private const string LICENSE_API = "https://kmpnplpijuzzbftsjacx.supabase.co/functions/v1/bridge-license";
-        private const string SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyNjc0MDUsImV4cCI6MjA3OTg0MzQwNX0.RLX0e1FAq7AlKIpVXhaw7J3ILY_yc0FJDoAzxQDy24E";
+        private static readonly string LICENSE_API = Environment.GetEnvironmentVariable("PATSKILLER_LICENSE_API") ?? "https://kmpnplpijuzzbftsjacx.supabase.co/functions/v1/bridge-license";
+        private static readonly string SUPABASE_ANON_KEY = Environment.GetEnvironmentVariable("PATSKILLER_SUPABASE_ANON_KEY") ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyNjc0MDUsImV4cCI6MjA3OTg0MzQwNX0.RLX0e1FAq7AlKIpVXhaw7J3ILY_yc0FJDoAzxQDy24E";
         private const string APP_FOLDER = "PatsKillerPro";
         private const string LICENSE_FILE = "license.key";  // encrypted cache
         private const string LICENSE_FILE_LEGACY = "license.dat";  // legacy cache file (v15/v21)

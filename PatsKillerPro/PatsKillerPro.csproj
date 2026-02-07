@@ -54,8 +54,9 @@
     <EmbeddedResource Include="Resources\logo.png" />
   </ItemGroup>
 
-  <!-- Build guard: prevent duplicate GoogleLoginForm definitions if an old root file still exists -->
+
   <ItemGroup>
+    <!-- Prevent duplicate GoogleLoginForm class if an old file exists at project root -->
     <Compile Remove="GoogleLoginForm.cs" />
   </ItemGroup>
 
