@@ -44,7 +44,8 @@ namespace PatsKillerPro
 
         // ---- Internal ----
         private readonly HttpClient _http = new();
-        private readonly Timer _pollTimer = new();
+        // Explicit WinForms timer to avoid ambiguity with System.Threading.Timer (implicit global usings)
+        private readonly System.Windows.Forms.Timer _pollTimer = new();
         private string? _sessionCode;
         private bool _pollInProgress;
 
