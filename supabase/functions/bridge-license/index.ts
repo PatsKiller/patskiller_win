@@ -190,10 +190,22 @@ serve(async (req) => {
     );
   }
 
-  const action = payload.action;
-  const licenseKey = payload.license_key ? normalizeKey(payload.license_key) : "";
-  const machineId = payload.machine_id?.trim() ?? "";
-  const userEmail = payload.user_email ? normalizeEmail(payload.user_email) : "";
+  // Accept both snake_case and camelCase fields (desktop clients vary by version).
+  const p: any = payload as any;
+
+  const action: Action | undefined = (p.action ?? p.Action) as Action | undefined;
+
+  const licenseKeyRaw = p.license_key ?? p.licenseKey ?? p.license_key_text ?? p.licenseKeyText;
+  const licenseKey = licenseKeyRaw ? normalizeKey(String(licenseKeyRaw)) : "";
+
+  const machineId = String(
+    p.machine_id ?? p.machineId ?? req.headers.get("x-machine-id") ?? "",
+  ).trim();
+
+  const userEmailRaw = p.user_email ?? p.userEmail ?? p.customerEmail ?? p.customer_email;
+  const userEmail = userEmailRaw ? normalizeEmail(String(userEmailRaw)) : "";
+
+  const siidRaw = p.siid ?? p.SIID ?? p.siId;
 
   if (
     !action || !["validate", "activate", "heartbeat", "deactivate"].includes(action)
@@ -437,9 +449,9 @@ serve(async (req) => {
     }
   }
 
-  const { combinedId, hwId, siid } = splitCombined(machineId, payload.siid);
-  const machineName = payload.machine_name?.trim() ?? null;
-  const version = payload.version?.trim() ?? null;
+  const { combinedId, hwId, siid } = splitCombined(machineId, String(siidRaw ?? ""));
+  const machineName = String(p.machine_name ?? p.machineName ?? "").trim() || null;
+  const version = String(p.version ?? "").trim() || null;
 
   // Helper: count active activations
   const countActive = async () => {
