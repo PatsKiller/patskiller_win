@@ -1,0 +1,10 @@
+### PatsKiller Pro — get-user-licenses (Secure)
+
+# List licenses for the currently signed-in user.
+# NOTE: Full license keys are NEVER returned (masked only).
+
+POST https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/get-user-licenses
+Authorization: Bearer <JWT_FROM_SSO>
+Content-Type: application/json
+
+{}

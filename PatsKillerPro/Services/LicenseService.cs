@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.Versioning;
@@ -40,7 +41,9 @@ namespace PatsKillerPro.Services
         }
 
         // ───────────────────────── Constants ─────────────────────────
-        private static readonly string LICENSE_API = Environment.GetEnvironmentVariable("PATSKILLER_LICENSE_API") ?? "https://kmpnplpijuzzbftsjacx.supabase.co/functions/v1/bridge-license";
+        private static readonly string SUPABASE_URL = Environment.GetEnvironmentVariable("PATSKILLER_SUPABASE_URL") ?? "https://kmpnplpijuzzbftsjacx.supabase.co";
+        private static readonly string LICENSE_API = Environment.GetEnvironmentVariable("PATSKILLER_LICENSE_API") ?? $"{SUPABASE_URL}/functions/v1/bridge-license";
+        private static readonly string USER_LICENSES_API = Environment.GetEnvironmentVariable("PATSKILLER_USER_LICENSES_API") ?? $"{SUPABASE_URL}/functions/v1/get-user-licenses";
         private static readonly string SUPABASE_ANON_KEY = Environment.GetEnvironmentVariable("PATSKILLER_SUPABASE_ANON_KEY") ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcG5wbHBpanV6emJmdHNqYWN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyNjc0MDUsImV4cCI6MjA3OTg0MzQwNX0.RLX0e1FAq7AlKIpVXhaw7J3ILY_yc0FJDoAzxQDy24E";
         private const string APP_FOLDER = "PatsKillerPro";
         private const string LICENSE_FILE = "license.key";  // encrypted cache
@@ -57,6 +60,7 @@ namespace PatsKillerPro.Services
         private readonly HttpClient _http;
         private string? _authToken;
         private string? _userEmail;
+        private string? _userDisplayName;
 
         private System.Threading.Timer? _heartbeatTimer;
         private LicenseCacheData? _cache;
@@ -77,6 +81,7 @@ namespace PatsKillerPro.Services
         public string? LicenseKey => _cache?.LicenseKey;
 
         public string? UserEmail => _userEmail;
+        public string? UserDisplayName => _userDisplayName;
         public bool HasSsoIdentity => !string.IsNullOrWhiteSpace(_authToken) && !string.IsNullOrWhiteSpace(_userEmail);
 
         /// <summary>True if the cached license needs online revalidation (>7 days).</summary>
@@ -106,6 +111,32 @@ namespace PatsKillerPro.Services
             }
         }
 
+        // ───────────────────── Account Licenses (masked) ─────────────────────
+        private readonly object _accountLicensesLock = new();
+        private List<AccountLicenseSummary> _accountLicenses = new();
+
+        /// <summary>Licenses discovered for the signed-in user (masked keys only).</summary>
+        public IReadOnlyList<AccountLicenseSummary> AccountLicenses
+        {
+            get
+            {
+                lock (_accountLicensesLock)
+                    return _accountLicenses.ToArray();
+            }
+        }
+
+        public int AccountLicenseCount
+        {
+            get
+            {
+                lock (_accountLicensesLock)
+                    return _accountLicenses.Count;
+            }
+        }
+
+        /// <summary>Fires when account license discovery completes.</summary>
+        public event Action<AccountLicensesResult>? OnAccountLicensesChanged;
+
         // ───────────────────────── Events ────────────────────────────
         /// <summary>
         /// (type, message) for UI log panel.  type: "info" | "success" | "warning" | "error"
@@ -129,14 +160,26 @@ namespace PatsKillerPro.Services
 /// </summary>
 public void SetAuthContext(string authToken, string userEmail)
 {
+    SetAuthContext(authToken, userEmail, null);
+}
+
+public void SetAuthContext(string authToken, string userEmail, string? displayName)
+{
     _authToken = authToken;
     _userEmail = userEmail;
+    _userDisplayName = displayName;
 }
 
 public void ClearAuthContext()
 {
     _authToken = null;
     _userEmail = null;
+    _userDisplayName = null;
+
+    lock (_accountLicensesLock)
+        _accountLicenses = new List<AccountLicenseSummary>();
+
+    try { OnAccountLicensesChanged?.Invoke(new AccountLicensesResult { Success = true, Licenses = new List<AccountLicenseSummary>(), Count = 0, Email = null }); } catch { }
 }
 
 private bool EnsureSsoIdentity(out LicenseValidationResult failure)
@@ -149,6 +192,86 @@ private bool EnsureSsoIdentity(out LicenseValidationResult failure)
     failure = LicenseValidationResult.Fail("");
     return true;
 }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  ACCOUNT LICENSE DISCOVERY (masked keys only)
+        // ═══════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Fetches licenses available for the signed-in user.
+        /// SECURITY: This endpoint returns *masked* keys only (XXXX-XXXX-XXXX-1234).
+        /// </summary>
+        public async Task<AccountLicensesResult> RefreshAccountLicensesAsync()
+        {
+            if (!HasSsoIdentity)
+            {
+                return new AccountLicensesResult
+                {
+                    Success = false,
+                    Error = "Not authenticated",
+                    Licenses = new System.Collections.Generic.List<AccountLicenseSummary>(),
+                    Count = 0,
+                    Email = _userEmail
+                };
+            }
+
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, USER_LICENSES_API)
+                {
+                    Content = new StringContent("{}", Encoding.UTF8, "application/json")
+                };
+
+                req.Headers.Add("Authorization", $"Bearer {_authToken}");
+
+                var resp = await _http.SendAsync(req);
+                var json = await resp.Content.ReadAsStringAsync();
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var err = TryParseApiError(json) ?? $"HTTP {(int)resp.StatusCode}";
+                    var fail = new AccountLicensesResult
+                    {
+                        Success = false,
+                        Error = err,
+                        Licenses = new System.Collections.Generic.List<AccountLicenseSummary>(),
+                        Count = 0,
+                        Email = _userEmail
+                    };
+                    try { OnAccountLicensesChanged?.Invoke(fail); } catch { }
+                    return fail;
+                }
+
+                var parsed = JsonSerializer.Deserialize<UserLicensesApiResponse>(json, _jsonOpts);
+                var licenses = parsed?.Licenses ?? new System.Collections.Generic.List<AccountLicenseSummary>();
+
+                lock (_accountLicensesLock)
+                    _accountLicenses = new System.Collections.Generic.List<AccountLicenseSummary>(licenses);
+
+                var ok = new AccountLicensesResult
+                {
+                    Success = true,
+                    Licenses = new System.Collections.Generic.List<AccountLicenseSummary>(licenses),
+                    Count = licenses.Count,
+                    Email = parsed?.Email ?? _userEmail
+                };
+
+                try { OnAccountLicensesChanged?.Invoke(ok); } catch { }
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                var fail = new AccountLicensesResult
+                {
+                    Success = false,
+                    Error = ex.Message,
+                    Licenses = new System.Collections.Generic.List<AccountLicenseSummary>(),
+                    Count = 0,
+                    Email = _userEmail
+                };
+                try { OnAccountLicensesChanged?.Invoke(fail); } catch { }
+                return fail;
+            }
+        }
 
         // ═══════════════════════════════════════════════════════════════
         //  VALIDATE  (called on startup, checks cache → online if needed)
@@ -680,6 +803,26 @@ private HttpRequestMessage BuildHttpRequest(string jsonBody)
             return result;
         }
 
+        private static string? TryParseApiError(string json)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object) return null;
+
+                // common patterns: { error }, { message }, { code }
+                if (root.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String)
+                    return err.GetString();
+                if (root.TryGetProperty("message", out var msg) && msg.ValueKind == JsonValueKind.String)
+                    return msg.GetString();
+                if (root.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String)
+                    return code.GetString();
+            }
+            catch { }
+            return null;
+        }
+
         private static string GetAppVersion()
         {
             return System.Reflection.Assembly.GetExecutingAssembly()
@@ -819,5 +962,40 @@ private HttpRequestMessage BuildHttpRequest(string jsonBody)
         public string? Message { get; set; }
         public string? ServerTime { get; set; }
         public string? NextCheckBy { get; set; }
+    }
+
+    /// <summary>
+    /// License summary returned from the get-user-licenses endpoint.
+    /// SECURITY: Masked key only.
+    /// </summary>
+    public sealed class AccountLicenseSummary
+    {
+        [JsonPropertyName("license_id")] public string LicenseId { get; set; } = "";
+        [JsonPropertyName("license_key_masked")] public string LicenseKeyMasked { get; set; } = "";
+        [JsonPropertyName("license_type")] public string? LicenseType { get; set; }
+        [JsonPropertyName("expires_at")] public DateTime? ExpiresAt { get; set; }
+        [JsonPropertyName("is_active")] public bool IsActive { get; set; }
+        [JsonPropertyName("max_machines")] public int MaxMachines { get; set; }
+        [JsonPropertyName("machines_used")] public int MachinesUsed { get; set; }
+        [JsonPropertyName("created_at")] public DateTime CreatedAt { get; set; }
+    }
+
+    public sealed class AccountLicensesResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+        public string? Email { get; set; }
+        public int Count { get; set; }
+        public System.Collections.Generic.List<AccountLicenseSummary> Licenses { get; set; } = new();
+    }
+
+    internal sealed class UserLicensesApiResponse
+    {
+        [JsonPropertyName("licenses")] public System.Collections.Generic.List<AccountLicenseSummary>? Licenses { get; set; }
+        [JsonPropertyName("email")] public string? Email { get; set; }
+        [JsonPropertyName("count")] public int Count { get; set; }
+        [JsonPropertyName("error")] public string? Error { get; set; }
+        [JsonPropertyName("code")] public string? Code { get; set; }
+        [JsonPropertyName("message")] public string? Message { get; set; }
     }
 }
