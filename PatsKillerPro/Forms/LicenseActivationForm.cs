@@ -29,14 +29,11 @@ namespace PatsKillerPro.Forms
         private readonly TextBox[] _keyParts = new TextBox[4];
         private Label _lblKeyPreview = null!;
         private Label _lblSignedIn = null!;
-        private Label _lblHeaderUser = null!;
-        private Label _lblKeyUser = null!;
         private Label _lblLicenseLine = null!;
         private Label _lblLicenseDetail = null!;
         private Label _lblKeyHint = null!;
         private ListView _lstAccountLicenses = null!;
         private Label _lblAccountLicensesNote = null!;
-        private Label _lblAccountLicensesHeader = null!;
         private Button _btnActivate = null!;
         private Button _btnPaste = null!;
         private Button _btnClear = null!;
@@ -49,14 +46,13 @@ namespace PatsKillerPro.Forms
         {
             Text = "License Management";
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.Sizable;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             BackColor = BgColor;
             ForeColor = TextMain;
             Font = new Font("Segoe UI", 10F);
-            MinimumSize = new Size(820, 620);
-            ClientSize = new Size(860, 680);
+            ClientSize = new Size(820, 620);
 
             BuildUI();
             Shown += async (_, __) => await RefreshUiAsync();
@@ -80,24 +76,15 @@ namespace PatsKillerPro.Forms
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // key entry
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // log
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
-            // Header
-            var header = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                ColumnCount = 1,
-                RowCount = 3,
-                Margin = new Padding(0, 0, 0, 14)
-            };
 
+            // Title
             var title = new Label
             {
                 Text = "License Management",
                 Font = new Font("Segoe UI", 20F, FontStyle.Bold),
                 ForeColor = Accent,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 4)
+                Margin = new Padding(0, 0, 0, 6)
             };
             var subtitle = new Label
             {
@@ -105,22 +92,12 @@ namespace PatsKillerPro.Forms
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = TextDim,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 6)
+                Margin = new Padding(0, 0, 0, 14)
             };
-
-            _lblHeaderUser = new Label
-            {
-                Text = "Signed in as: --",
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                ForeColor = TextMain,
-                AutoSize = true,
-                Margin = new Padding(0, 0, 0, 0)
-            };
-
-            header.Controls.Add(title, 0, 0);
-            header.Controls.Add(subtitle, 0, 1);
-            header.Controls.Add(_lblHeaderUser, 0, 2);
-            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(title, 0, 0);
+            root.Controls.Add(subtitle, 0, 0);
+            root.SetCellPosition(subtitle, new TableLayoutPanelCellPosition(0, 0));
+            subtitle.Location = new Point(subtitle.Location.X, subtitle.Location.Y + 40);
 
             // Identity / Status card
             var identityCard = CardPanel();
@@ -137,7 +114,6 @@ namespace PatsKillerPro.Forms
 
             identityLayout.Controls.Add(MakeKey("Signed-in Email:"), 0, 0);
             _lblSignedIn = MakeVal("--");
-            _lblSignedIn.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             identityLayout.Controls.Add(_lblSignedIn, 1, 0);
 
             identityLayout.Controls.Add(MakeKey("License Status:"), 0, 1);
@@ -172,7 +148,7 @@ namespace PatsKillerPro.Forms
             identityLayout.Controls.Add(_lnkSignIn, 0, 2);
 
             // Account licenses (masked keys only)
-            _lblAccountLicensesHeader = new Label
+            var acctHdr = new Label
             {
                 Text = "Account Licenses (masked)",
                 ForeColor = TextMain,
@@ -180,8 +156,8 @@ namespace PatsKillerPro.Forms
                 AutoSize = true,
                 Margin = new Padding(0, 12, 0, 6)
             };
-            identityLayout.Controls.Add(_lblAccountLicensesHeader, 0, 3);
-            identityLayout.SetColumnSpan(_lblAccountLicensesHeader, 2);
+            identityLayout.Controls.Add(acctHdr, 0, 3);
+            identityLayout.SetColumnSpan(acctHdr, 2);
 
             _lblAccountLicensesNote = new Label
             {
@@ -199,8 +175,6 @@ namespace PatsKillerPro.Forms
                 View = View.Details,
                 FullRowSelect = true,
                 GridLines = true,
-                HideSelection = false,
-                HeaderStyle = ColumnHeaderStyle.Nonclickable,
                 BackColor = BgColor,
                 ForeColor = TextMain,
                 BorderStyle = BorderStyle.FixedSingle,
@@ -282,17 +256,16 @@ namespace PatsKillerPro.Forms
                 Dock = DockStyle.Top,
                 BackColor = Surface,
                 ColumnCount = 1,
-                RowCount = 6,
+                RowCount = 5,
                 Padding = new Padding(14),
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
-            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // key header
-            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // signed-in line
-            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // hint
-            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // key boxes
-            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // preview
-            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // actions
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var keyHdr = new Label
             {
@@ -301,15 +274,6 @@ namespace PatsKillerPro.Forms
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 AutoSize = true,
                 Margin = new Padding(0, 0, 0, 10)
-            };
-
-            _lblKeyUser = new Label
-            {
-                Text = "Signed in as: --",
-                ForeColor = TextMain,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                AutoSize = true,
-                Margin = new Padding(0, 0, 0, 6)
             };
             _lblKeyHint = new Label
             {
@@ -320,8 +284,7 @@ namespace PatsKillerPro.Forms
                 Margin = new Padding(0, 0, 0, 10)
             };
             k.Controls.Add(keyHdr, 0, 0);
-            k.Controls.Add(_lblKeyUser, 0, 1);
-            k.Controls.Add(_lblKeyHint, 0, 2);
+            k.Controls.Add(_lblKeyHint, 0, 1);
 
             var keyRow = new FlowLayoutPanel
             {
@@ -435,9 +398,9 @@ namespace PatsKillerPro.Forms
             keyActions.Controls.Add(_btnPaste);
             keyActions.Controls.Add(_btnClear);
 
-            k.Controls.Add(keyRow, 0, 3);
-            k.Controls.Add(_lblKeyPreview, 0, 4);
-            k.Controls.Add(keyActions, 0, 5);
+            k.Controls.Add(keyRow, 0, 2);
+            k.Controls.Add(_lblKeyPreview, 0, 3);
+            k.Controls.Add(keyActions, 0, 4);
 
             keyCard.Controls.Add(k);
             root.Controls.Add(keyCard, 0, 3);
@@ -688,9 +651,7 @@ namespace PatsKillerPro.Forms
         private async Task RefreshUiAsync()
         {
             var email = LicenseService.Instance.UserEmail ?? "";
-            _lblHeaderUser.Text = string.IsNullOrWhiteSpace(email) ? "Signed in as: (not signed in)" : $"Signed in as: {email}";
             _lblSignedIn.Text = string.IsNullOrWhiteSpace(email) ? "Not signed in" : email;
-            _lblKeyUser.Text = string.IsNullOrWhiteSpace(email) ? "Signed in as: (not signed in)" : $"Signed in as: {email}";
             _lblSignedIn.ForeColor = string.IsNullOrWhiteSpace(email) ? Warning : TextMain;
 
             // Strict mode: show sign-in link if missing identity
@@ -712,14 +673,6 @@ namespace PatsKillerPro.Forms
                 _lstAccountLicenses.Items.Clear();
 
                 var list = LicenseService.Instance.AccountLicenses;
-
-                // Update header with count so the user understands what "(1 available)" means
-                try
-                {
-                    var c = list?.Count ?? 0;
-                    _lblAccountLicensesHeader.Text = c > 0 ? $"Account Licenses (masked) — {c}" : "Account Licenses (masked)";
-                }
-                catch { }
                 if (list == null || list.Count == 0)
                 {
                     var it = new ListViewItem("No account licenses found");

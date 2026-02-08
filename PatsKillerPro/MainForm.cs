@@ -57,7 +57,7 @@ namespace PatsKillerPro
         private Panel _header = null!, _tabBar = null!, _content = null!, _logPanel = null!, _loginPanel = null!;
         private Panel _patsTab = null!, _diagTab = null!, _freeTab = null!;
         private Button _btnTab1 = null!, _btnTab2 = null!, _btnTab3 = null!, _btnLogout = null!;
-        private Label _lblTokensTotal = null!, _lblTokensPromo = null!, _lblLicense = null!, _lblUser = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
+        private Label _lblTokens = null!, _lblLicense = null!, _lblUser = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
@@ -438,42 +438,28 @@ namespace PatsKillerPro
             left.Controls.Add(logo, 0, 0);
             left.Controls.Add(textStack, 1, 0);
 
-            
             // Right block (tokens + user) + logout button
             var meta = new TableLayoutPanel
             {
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 ColumnCount = 1,
-                RowCount = 4,
+                RowCount = 3,
                 Margin = new Padding(Dpi(10), 0, Dpi(20), 0),
                 Anchor = AnchorStyles.Right
             };
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // total
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // promo
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // license
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // user
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            _lblTokensTotal = new Label
+            _lblTokens = new Label
             {
-                Text = "Total: --",
+                Text = "Tokens: --",
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 ForeColor = SUCCESS,
                 AutoSize = true,
                 TextAlign = ContentAlignment.MiddleRight,
                 Anchor = AnchorStyles.Right,
-                Visible = false
-            };
-
-            _lblTokensPromo = new Label
-            {
-                Text = "Promo: --",
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = WARNING,
-                AutoSize = true,
-                TextAlign = ContentAlignment.MiddleRight,
-                Anchor = AnchorStyles.Right,
-                Margin = new Padding(0, Dpi(2), 0, 0),
                 Visible = false
             };
 
@@ -511,8 +497,8 @@ namespace PatsKillerPro
 
             _lblUser = new Label
             {
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                ForeColor = TEXT,
+                Font = new Font("Segoe UI", 10),
+                ForeColor = TEXT_DIM,
                 AutoSize = true,
                 AutoEllipsis = true,
                 MaximumSize = new Size(Dpi(420), 0),
@@ -522,11 +508,9 @@ namespace PatsKillerPro
                 Visible = false
             };
 
-            meta.Controls.Add(_lblTokensTotal, 0, 0);
-            meta.Controls.Add(_lblTokensPromo, 0, 1);
-            meta.Controls.Add(_lblLicense, 0, 2);
-            meta.Controls.Add(_lblUser, 0, 3);
-
+            meta.Controls.Add(_lblTokens, 0, 0);
+            meta.Controls.Add(_lblLicense, 0, 1);
+            meta.Controls.Add(_lblUser, 0, 2);
 
             _btnLogout = AutoBtn("Logout", BTN_BG);
             _btnLogout.Margin = new Padding(0);
@@ -719,10 +703,13 @@ namespace PatsKillerPro
             _txtOutcode.Margin = DpiPad(0, 6, 15, 0);
             row3.Controls.Add(_txtOutcode);
 
+            var btnCopy = AutoBtn("Copy", BTN_BG);
+            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) Clipboard.SetText(_txtOutcode.Text); };
+            row3.Controls.Add(btnCopy);
+
             row3.Controls.Add(new Label { Text = "INCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = DpiPad(30, 12, 10, 0) });
             
             _txtIncode = MakeTextBox(160);
-            _txtIncode.ReadOnly = true;
             _txtIncode.Margin = DpiPad(0, 6, 15, 0);
             row3.Controls.Add(_txtIncode);
 
@@ -1304,10 +1291,8 @@ namespace PatsKillerPro
             _loginPanel.Visible = false;
 
             // Hide token/user UI while logged out.
-            _lblTokensTotal.Visible = false;
-            _lblTokensTotal.Text = string.Empty;
-            _lblTokensPromo.Visible = false;
-            _lblTokensPromo.Text = string.Empty;
+            _lblTokens.Visible = false;
+            _lblTokens.Text = string.Empty;
             _lblLicense.Visible = false;
             _lblLicense.Text = string.Empty;
             _lblUser.Visible = false;
@@ -1399,32 +1384,16 @@ if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
         
 private void ApplyAuthHeader()
 {
-    // Top-right meta stack:
-    //   • Total tokens (green)
-    //   • Promo tokens (yellow + expiration)
-    //   • License (clickable)
-    //   • User email
+    // Top-right meta stack: Tokens (green), License (clickable), Email (dim)
     if (IsLoggedIn)
     {
         _lblUser.Text = _userEmail ?? "";
         _lblUser.Visible = !string.IsNullOrWhiteSpace(_lblUser.Text);
 
-        var tbs = TokenBalanceService.Instance;
-        _lblTokensTotal.Text = $"Total: {tbs.TotalTokens}";
-        _lblTokensTotal.Visible = true;
+        _lblTokens.Text = $"Tokens: {_tokenBalance}";
+        _lblTokens.Visible = true;
 
-        // Promo breakdown + expiration (from token service; separate from license expiry)
-        var promo = tbs.PromoTokens;
-        DateTime? promoExp = tbs.PromoExpiresAt;
-
-        var promoText = $"Promo: {promo}";
-        if (promoExp.HasValue)
-            promoText += $" (exp {promoExp.Value:yyyy-MM-dd})";
-
-        _lblTokensPromo.Text = promoText;
-        _lblTokensPromo.Visible = promo > 0 || promoExp.HasValue;
-
-        // License line
+        // License line (separate from email for clarity)
         if (LicenseService.Instance.IsLicensed)
         {
             var typ = LicenseService.Instance.LicenseType ?? "active";
@@ -1433,6 +1402,7 @@ private void ApplyAuthHeader()
         }
         else if (!string.IsNullOrWhiteSpace(LicenseService.Instance.LicenseKey))
         {
+            // License exists but not valid (e.g., mismatch / expired / needs activation)
             _lblLicense.Text = "License: Attention needed";
             _lblLicense.ForeColor = WARNING;
         }
@@ -1442,7 +1412,7 @@ private void ApplyAuthHeader()
             _lblLicense.Text = available > 0
                 ? $"License: Not activated ({available} available)"
                 : "License: Not activated";
-            _lblLicense.ForeColor = TEXT_DIM;
+            _lblLicense.ForeColor = TEXT_MUTED;
         }
         _lblLicense.Visible = true;
 
@@ -1451,8 +1421,7 @@ private void ApplyAuthHeader()
     }
 
     // Logged out
-    _lblTokensTotal.Visible = false;
-    _lblTokensPromo.Visible = false;
+    _lblTokens.Visible = false;
     _lblLicense.Text = "";
     _lblLicense.Visible = false;
     _lblUser.Visible = false;
