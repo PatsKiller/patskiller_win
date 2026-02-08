@@ -4,6 +4,8 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PatsKillerPro.Communication;
@@ -32,7 +34,7 @@ namespace PatsKillerPro
         private readonly Color BTN_BG = Color.FromArgb(54, 54, 64);
 
         // State
-        private string _userEmail = "", _authToken = "", _refreshToken = "";
+        private string _userEmail = "", _userDisplayName = "", _authToken = "", _refreshToken = "";
         private int _tokenBalance = 0;
         private List<J2534DeviceInfo> _devices = new();
         private bool _isConnected = false;
@@ -57,7 +59,7 @@ namespace PatsKillerPro
         private Panel _header = null!, _tabBar = null!, _content = null!, _logPanel = null!, _loginPanel = null!;
         private Panel _patsTab = null!, _diagTab = null!, _freeTab = null!;
         private Button _btnTab1 = null!, _btnTab2 = null!, _btnTab3 = null!, _btnLogout = null!;
-        private Label _lblTokens = null!, _lblLicense = null!, _lblUser = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
+        private Label _lblTokensTotal = null!, _lblTokensPromo = null!, _lblPromoExpiry = null!, _lblLicense = null!, _lblUser = null!, _lblUserEmail = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
@@ -87,7 +89,7 @@ namespace PatsKillerPro
                 try { BeginInvoke(new Action(() => SetUiBusy(busy))); } catch { /* ignore */ }
             };
 
-            LoadSession();
+            // Session restore handled in MainForm_Shown.
             
             // Wire up ProActivityLogger to show messages in UI log panel
             ProActivityLogger.Instance.OnLogMessage += (type, msg) =>
@@ -367,7 +369,9 @@ namespace PatsKillerPro
             _header = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = Dpi(84),
+                // Increased height so the two-line identity (Name + Email) is always visible
+                // alongside the token/license stack at common DPI scaling settings.
+                Height = Dpi(112),
                 BackColor = SURFACE,
                 Padding = DpiPad(18, 12, 18, 12)
             };
@@ -438,81 +442,106 @@ namespace PatsKillerPro
             left.Controls.Add(logo, 0, 0);
             left.Controls.Add(textStack, 1, 0);
 
-            // Right block (tokens + user) + logout button
+            
+                        // Right block (tokens + promo + license + identity) + logout button
+            var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
+
             var meta = new TableLayoutPanel
             {
                 AutoSize = true,
-                BackColor = Color.Transparent,
                 ColumnCount = 1,
-                RowCount = 3,
-                Margin = new Padding(Dpi(10), 0, Dpi(20), 0),
-                Anchor = AnchorStyles.Right
+                RowCount = 6,
+                Margin = new Padding(0, 0, 10, 0)
             };
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // total
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // promo
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // promo expiry
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // license
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // user name
+            meta.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // user email
 
-            _lblTokens = new Label
+            _lblTokensTotal = new Label
             {
-                Text = "Tokens: --",
-                Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = SUCCESS,
                 AutoSize = true,
+                ForeColor = SUCCESS,
+                Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleRight,
-                Anchor = AnchorStyles.Right,
+                Margin = new Padding(0, 0, 0, 0)
+            };
+
+            _lblTokensPromo = new Label
+            {
+                AutoSize = true,
+                ForeColor = WARNING,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleRight,
+                Margin = new Padding(0, 2, 0, 0)
+            };
+
+            _lblPromoExpiry = new Label
+            {
+                AutoSize = true,
+                ForeColor = TEXT_DIM,
+                Font = new Font("Segoe UI", 9, FontStyle.Regular),
+                TextAlign = ContentAlignment.MiddleRight,
+                Margin = new Padding(0, 0, 0, 0),
                 Visible = false
             };
 
             _lblLicense = new Label
             {
-                Text = "License: --",
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = TEXT_MUTED,
                 AutoSize = true,
+                ForeColor = TEXT_DIM,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleRight,
-                Anchor = AnchorStyles.Right,
-                Margin = new Padding(0, Dpi(2), 0, 0),
-                Cursor = Cursors.Hand,
-                Visible = false
-            };
-            _lblLicense.Click += async (s, e) =>
-            {
-                // License management is strict: requires Google SSO identity.
-                if (!IsLoggedIn)
-                {
-                    MessageBox.Show("Please sign in with Google first. Licensing is bound to your account.", "Sign-in Required", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    await PromptAuthModalAsync();
-                    ApplyAuthHeader();
-                    return;
-                }
-
-                using var lic = new LicenseActivationForm();
-                var lr = lic.ShowDialog(this);
-                if (lr == DialogResult.OK)
-                {
-                    try { await LicenseService.Instance.ValidateAsync(); } catch { }
-                    ApplyAuthHeader();
-                }
+                Margin = new Padding(0, 4, 0, 0),
+                Cursor = Cursors.Hand
             };
 
+            // Identity (two-line: Name + Email)
             _lblUser = new Label
             {
-                Font = new Font("Segoe UI", 10),
-                ForeColor = TEXT_DIM,
                 AutoSize = true,
-                AutoEllipsis = true,
-                MaximumSize = new Size(Dpi(420), 0),
+                ForeColor = TEXT,
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleRight,
-                Anchor = AnchorStyles.Right,
-                Margin = new Padding(0, Dpi(2), 0, 0),
-                Visible = false
+                Margin = new Padding(0, 6, 0, 0),
+                AutoEllipsis = true,
+                MaximumSize = new Size(Dpi(420), 0)
             };
 
-            meta.Controls.Add(_lblTokens, 0, 0);
-            meta.Controls.Add(_lblLicense, 0, 1);
-            meta.Controls.Add(_lblUser, 0, 2);
+            _lblUserEmail = new Label
+            {
+                AutoSize = true,
+                ForeColor = TEXT_DIM,
+                // Slightly stronger emphasis improves readability on dark header backgrounds.
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleRight,
+                Margin = new Padding(0, 0, 0, 0),
+                AutoEllipsis = true,
+                // Allow longer emails before ellipsis.
+                MaximumSize = new Size(Dpi(420), 0)
+            };
 
-            _btnLogout = AutoBtn("Logout", BTN_BG);
+            _lblLicense.Click += (_, __) =>
+            {
+                if (!IsLoggedIn) return;
+                using var lic = new PatsKillerPro.Forms.LicenseActivationForm();
+                lic.ShowDialog(this);
+                try { _ = LicenseService.Instance.ValidateAsync(); } catch { }
+                try { _ = LicenseService.Instance.RefreshAccountLicensesAsync(); } catch { }
+                ApplyAuthHeader();
+            };
+
+            meta.Controls.Add(_lblTokensTotal, 0, 0);
+            meta.Controls.Add(_lblTokensPromo, 0, 1);
+            meta.Controls.Add(_lblPromoExpiry, 0, 2);
+            meta.Controls.Add(_lblLicense, 0, 3);
+            meta.Controls.Add(_lblUser, 0, 4);
+            meta.Controls.Add(_lblUserEmail, 0, 5);
+            right.Controls.Add(meta);
+
+_btnLogout = AutoBtn("Logout", BTN_BG);
             _btnLogout.Margin = new Padding(0);
             _btnLogout.Click += (s, e) => Logout();
             _btnLogout.Visible = false;
@@ -703,13 +732,10 @@ namespace PatsKillerPro
             _txtOutcode.Margin = DpiPad(0, 6, 15, 0);
             row3.Controls.Add(_txtOutcode);
 
-            var btnCopy = AutoBtn("Copy", BTN_BG);
-            btnCopy.Click += (s, e) => { if (!string.IsNullOrEmpty(_txtOutcode.Text)) Clipboard.SetText(_txtOutcode.Text); };
-            row3.Controls.Add(btnCopy);
-
             row3.Controls.Add(new Label { Text = "INCODE:", Font = new Font("Segoe UI", 11, FontStyle.Bold), ForeColor = TEXT, AutoSize = true, Margin = DpiPad(30, 12, 10, 0) });
             
             _txtIncode = MakeTextBox(160);
+            _txtIncode.ReadOnly = true;
             _txtIncode.Margin = DpiPad(0, 6, 15, 0);
             row3.Controls.Add(_txtIncode);
 
@@ -1291,11 +1317,16 @@ namespace PatsKillerPro
             _loginPanel.Visible = false;
 
             // Hide token/user UI while logged out.
-            _lblTokens.Visible = false;
-            _lblTokens.Text = string.Empty;
+            _lblTokensTotal.Visible = false;
+            _lblTokensTotal.Text = string.Empty;
+            _lblTokensPromo.Visible = false;
+            _lblTokensPromo.Text = string.Empty;
+            _lblPromoExpiry.Visible = false;
+            _lblPromoExpiry.Text = string.Empty;
             _lblLicense.Visible = false;
             _lblLicense.Text = string.Empty;
             _lblUser.Visible = false;
+            _lblUserEmail.Visible = false;
             _btnLogout.Visible = false;
         }
         private void ShowMain() { _loginPanel.Visible = false; _tabBar.Visible = _content.Visible = _logPanel.Visible = _btnLogout.Visible = true; SwitchTab(0); AutoStartOnce(); }
@@ -1322,6 +1353,9 @@ private async void MainForm_Shown(object? sender, EventArgs e)
         // Validate license (strict: requires SSO identity), but do not block app startup if missing.
         try { await LicenseService.Instance.ValidateAsync(); } catch { /* best effort */ }
 
+        // Fetch account licenses (masked) so the header can show availability.
+        try { await LicenseService.Instance.RefreshAccountLicensesAsync(); } catch { /* best effort */ }
+
         await RefreshTokenBalanceAsync();
         ShowMain();
         ApplyAuthHeader();
@@ -1340,13 +1374,21 @@ private async void MainForm_Shown(object? sender, EventArgs e)
             _userEmail = Settings.GetString("user_email", "") ?? "";
             
             
+            _userDisplayName = Settings.GetString("user_display_name", "") ?? "";
+
+            if (string.IsNullOrWhiteSpace(_userDisplayName) && !string.IsNullOrWhiteSpace(_authToken) && !string.IsNullOrWhiteSpace(_userEmail))
+            {
+                _userDisplayName = DeriveDisplayName(_authToken, _userEmail);
+                try { SaveSession(); } catch { }
+            }
+            
 // CRITICAL: Set auth context for downstream services when restoring session
 if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
 {
     ProActivityLogger.Instance.SetAuthContext(_authToken, _userEmail);
     TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
     IncodeService.Instance.SetAuthContext(_authToken, _userEmail);
-    LicenseService.Instance.SetAuthContext(_authToken, _userEmail);
+    LicenseService.Instance.SetAuthContext(_authToken, _userEmail, _userDisplayName);
     Logger.Info($"[MainForm] Session restored for: {_userEmail}");
 }
         }
@@ -1356,6 +1398,7 @@ if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
             Settings.SetString("auth_token", _authToken ?? "");
             Settings.SetString("refresh_token", _refreshToken ?? "");
             Settings.SetString("user_email", _userEmail ?? "");
+            Settings.SetString("user_display_name", _userDisplayName ?? "");
             Settings.Save();
         }
 
@@ -1365,10 +1408,12 @@ if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
             _refreshToken = "";
             _userEmail = "";
             _tokenBalance = 0;
+            _userDisplayName = "";
 
             Settings.SetString("auth_token", "");
             Settings.SetString("refresh_token", "");
             Settings.SetString("user_email", "");
+            Settings.SetString("user_display_name", "");
             Settings.Save();
             
             // Clear logger auth context too
@@ -1379,18 +1424,128 @@ if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
         }
 
         
+
+        private static string DeriveDisplayName(string authToken, string email)
+        {
+            var raw = (string?)null;
+
+            try
+            {
+                var parts = (authToken ?? "").Split('.');
+                if (parts.Length >= 2)
+                {
+                    var payload = parts[1].Replace('-', '+').Replace('_', '/');
+                    payload = payload.PadRight(payload.Length + ((4 - payload.Length % 4) % 4), '=');
+                    var json = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+
+                    // Supabase typically stores Google profile data under user_metadata.
+                    if (root.TryGetProperty("user_metadata", out var um) && um.ValueKind == JsonValueKind.Object)
+                    {
+                        if (um.TryGetProperty("full_name", out var fn) && fn.ValueKind == JsonValueKind.String)
+                            raw = fn.GetString();
+                        else if (um.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String)
+                            raw = n.GetString();
+                        else if (um.TryGetProperty("display_name", out var dn) && dn.ValueKind == JsonValueKind.String)
+                            raw = dn.GetString();
+                    }
+
+                    if (string.IsNullOrWhiteSpace(raw) && root.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
+                        raw = name.GetString();
+                }
+            }
+            catch
+            {
+                // best effort
+            }
+
+            // Normalize to "First L." (clean + readable)
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                var parts = raw!.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 1) return parts[0];
+                var first = parts[0];
+                var last = parts[parts.Length - 1];
+                return $"{first} {char.ToUpperInvariant(last[0])}.";
+            }
+
+            // Fallback: derive from email local-part
+            var local = (email ?? "").Split('@')[0].Replace('.', ' ').Replace('_', ' ').Trim();
+            if (string.IsNullOrWhiteSpace(local)) return email ?? "";
+            var eparts = local.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (eparts.Length == 1)
+            {
+                var s = eparts[0];
+                return char.ToUpperInvariant(s[0]) + s.Substring(1);
+            }
+            var f = eparts[0];
+            var l = eparts[eparts.Length - 1];
+            return $"{char.ToUpperInvariant(f[0]) + f.Substring(1)} {char.ToUpperInvariant(l[0])}.";
+        }
+
 private void ApplyAuthHeader()
 {
-    // Top-right meta stack: Tokens (green), License (clickable), Email (dim)
+    // Top-right meta stack:
+    //   • Total tokens (green)
+    //   • Promo tokens (yellow)
+    //   • Promo expiry (separate line; hidden if null)
+    //   • License (clickable)
+    //   • User name
+    //   • User email
+
     if (IsLoggedIn)
     {
-        _lblUser.Text = _userEmail ?? "";
+        // Identity
+        var email = _userEmail ?? "";
+        if (string.IsNullOrWhiteSpace(_userDisplayName))
+            _userDisplayName = DeriveDisplayName(_authToken, email);
+
+        _lblUser.Text = _userDisplayName ?? "";
         _lblUser.Visible = !string.IsNullOrWhiteSpace(_lblUser.Text);
 
-        _lblTokens.Text = $"Tokens: {_tokenBalance}";
-        _lblTokens.Visible = true;
+        _lblUserEmail.Text = email;
+        _lblUserEmail.Visible = !string.IsNullOrWhiteSpace(_lblUserEmail.Text);
 
-        // License line (separate from email for clarity)
+        // Tokens
+        var tbs = TokenBalanceService.Instance;
+        _lblTokensTotal.Text = $"Tokens: {tbs.TotalTokens}";
+        _lblTokensTotal.Visible = true;
+
+        // Promo token line is always shown for clarity ("Promo: 0" when none).
+        _lblTokensPromo.Text = $"Promo: {tbs.PromoTokens}";
+        _lblTokensPromo.Visible = true;
+        _lblTokensPromo.ForeColor = tbs.PromoTokens > 0 ? WARNING : TEXT_DIM;
+
+        // Promo expiry (separate line; date-only). If promo tokens exist but there's no expiry,
+        // display "No expiry" so operators aren't guessing.
+        var promoExp = tbs.PromoExpiresAt;
+        if (tbs.PromoTokens > 0)
+        {
+            _lblPromoExpiry.Visible = true;
+
+            if (promoExp.HasValue)
+            {
+                _lblPromoExpiry.Text = $"Promo exp: {promoExp.Value:yyyy-MM-dd}";
+
+                // If expiring within 7 days, escalate to red.
+                var daysLeft = (promoExp.Value.ToUniversalTime() - DateTime.UtcNow).TotalDays;
+                _lblPromoExpiry.ForeColor = daysLeft <= 7 ? DANGER : TEXT_DIM;
+            }
+            else
+            {
+                _lblPromoExpiry.Text = "Promo exp: No expiry";
+                _lblPromoExpiry.ForeColor = TEXT_DIM;
+            }
+        }
+        else
+        {
+            _lblPromoExpiry.Visible = false;
+            _lblPromoExpiry.Text = "";
+        }
+
+        // License line
         if (LicenseService.Instance.IsLicensed)
         {
             var typ = LicenseService.Instance.LicenseType ?? "active";
@@ -1399,14 +1554,16 @@ private void ApplyAuthHeader()
         }
         else if (!string.IsNullOrWhiteSpace(LicenseService.Instance.LicenseKey))
         {
-            // License exists but not valid (e.g., mismatch / expired / needs activation)
             _lblLicense.Text = "License: Attention needed";
             _lblLicense.ForeColor = WARNING;
         }
         else
         {
-            _lblLicense.Text = "License: Not activated";
-            _lblLicense.ForeColor = TEXT_MUTED;
+            var available = LicenseService.Instance.AccountLicenseCount;
+            _lblLicense.Text = available > 0
+                ? $"License: Not activated ({available} available)"
+                : "License: Not activated";
+            _lblLicense.ForeColor = TEXT_DIM;
         }
         _lblLicense.Visible = true;
 
@@ -1415,10 +1572,13 @@ private void ApplyAuthHeader()
     }
 
     // Logged out
-    _lblTokens.Visible = false;
+    _lblTokensTotal.Visible = false;
+    _lblTokensPromo.Visible = false;
+    _lblPromoExpiry.Visible = false;
     _lblLicense.Text = "";
     _lblLicense.Visible = false;
     _lblUser.Visible = false;
+    _lblUserEmail.Visible = false;
     _btnLogout.Visible = false;
 }
 
@@ -1487,16 +1647,32 @@ private void ApplyAuthHeader()
             _refreshToken = refreshToken ?? "";
             _userEmail = email ?? "";
 
+            _userDisplayName = string.IsNullOrWhiteSpace(_userDisplayName)
+                ? DeriveDisplayName(_authToken, _userEmail)
+                : _userDisplayName;
+
             SaveSession();
 
             // Set auth context for downstream services
             ProActivityLogger.Instance.SetAuthContext(_authToken, _userEmail);
             TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
             IncodeService.Instance.SetAuthContext(_authToken, _userEmail);
-            LicenseService.Instance.SetAuthContext(_authToken, _userEmail);
+            LicenseService.Instance.SetAuthContext(_authToken, _userEmail, _userDisplayName);
 
             // Strict license validation now has the Bearer token
             try { await LicenseService.Instance.ValidateAsync(); } catch { /* best effort */ }
+
+            // Fetch account licenses (masked keys only) to drive UI selection without leaking full keys.
+            try
+            {
+                var lr = await LicenseService.Instance.RefreshAccountLicensesAsync();
+                if (lr.Success)
+                {
+                    if (!LicenseService.Instance.IsLicensed && string.IsNullOrWhiteSpace(LicenseService.Instance.LicenseKey) && lr.Count > 0)
+                        Log("info", $"{lr.Count} license(s) found in your account. Click 'License' to activate on this machine.");
+                }
+            }
+            catch { /* best effort */ }
 
             await RefreshTokenBalanceAsync();
             
@@ -1512,7 +1688,6 @@ private void ApplyAuthHeader()
             try
             {
                 TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
-                ProActivityLogger.Instance.SetAuthContext(_authToken, _userEmail);
                 await TokenBalanceService.Instance.RefreshBalanceAsync();
                 _tokenBalance = TokenBalanceService.Instance.TotalTokens;
             }
@@ -1544,11 +1719,8 @@ private void ApplyAuthHeader()
                 ProActivityLogger.Instance.LogLogout(_userEmail);
             }
             
+            // ClearSession already clears auth context across services.
             ClearSession();
-            ProActivityLogger.Instance.ClearAuthContext();
-            TokenBalanceService.Instance.ClearAuthContext();
-            IncodeService.Instance.ClearAuthContext();
-            LicenseService.Instance.ClearAuthContext();
             ApplyAuthHeader();
 
             // Optional: immediately present the modal login again (switch user).

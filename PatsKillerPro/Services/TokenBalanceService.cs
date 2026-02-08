@@ -49,6 +49,10 @@ namespace PatsKillerPro.Services
         public int RegularTokens { get; private set; } = 0;
         public int PromoTokens { get; private set; } = 0;
         public int TotalTokens => RegularTokens + PromoTokens;
+        /// <summary>
+        /// Optional promo expiration date provided by token service (separate from license expiry).
+        /// </summary>
+        public DateTime? PromoExpiresAt { get; private set; } = null;
         public DateTime LastUpdated { get; private set; } = DateTime.MinValue;
 
         // Key programming session tracking
@@ -77,8 +81,42 @@ namespace PatsKillerPro.Services
             UserId = null;
             RegularTokens = 0;
             PromoTokens = 0;
+            PromoExpiresAt = null;
             LastUpdated = DateTime.MinValue;
             EndKeySession();
+        }
+
+        private static DateTime? TryReadDate(JsonElement root, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                if (!root.TryGetProperty(n, out var el)) continue;
+                try
+                {
+                    if (el.ValueKind == JsonValueKind.String)
+                    {
+                        var s = el.GetString();
+                        if (string.IsNullOrWhiteSpace(s)) continue;
+                        if (DateTime.TryParse(s, out var dt)) return dt;
+                    }
+                    else if (el.ValueKind == JsonValueKind.Number)
+                    {
+                        // Accept unix seconds/ms
+                        if (el.TryGetInt64(out var v))
+                        {
+                            if (v > 10_000_000_000) // ms
+                                return DateTimeOffset.FromUnixTimeMilliseconds(v).UtcDateTime;
+                            if (v > 0)
+                                return DateTimeOffset.FromUnixTimeSeconds(v).UtcDateTime;
+                        }
+                    }
+                }
+                catch
+                {
+                    // best effort
+                }
+            }
+            return null;
         }
 
         // ============ KEY SESSION MANAGEMENT ============
@@ -183,9 +221,20 @@ namespace PatsKillerPro.Services
                 if (root.TryGetProperty("promoTokens", out var pt)) promoTokens = pt.GetInt32();
                 else if (root.TryGetProperty("promo_tokens", out var pt2)) promoTokens = pt2.GetInt32();
 
+                // Promo expiry (separate from license expiry)
+                var promoExp = TryReadDate(root,
+                    "promo_expires_at",
+                    "promoExpiresAt",
+                    "promo_exp",
+                    "promo_expiry",
+                    "promoExpiry",
+                    "promo_expiration",
+                    "promoExpiration");
+
                 var oldTotal = TotalTokens;
                 RegularTokens = regularTokens;
                 PromoTokens = promoTokens;
+                PromoExpiresAt = promoExp;
                 LastUpdated = DateTime.Now;
 
                 Logger.Info($"[TokenBalanceService] Balance: Regular={RegularTokens}, Promo={PromoTokens}, Total={TotalTokens}");
@@ -197,7 +246,8 @@ namespace PatsKillerPro.Services
                         RegularTokens = RegularTokens,
                         PromoTokens = PromoTokens,
                         TotalTokens = TotalTokens,
-                        PreviousTotal = oldTotal
+                        PreviousTotal = oldTotal,
+                        PromoExpiresAt = PromoExpiresAt
                     });
                 }
 
@@ -206,7 +256,8 @@ namespace PatsKillerPro.Services
                     Success = true,
                     RegularTokens = RegularTokens,
                     PromoTokens = PromoTokens,
-                    TotalTokens = TotalTokens
+                    TotalTokens = TotalTokens,
+                    PromoExpiresAt = PromoExpiresAt
                 };
             }
             catch (Exception ex)
@@ -239,6 +290,7 @@ namespace PatsKillerPro.Services
                     var oldTotal = TotalTokens;
                     RegularTokens = totalTokens;
                     PromoTokens = 0;
+                    PromoExpiresAt = null;
                     LastUpdated = DateTime.Now;
 
                     if (oldTotal != TotalTokens)
@@ -248,7 +300,8 @@ namespace PatsKillerPro.Services
                             RegularTokens = RegularTokens,
                             PromoTokens = PromoTokens,
                             TotalTokens = TotalTokens,
-                            PreviousTotal = oldTotal
+                            PreviousTotal = oldTotal,
+                            PromoExpiresAt = PromoExpiresAt
                         });
                     }
 
@@ -407,6 +460,7 @@ namespace PatsKillerPro.Services
         public int RegularTokens { get; set; }
         public int PromoTokens { get; set; }
         public int TotalTokens { get; set; }
+        public DateTime? PromoExpiresAt { get; set; }
     }
 
     public class TokenDeductResult
@@ -428,5 +482,6 @@ namespace PatsKillerPro.Services
         public int PromoTokens { get; set; }
         public int TotalTokens { get; set; }
         public int PreviousTotal { get; set; }
+        public DateTime? PromoExpiresAt { get; set; }
     }
 }
