@@ -27,10 +27,19 @@ namespace PatsKillerPro.Forms
         private static readonly Color TextDim  = ColorTranslator.FromHtml("#94A3B8");
 
         private readonly TextBox[] _keyParts = new TextBox[4];
+        private Label _lblKeyPreview = null!;
         private Label _lblSignedIn = null!;
+        private Label _lblHeaderUser = null!;
+        private Label _lblKeyUser = null!;
         private Label _lblLicenseLine = null!;
         private Label _lblLicenseDetail = null!;
+        private Label _lblKeyHint = null!;
+        private ListView _lstAccountLicenses = null!;
+        private Label _lblAccountLicensesNote = null!;
+        private Label _lblAccountLicensesHeader = null!;
         private Button _btnActivate = null!;
+        private Button _btnPaste = null!;
+        private Button _btnClear = null!;
         private Button _btnRevalidate = null!;
         private Button _btnDeactivate = null!;
         private RichTextBox _log = null!;
@@ -40,13 +49,14 @@ namespace PatsKillerPro.Forms
         {
             Text = "License Management";
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = false;
             MinimizeBox = false;
             BackColor = BgColor;
             ForeColor = TextMain;
             Font = new Font("Segoe UI", 10F);
-            ClientSize = new Size(820, 620);
+            MinimumSize = new Size(820, 620);
+            ClientSize = new Size(860, 680);
 
             BuildUI();
             Shown += async (_, __) => await RefreshUiAsync();
@@ -61,7 +71,8 @@ namespace PatsKillerPro.Forms
                 Padding = new Padding(22),
                 ColumnCount = 1,
                 RowCount = 6,
-                AutoSize = false
+                AutoSize = false,
+                AutoScroll = true
             };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // title
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // identity + status
@@ -69,15 +80,24 @@ namespace PatsKillerPro.Forms
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // key entry
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // log
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
+            // Header
+            var header = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                ColumnCount = 1,
+                RowCount = 3,
+                Margin = new Padding(0, 0, 0, 14)
+            };
 
-            // Title
             var title = new Label
             {
                 Text = "License Management",
                 Font = new Font("Segoe UI", 20F, FontStyle.Bold),
                 ForeColor = Accent,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 6)
+                Margin = new Padding(0, 0, 0, 4)
             };
             var subtitle = new Label
             {
@@ -85,12 +105,22 @@ namespace PatsKillerPro.Forms
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = TextDim,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 14)
+                Margin = new Padding(0, 0, 0, 6)
             };
-            root.Controls.Add(title, 0, 0);
-            root.Controls.Add(subtitle, 0, 0);
-            root.SetCellPosition(subtitle, new TableLayoutPanelCellPosition(0, 0));
-            subtitle.Location = new Point(subtitle.Location.X, subtitle.Location.Y + 40);
+
+            _lblHeaderUser = new Label
+            {
+                Text = "Signed in as: --",
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                ForeColor = TextMain,
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 0)
+            };
+
+            header.Controls.Add(title, 0, 0);
+            header.Controls.Add(subtitle, 0, 1);
+            header.Controls.Add(_lblHeaderUser, 0, 2);
+            root.Controls.Add(header, 0, 0);
 
             // Identity / Status card
             var identityCard = CardPanel();
@@ -99,7 +129,7 @@ namespace PatsKillerPro.Forms
                 Dock = DockStyle.Fill,
                 BackColor = Surface,
                 ColumnCount = 2,
-                RowCount = 3,
+                RowCount = 6,
                 Padding = new Padding(14)
             };
             identityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -107,6 +137,7 @@ namespace PatsKillerPro.Forms
 
             identityLayout.Controls.Add(MakeKey("Signed-in Email:"), 0, 0);
             _lblSignedIn = MakeVal("--");
+            _lblSignedIn.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             identityLayout.Controls.Add(_lblSignedIn, 1, 0);
 
             identityLayout.Controls.Add(MakeKey("License Status:"), 0, 1);
@@ -139,6 +170,74 @@ namespace PatsKillerPro.Forms
                 Close();
             };
             identityLayout.Controls.Add(_lnkSignIn, 0, 2);
+
+            // Account licenses (masked keys only)
+            _lblAccountLicensesHeader = new Label
+            {
+                Text = "Account Licenses (masked)",
+                ForeColor = TextMain,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                AutoSize = true,
+                Margin = new Padding(0, 12, 0, 6)
+            };
+            identityLayout.Controls.Add(_lblAccountLicensesHeader, 0, 3);
+            identityLayout.SetColumnSpan(_lblAccountLicensesHeader, 2);
+
+            _lblAccountLicensesNote = new Label
+            {
+                Text = "Keys are masked for security. Use the full key from your purchase email to activate.",
+                ForeColor = TextDim,
+                Font = new Font("Segoe UI", 8.5F),
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            identityLayout.Controls.Add(_lblAccountLicensesNote, 0, 4);
+            identityLayout.SetColumnSpan(_lblAccountLicensesNote, 2);
+
+            _lstAccountLicenses = new ListView
+            {
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                HideSelection = false,
+                HeaderStyle = ColumnHeaderStyle.Nonclickable,
+                BackColor = BgColor,
+                ForeColor = TextMain,
+                BorderStyle = BorderStyle.FixedSingle,
+                Height = 120,
+                Dock = DockStyle.Fill
+            };
+            _lstAccountLicenses.Columns.Add("Masked Key", 170);
+            _lstAccountLicenses.Columns.Add("Type", 130);
+            _lstAccountLicenses.Columns.Add("Expires", 110);
+            _lstAccountLicenses.Columns.Add("Seats", 70);
+            _lstAccountLicenses.Columns.Add("Used", 70);
+
+            // Helpful: if user selects a license, hint the last 4 digits to find the full key in their email.
+            _lstAccountLicenses.SelectedIndexChanged += (_, __) =>
+            {
+                try
+                {
+                    if (_lstAccountLicenses.SelectedItems.Count == 0)
+                    {
+                        _lblKeyHint.Text = "Enter the 16-character key from your email (format: XXXX-XXXX-XXXX-XXXX).";
+                        return;
+                    }
+
+                    var masked = _lstAccountLicenses.SelectedItems[0].Text ?? "";
+                    var last4 = masked.Length >= 4 ? masked.Substring(masked.Length - 4) : "";
+                    _lblKeyHint.Text = string.IsNullOrWhiteSpace(last4)
+                        ? "Enter the 16-character key from your email (format: XXXX-XXXX-XXXX-XXXX)."
+                        : $"Enter the full key from your email (ends with {last4}).";
+                }
+                catch
+                {
+                    _lblKeyHint.Text = "Enter the 16-character key from your email (format: XXXX-XXXX-XXXX-XXXX).";
+                }
+            };
+
+            identityLayout.Controls.Add(_lstAccountLicenses, 0, 5);
+            identityLayout.SetColumnSpan(_lstAccountLicenses, 2);
 
             identityCard.Controls.Add(identityLayout);
             root.Controls.Add(identityCard, 0, 1);
@@ -180,12 +279,20 @@ namespace PatsKillerPro.Forms
             var keyCard = CardPanel();
             var k = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 BackColor = Surface,
                 ColumnCount = 1,
-                RowCount = 4,
-                Padding = new Padding(14)
+                RowCount = 6,
+                Padding = new Padding(14),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // key header
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // signed-in line
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // hint
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // key boxes
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // preview
+            k.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // actions
 
             var keyHdr = new Label
             {
@@ -195,7 +302,16 @@ namespace PatsKillerPro.Forms
                 AutoSize = true,
                 Margin = new Padding(0, 0, 0, 10)
             };
-            var keyHint = new Label
+
+            _lblKeyUser = new Label
+            {
+                Text = "Signed in as: --",
+                ForeColor = TextMain,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 6)
+            };
+            _lblKeyHint = new Label
             {
                 Text = "Enter the 16-character key from your email (format: XXXX-XXXX-XXXX-XXXX).",
                 ForeColor = TextDim,
@@ -204,7 +320,8 @@ namespace PatsKillerPro.Forms
                 Margin = new Padding(0, 0, 0, 10)
             };
             k.Controls.Add(keyHdr, 0, 0);
-            k.Controls.Add(keyHint, 0, 1);
+            k.Controls.Add(_lblKeyUser, 0, 1);
+            k.Controls.Add(_lblKeyHint, 0, 2);
 
             var keyRow = new FlowLayoutPanel
             {
@@ -217,38 +334,45 @@ namespace PatsKillerPro.Forms
 
             for (var i = 0; i < 4; i++)
             {
-                _keyParts[i] = new TextBox
-                {
-                    Width = 92,
-                    Height = 34,
-                    BackColor = BgColor,
-                    ForeColor = TextMain,
-                    BorderStyle = BorderStyle.FixedSingle,
-                    Font = new Font("Consolas", 16F, FontStyle.Bold),
-                    MaxLength = 4,
-                    TextAlign = HorizontalAlignment.Center,
-                    CharacterCasing = CharacterCasing.Upper,
-                    Margin = new Padding(i == 0 ? 0 : 10, 0, 0, 0)
-                };
-
                 var idx = i;
+                var panel = MakeKeyPartPanel(out _keyParts[i]);
+                panel.Margin = new Padding(i == 0 ? 0 : 10, 0, 0, 0);
+
                 _keyParts[i].TextChanged += (_, __) =>
                 {
                     if (_keyParts[idx].Text.Length == 4 && idx < 3)
                         _keyParts[idx + 1].Focus();
+                    UpdateKeyPreview();
                 };
 
                 _keyParts[i].KeyDown += (_, e) =>
                 {
+                    // Backspace across boxes
                     if (e.KeyCode == Keys.Back && _keyParts[idx].SelectionStart == 0 && idx > 0 && _keyParts[idx].TextLength == 0)
                     {
                         _keyParts[idx - 1].Focus();
                         _keyParts[idx - 1].SelectionStart = _keyParts[idx - 1].TextLength;
                         e.SuppressKeyPress = true;
+                        return;
+                    }
+
+                    // Ctrl+V paste support on any box
+                    if (e.Control && e.KeyCode == Keys.V)
+                    {
+                        try
+                        {
+                            var clip = Clipboard.GetText();
+                            if (TryFillKeyParts(clip))
+                                e.SuppressKeyPress = true;
+                        }
+                        catch { /* ignore */ }
                     }
                 };
 
-                keyRow.Controls.Add(_keyParts[i]);
+                _keyParts[i].GotFocus += (_, __) => panel.Invalidate();
+                _keyParts[i].LostFocus += (_, __) => panel.Invalidate();
+
+                keyRow.Controls.Add(panel);
                 if (i < 3)
                 {
                     keyRow.Controls.Add(new Label
@@ -262,9 +386,43 @@ namespace PatsKillerPro.Forms
                 }
             }
 
+            _lblKeyPreview = new Label
+            {
+                Text = "Key: ____-____-____-____",
+                ForeColor = TextDim,
+                Font = new Font("Consolas", 10F, FontStyle.Bold),
+                AutoSize = true,
+                Margin = new Padding(0, 8, 0, 0)
+            };
+
             _btnActivate = PrimaryButton("Activate / Replace");
             _btnActivate.Width = 260;
             _btnActivate.Click += async (_, __) => await ActivateAsync();
+
+            _btnPaste = SecondaryButton("Paste");
+            _btnPaste.Width = 110;
+            _btnPaste.Click += (_, __) =>
+            {
+                try
+                {
+                    var clip = Clipboard.GetText();
+                    if (!TryFillKeyParts(clip))
+                        MessageBox.Show("Clipboard does not look like a license key. Copy the full key from your email (XXXX-XXXX-XXXX-XXXX).", "Paste Failed", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch
+                {
+                    MessageBox.Show("Unable to read clipboard.", "Paste Failed", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            };
+
+            _btnClear = SecondaryButton("Clear");
+            _btnClear.Width = 110;
+            _btnClear.Click += (_, __) =>
+            {
+                foreach (var tb in _keyParts) tb.Text = "";
+                _keyParts[0].Focus();
+                UpdateKeyPreview();
+            };
 
             var keyActions = new FlowLayoutPanel
             {
@@ -274,9 +432,12 @@ namespace PatsKillerPro.Forms
                 Margin = new Padding(0, 12, 0, 0)
             };
             keyActions.Controls.Add(_btnActivate);
+            keyActions.Controls.Add(_btnPaste);
+            keyActions.Controls.Add(_btnClear);
 
-            k.Controls.Add(keyRow, 0, 2);
-            k.Controls.Add(keyActions, 0, 3);
+            k.Controls.Add(keyRow, 0, 3);
+            k.Controls.Add(_lblKeyPreview, 0, 4);
+            k.Controls.Add(keyActions, 0, 5);
 
             keyCard.Controls.Add(k);
             root.Controls.Add(keyCard, 0, 3);
@@ -320,6 +481,7 @@ namespace PatsKillerPro.Forms
             root.Controls.Add(footer, 0, 5);
 
             Controls.Add(root);
+            UpdateKeyPreview();
         }
 
         private Panel CardPanel()
@@ -329,7 +491,9 @@ namespace PatsKillerPro.Forms
                 Dock = DockStyle.Top,
                 BackColor = Surface,
                 Margin = new Padding(0, 0, 0, 14),
-                Padding = new Padding(1)
+                Padding = new Padding(1),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
             p.Paint += (_, e) =>
             {
@@ -392,6 +556,91 @@ namespace PatsKillerPro.Forms
             return b;
         }
 
+        /// <summary>
+        /// Creates a high-contrast 4-char license key input box (v15 style) with a themed border.
+        /// This avoids the "invisible textbox" problem on some Windows themes / DPI settings.
+        /// </summary>
+        private Panel MakeKeyPartPanel(out TextBox tb)
+        {
+            var panel = new Panel
+            {
+                Width = 96,
+                Height = 44,
+                Padding = new Padding(2),
+                BackColor = BgColor
+            };
+
+            tb = new TextBox
+            {
+                BorderStyle = BorderStyle.None,
+                BackColor = BgColor,
+                ForeColor = TextMain,
+                Font = new Font("Consolas", 16F, FontStyle.Bold),
+                MaxLength = 4,
+                TextAlign = HorizontalAlignment.Center,
+                CharacterCasing = CharacterCasing.Upper,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
+                ShortcutsEnabled = true
+            };
+
+	            // NOTE: 'tb' is an out-parameter. C# forbids capturing ref/out/in parameters
+	            // inside lambdas/anonymous methods. Copy it to a local variable before use.
+	            var tbLocal = tb;
+
+            // Limit to A-Z / 0-9 to reduce formatting mistakes.
+            tb.KeyPress += (_, e) =>
+            {
+                if (char.IsControl(e.KeyChar)) return;
+                if (!char.IsLetterOrDigit(e.KeyChar)) e.Handled = true;
+            };
+
+            panel.Controls.Add(tb);
+
+            panel.Paint += (_, e) =>
+            {
+	                var isFocused = tbLocal.Focused;
+                using var pen = new Pen(isFocused ? Accent : Border, isFocused ? 2 : 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
+            };
+
+            return panel;
+        }
+
+        private void UpdateKeyPreview()
+        {
+            try
+            {
+                var parts = _keyParts
+                    .Select(x => (x.Text ?? "").Trim().ToUpperInvariant())
+                    .Select(p => (p + "____").Substring(0, 4))
+                    .ToArray();
+
+                _lblKeyPreview.Text = "Key: " + string.Join("-", parts);
+                _lblKeyPreview.ForeColor = parts.All(p => !p.Contains('_')) ? TextMain : TextDim;
+            }
+            catch
+            {
+                // ignore preview failures
+            }
+        }
+
+        private bool TryFillKeyParts(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+
+            var cleaned = new string(raw.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+            if (cleaned.Length != 16) return false;
+
+            for (var i = 0; i < 4; i++)
+                _keyParts[i].Text = cleaned.Substring(i * 4, 4);
+
+            UpdateKeyPreview();
+            _keyParts[3].Focus();
+            _keyParts[3].SelectionStart = _keyParts[3].TextLength;
+            return true;
+        }
+
         private void AddCopyRow(TableLayoutPanel t, int row, string label, string value)
         {
             // row 0 is header
@@ -439,14 +688,76 @@ namespace PatsKillerPro.Forms
         private async Task RefreshUiAsync()
         {
             var email = LicenseService.Instance.UserEmail ?? "";
+            _lblHeaderUser.Text = string.IsNullOrWhiteSpace(email) ? "Signed in as: (not signed in)" : $"Signed in as: {email}";
             _lblSignedIn.Text = string.IsNullOrWhiteSpace(email) ? "Not signed in" : email;
+            _lblKeyUser.Text = string.IsNullOrWhiteSpace(email) ? "Signed in as: (not signed in)" : $"Signed in as: {email}";
             _lblSignedIn.ForeColor = string.IsNullOrWhiteSpace(email) ? Warning : TextMain;
 
             // Strict mode: show sign-in link if missing identity
             _lnkSignIn.Visible = !LicenseService.Instance.HasSsoIdentity;
 
+            // Best-effort pull of account licenses (masked) for UI selection.
+            try { await LicenseService.Instance.RefreshAccountLicensesAsync(); } catch { }
+            RenderAccountLicenses();
+
             var res = await LicenseService.Instance.ValidateAsync();
             RenderStatus(res);
+        }
+
+        private void RenderAccountLicenses()
+        {
+            try
+            {
+                _lstAccountLicenses.BeginUpdate();
+                _lstAccountLicenses.Items.Clear();
+
+                var list = LicenseService.Instance.AccountLicenses;
+
+                // Update header with count so the user understands what "(1 available)" means
+                try
+                {
+                    var c = list?.Count ?? 0;
+                    _lblAccountLicensesHeader.Text = c > 0 ? $"Account Licenses (masked) — {c}" : "Account Licenses (masked)";
+                }
+                catch { }
+                if (list == null || list.Count == 0)
+                {
+                    var it = new ListViewItem("No account licenses found");
+                    it.SubItems.Add("—");
+                    it.SubItems.Add("—");
+                    it.SubItems.Add("—");
+                    it.SubItems.Add("—");
+                    _lstAccountLicenses.Items.Add(it);
+                }
+                else
+                {
+                    foreach (var l in list.OrderByDescending(x => x.CreatedAt))
+                    {
+                        var exp = l.ExpiresAt?.ToString("yyyy-MM-dd") ?? "Never";
+                        var seats = l.MaxMachines > 0 ? l.MaxMachines.ToString() : "—";
+                        var used = l.MachinesUsed >= 0 ? l.MachinesUsed.ToString() : "—";
+
+                        var it = new ListViewItem(l.LicenseKeyMasked);
+                        it.SubItems.Add(l.LicenseType ?? "—");
+                        it.SubItems.Add(exp);
+                        it.SubItems.Add(seats);
+                        it.SubItems.Add(used);
+
+                        if (!l.IsActive)
+                            it.ForeColor = TextDim;
+
+                        _lstAccountLicenses.Items.Add(it);
+                    }
+                }
+            }
+            catch
+            {
+                // ignore UI rendering errors
+            }
+            finally
+            {
+                try { _lstAccountLicenses.EndUpdate(); } catch { }
+            }
         }
 
         private void RenderStatus(LicenseValidationResult res)
@@ -563,6 +874,8 @@ namespace PatsKillerPro.Forms
         {
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
             _btnActivate.Enabled = !busy && _btnActivate.Enabled;
+            if (_btnPaste != null) _btnPaste.Enabled = !busy;
+            if (_btnClear != null) _btnClear.Enabled = !busy;
             _btnRevalidate.Enabled = !busy && _btnRevalidate.Enabled;
             _btnDeactivate.Enabled = !busy && _btnDeactivate.Enabled;
         }
