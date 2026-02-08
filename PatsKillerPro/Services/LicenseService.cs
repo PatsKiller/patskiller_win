@@ -60,7 +60,6 @@ namespace PatsKillerPro.Services
         private readonly HttpClient _http;
         private string? _authToken;
         private string? _userEmail;
-        private string? _userDisplayName;
 
         private System.Threading.Timer? _heartbeatTimer;
         private LicenseCacheData? _cache;
@@ -81,7 +80,6 @@ namespace PatsKillerPro.Services
         public string? LicenseKey => _cache?.LicenseKey;
 
         public string? UserEmail => _userEmail;
-        public string? UserDisplayName => _userDisplayName;
         public bool HasSsoIdentity => !string.IsNullOrWhiteSpace(_authToken) && !string.IsNullOrWhiteSpace(_userEmail);
 
         /// <summary>True if the cached license needs online revalidation (>7 days).</summary>
@@ -160,21 +158,14 @@ namespace PatsKillerPro.Services
 /// </summary>
 public void SetAuthContext(string authToken, string userEmail)
 {
-    SetAuthContext(authToken, userEmail, null);
-}
-
-public void SetAuthContext(string authToken, string userEmail, string? displayName)
-{
     _authToken = authToken;
     _userEmail = userEmail;
-    _userDisplayName = displayName;
 }
 
 public void ClearAuthContext()
 {
     _authToken = null;
     _userEmail = null;
-    _userDisplayName = null;
 
     lock (_accountLicensesLock)
         _accountLicenses = new List<AccountLicenseSummary>();
