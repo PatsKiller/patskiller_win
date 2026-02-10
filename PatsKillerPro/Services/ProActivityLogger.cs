@@ -62,7 +62,8 @@ namespace PatsKillerPro.Services
         {
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             MachineId = GenerateMachineId();
-            AppVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "2.0.0";
+            // Use informational version (includes CI build number) for supportability
+            this.AppVersion = PatsKillerPro.Utils.AppVersion.Informational;
         }
 
         private static string GenerateMachineId()
