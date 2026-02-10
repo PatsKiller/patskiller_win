@@ -59,7 +59,7 @@ namespace PatsKillerPro
         private Panel _header = null!, _tabBar = null!, _content = null!, _logPanel = null!, _loginPanel = null!;
         private Panel _patsTab = null!, _diagTab = null!, _freeTab = null!;
         private Button _btnTab1 = null!, _btnTab2 = null!, _btnTab3 = null!, _btnLogout = null!;
-        private Label _lblTokensTotal = null!, _lblTokensPromo = null!, _lblPromoExpiry = null!, _lblLicense = null!, _lblUser = null!, _lblUserEmail = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
+        private Label _lblTokensTotal = null!, _lblTokensPromo = null!, _lblPromoExpiry = null!, _lblLicense = null!, _lblUser = null!, _lblUserEmail = null!, _lblStatus = null!, _lblDeviceBanner = null!, _lblVin = null!, _lblKeys = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
@@ -680,7 +680,20 @@ _btnLogout = AutoBtn("Logout", BTN_BG);
             _lblStatus = new Label { Text = "Status: Not Connected", Font = new Font("Segoe UI", 11), ForeColor = WARNING, AutoSize = true, Margin = DpiPad(30, 12, 0, 0) };
             row1.Controls.Add(_lblStatus);
 
+// Device banner (operator-friendly)
+            var row1b = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true, Margin = new Padding(0, Dpi(6), 0, 0) };
+            _lblDeviceBanner = new Label
+            {
+                Text = "Selected Device: —",
+                Font = new Font("Segoe UI", 10),
+                ForeColor = TEXT_DIM,
+                AutoSize = true,
+                Margin = DpiPad(0, 0, 0, 0)
+            };
+            row1b.Controls.Add(_lblDeviceBanner);
+
             sec1.Controls.Add(row1);
+            sec1.Controls.Add(row1b);
             layout.Controls.Add(sec1, 0, 0);
 
             // === SECTION 2: VEHICLE INFORMATION ===
@@ -1759,24 +1772,61 @@ private void ApplyAuthHeader()
 
         private async void BtnConnect_Click(object? s, EventArgs e)
         {
-            if (_cmbDevices.SelectedIndex < 0 || _devices.Count == 0)
+            // If no cached scan results, run a quick scan.
+            if (_devices.Count == 0)
             {
-                MessageBox.Show("Please scan and select a device first");
+                try { _devices = J2534DeviceScanner.ScanForDevices(); } catch { /* ignore */ }
+            }
+
+            if (_devices.Count == 0)
+            {
+                MessageBox.Show("No J2534 devices detected. Click 'Scan Devices' and ensure your interface driver is installed.");
                 return;
             }
 
-            var idx = _cmbDevices.SelectedIndex;
-            if (idx >= _devices.Count)
+            // --- Device selection ---
+            J2534DeviceInfo device;
+            string? probeVin = null;
+            double probeVoltage = 0;
+            string probeStatus = "";
+
+            if (_devices.Count == 1)
             {
-                MessageBox.Show("Please select a valid device");
-                return;
+                device = _devices[0];
+            }
+            else
+            {
+                using var dlg = new DeviceSelectForm(_devices, TimeSpan.FromSeconds(20));
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Selection == null)
+                    return;
+
+                device = dlg.Selection.Device;
+                probeVin = dlg.Selection.Vin;
+                probeVoltage = dlg.Selection.Voltage;
+                probeStatus = dlg.Selection.Status;
             }
 
-            var startTime = DateTime.Now;
+            // Sync dropdown selection (visual consistency)
+            try
+            {
+                var matchIdx = _devices.FindIndex(d => d.FunctionLibrary == device.FunctionLibrary);
+                if (matchIdx >= 0)
+                    _cmbDevices.SelectedIndex = matchIdx;
+            }
+            catch { /* ignore */ }
+
+            // Pre-connect banner (what we are about to use)
+            if (_lblDeviceBanner != null)
+            {
+                _lblDeviceBanner.Text = _devices.Count > 1
+                    ? $"Selected Device: {device.Name} ({device.Vendor}) — {probeStatus}".Trim()
+                    : $"Selected Device: {device.Name} ({device.Vendor})";
+            }
+
+var startTime = DateTime.Now;
 
             try
             {
-                var device = _devices[idx];
                 var result = await J2534Service.Instance.ConnectDeviceAsync(device);
                 
                 if (result.Success)
@@ -1784,7 +1834,20 @@ private void ApplyAuthHeader()
                     _isConnected = true;
                     _lblStatus.Text = "Status: Connected";
                     _lblStatus.ForeColor = SUCCESS;
+                    if (_lblDeviceBanner != null) _lblDeviceBanner.Text = $"Selected Device: {device.Name} ({device.Vendor}) — Connected";
                     Log("success", $"Connected to {device.Name}");
+
+                    // If the probe provided VIN/VBATT, surface it immediately (VIN may be unavailable).
+                    if (!string.IsNullOrWhiteSpace(probeVin))
+                    {
+                        _lblVin.Text = $"VIN: {probeVin}";
+                        _lblVin.ForeColor = SUCCESS;
+                    }
+                    else
+                    {
+                        _lblVin.Text = "VIN: —————————————————";
+                        _lblVin.ForeColor = TEXT_DIM;
+                    }
                     
                     ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
                     {
@@ -1794,13 +1857,14 @@ private void ApplyAuthHeader()
                         TokenChange = 0, // FREE
                         Details = $"Connected to {device.Name}",
                         ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds,
-                        Metadata = new { deviceName = device.Name, vendor = device.Vendor }
+                        Metadata = new { deviceName = device.Name, vendor = device.Vendor, probeVin = probeVin, probeVoltage = probeVoltage }
                     });
                 }
                 else
                 {
                     _lblStatus.Text = "Status: Connection Failed";
                     _lblStatus.ForeColor = DANGER;
+                    if (_lblDeviceBanner != null) _lblDeviceBanner.Text = $"Selected Device: {device.Name} ({device.Vendor}) — Connection Failed";
                     Log("error", $"Failed: {result.Error}");
                     
                     ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
