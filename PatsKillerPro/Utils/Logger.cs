@@ -36,15 +36,9 @@ namespace PatsKillerPro.Utils
         /// </summary>
         private static string GetVersion()
         {
-            try
-            {
-                var version = Assembly.GetExecutingAssembly().GetName().Version;
-                return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "2.0.0";
-            }
-            catch
-            {
-                return "2.0.0";
-            }
+            // Prefer informational version (includes CI build number) for supportability
+            try { return AppVersion.Display; }
+            catch { return "2.8.25"; }
         }
 
         /// <summary>

@@ -59,7 +59,12 @@ namespace PatsKillerPro
         private Panel _header = null!, _tabBar = null!, _content = null!, _logPanel = null!, _loginPanel = null!;
         private Panel _patsTab = null!, _diagTab = null!, _freeTab = null!;
         private Button _btnTab1 = null!, _btnTab2 = null!, _btnTab3 = null!, _btnLogout = null!;
-        private Label _lblTokensTotal = null!, _lblTokensPromo = null!, _lblPromoExpiry = null!, _lblLicense = null!, _lblUser = null!, _lblUserEmail = null!, _lblStatus = null!, _lblVin = null!, _lblKeys = null!;
+        private Label _lblTokensTotal = null!, _lblTokensPromo = null!, _lblPromoExpiry = null!, _lblLicense = null!, _lblUser = null!, _lblUserEmail = null!, _lblStatus = null!, _lblDeviceBanner = null!, _lblVin = null!, _lblKeys = null!;
+        private Label _lblAppVersionLeft = null!;
+
+        private Panel _toastPanel = null!;
+        private Label _lblToast = null!;
+        private System.Windows.Forms.Timer _toastTimer = null!;
         private ComboBox _cmbDevices = null!, _cmbVehicles = null!;
         private TextBox _txtOutcode = null!, _txtIncode = null!, _txtEmail = null!, _txtPassword = null!;
         private RichTextBox _txtLog = null!;
@@ -122,6 +127,29 @@ namespace PatsKillerPro
             }
             catch { /* ignore */ }
 
+            // Token toast: show "Used N token(s)" whenever the total decreases.
+            try
+            {
+                TokenBalanceService.Instance.BalanceChanged += e =>
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            if (e.TotalTokens < e.PreviousTotal)
+                            {
+                                var used = e.PreviousTotal - e.TotalTokens;
+                                if (used > 0)
+                                    ShowTokenToast($"Used {used} token{(used == 1 ? "" : "s")}", 5000);
+                            }
+                        }));
+                    }
+                    catch { /* ignore */ }
+                };
+            }
+            catch { /* ignore */ }
+
             // Dispose cached images cleanly
             this.FormClosed += (_, __) => { try { _logoImage?.Dispose(); } catch { } };
         }
@@ -137,7 +165,8 @@ namespace PatsKillerPro
 
         private void InitializeComponent()
         {
-            this.Text = "PatsKiller Pro 2026";
+            // Window title includes build version for easy operator support & troubleshooting
+            this.Text = $"PatsKiller Pro 2026 v{AppVersion.Display}";
             this.ClientSize = new Size(1400, 900);
             // Keep the app usable on common laptop screens (e.g., 1366x768)
             this.MinimumSize = new Size(1100, 720);
@@ -371,7 +400,7 @@ namespace PatsKillerPro
                 Dock = DockStyle.Top,
                 // Increased height so the two-line identity (Name + Email) is always visible
                 // alongside the token/license stack at common DPI scaling settings.
-                Height = Dpi(112),
+                Height = Dpi(132),
                 BackColor = SURFACE,
                 Padding = DpiPad(18, 12, 18, 12)
             };
@@ -417,6 +446,7 @@ namespace PatsKillerPro
             };
             textStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             textStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            textStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var title = new Label
             {
@@ -435,9 +465,20 @@ namespace PatsKillerPro
                 AutoEllipsis = true,
                 MaximumSize = new Size(Dpi(900), 0),
                 Margin = new Padding(0, Dpi(2), 0, 0),
-                Visible = false};
+                Visible = false
+            };
+
+            _lblAppVersionLeft = new Label
+            {
+                Text = $"v{AppVersion.Display}",
+                Font = new Font("Segoe UI", 9),
+                ForeColor = TEXT_DIM,
+                AutoSize = true,
+                Margin = new Padding(0, Dpi(4), 0, 0)
+            };
             textStack.Controls.Add(title, 0, 0);
             textStack.Controls.Add(subtitle, 0, 1);
+            textStack.Controls.Add(_lblAppVersionLeft, 0, 2);
 
             left.Controls.Add(logo, 0, 0);
             left.Controls.Add(textStack, 1, 0);
@@ -550,6 +591,45 @@ _btnLogout = AutoBtn("Logout", BTN_BG);
             headerTable.Controls.Add(meta, 1, 0);
             headerTable.Controls.Add(_btnLogout, 2, 0);
             _header.Controls.Add(headerTable);
+
+            // Toast (top-right, under Tokens): used for token-consumption notices ("Used 1 token").
+            _toastPanel = new Panel
+            {
+                Visible = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = Color.FromArgb(28, 40, 56),
+                Padding = DpiPad(10, 6, 10, 6),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            _toastPanel.Paint += (s, e) =>
+            {
+                using var p = new Pen(Color.FromArgb(65, 90, 120));
+                var r = _toastPanel.ClientRectangle;
+                r.Width -= 1;
+                r.Height -= 1;
+                e.Graphics.DrawRectangle(p, r);
+            };
+
+            _lblToast = new Label
+            {
+                AutoSize = true,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Text = "",
+                MaximumSize = new Size(Dpi(360), 0)
+            };
+            _toastPanel.Controls.Add(_lblToast);
+            _toastPanel.Cursor = Cursors.Hand;
+            _toastPanel.Click += (s, e) => HideTokenToast();
+            _lblToast.Click += (s, e) => HideTokenToast();
+
+            _toastTimer = new Timer();
+            _toastTimer.Tick += (s, e) => HideTokenToast();
+
+            _header.Controls.Add(_toastPanel);
+            _header.Resize += (s, e) => PositionTokenToast();
+            this.Shown += (s, e) => PositionTokenToast();
 
             // TAB BAR (Dock below header, height scales with DPI)
             _tabBar = new Panel
@@ -680,7 +760,20 @@ _btnLogout = AutoBtn("Logout", BTN_BG);
             _lblStatus = new Label { Text = "Status: Not Connected", Font = new Font("Segoe UI", 11), ForeColor = WARNING, AutoSize = true, Margin = DpiPad(30, 12, 0, 0) };
             row1.Controls.Add(_lblStatus);
 
+// Device banner (operator-friendly)
+            var row1b = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, WrapContents = true, Margin = new Padding(0, Dpi(6), 0, 0) };
+            _lblDeviceBanner = new Label
+            {
+                Text = "Selected Device: —",
+                Font = new Font("Segoe UI", 10),
+                ForeColor = TEXT_DIM,
+                AutoSize = true,
+                Margin = DpiPad(0, 0, 0, 0)
+            };
+            row1b.Controls.Add(_lblDeviceBanner);
+
             sec1.Controls.Add(row1);
+            sec1.Controls.Add(row1b);
             layout.Controls.Add(sec1, 0, 0);
 
             // === SECTION 2: VEHICLE INFORMATION ===
@@ -1582,6 +1675,63 @@ private void ApplyAuthHeader()
     _btnLogout.Visible = false;
 }
 
+        private void ShowTokenToast(string message, int milliseconds = 5000)
+        {
+            if (_toastPanel == null || _lblToast == null) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => ShowTokenToast(message, milliseconds)));
+                return;
+            }
+
+            _lblToast.Text = message;
+            _toastPanel.Visible = true;
+            _toastPanel.BringToFront();
+            PositionTokenToast();
+
+            _toastTimer.Stop();
+            _toastTimer.Interval = Math.Max(1000, milliseconds);
+            _toastTimer.Start();
+        }
+
+        private void HideTokenToast()
+        {
+            if (_toastPanel == null) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(HideTokenToast));
+                return;
+            }
+            _toastTimer.Stop();
+            _toastPanel.Visible = false;
+        }
+
+        private void PositionTokenToast()
+        {
+            if (_toastPanel == null || _lblTokensTotal == null || _header == null) return;
+            if (!_lblTokensTotal.IsHandleCreated || !_header.IsHandleCreated) return;
+
+            try
+            {
+                // Position: right-aligned to Tokens label, slightly below it.
+                var tokenBottomRightScreen = _lblTokensTotal.PointToScreen(new Point(_lblTokensTotal.Width, _lblTokensTotal.Height));
+                var tokenBottomRightClient = _header.PointToClient(tokenBottomRightScreen);
+
+                var x = tokenBottomRightClient.X - _toastPanel.Width;
+                var y = tokenBottomRightClient.Y + Dpi(6);
+
+                // Clamp inside header bounds.
+                x = Math.Max(_header.Padding.Left, Math.Min(x, _header.ClientSize.Width - _toastPanel.Width - _header.Padding.Right));
+                y = Math.Max(_header.Padding.Top, Math.Min(y, _header.ClientSize.Height - _toastPanel.Height - _header.Padding.Bottom));
+
+                _toastPanel.Location = new Point(x, y);
+            }
+            catch
+            {
+                // best effort
+            }
+        }
+
         private async System.Threading.Tasks.Task<bool> PromptAuthModalAsync()
         {
             // Modal auth flow:
@@ -1759,24 +1909,61 @@ private void ApplyAuthHeader()
 
         private async void BtnConnect_Click(object? s, EventArgs e)
         {
-            if (_cmbDevices.SelectedIndex < 0 || _devices.Count == 0)
+            // If no cached scan results, run a quick scan.
+            if (_devices.Count == 0)
             {
-                MessageBox.Show("Please scan and select a device first");
+                try { _devices = J2534DeviceScanner.ScanForDevices(); } catch { /* ignore */ }
+            }
+
+            if (_devices.Count == 0)
+            {
+                MessageBox.Show("No J2534 devices detected. Click 'Scan Devices' and ensure your interface driver is installed.");
                 return;
             }
 
-            var idx = _cmbDevices.SelectedIndex;
-            if (idx >= _devices.Count)
+            // --- Device selection ---
+            J2534DeviceInfo device;
+            string? probeVin = null;
+            double probeVoltage = 0;
+            string probeStatus = "";
+
+            if (_devices.Count == 1)
             {
-                MessageBox.Show("Please select a valid device");
-                return;
+                device = _devices[0];
+            }
+            else
+            {
+                using var dlg = new DeviceSelectForm(_devices, TimeSpan.FromSeconds(20));
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Selection == null)
+                    return;
+
+                device = dlg.Selection.Device;
+                probeVin = dlg.Selection.Vin;
+                probeVoltage = dlg.Selection.Voltage;
+                probeStatus = dlg.Selection.Status;
             }
 
-            var startTime = DateTime.Now;
+            // Sync dropdown selection (visual consistency)
+            try
+            {
+                var matchIdx = _devices.FindIndex(d => d.FunctionLibrary == device.FunctionLibrary);
+                if (matchIdx >= 0)
+                    _cmbDevices.SelectedIndex = matchIdx;
+            }
+            catch { /* ignore */ }
+
+            // Pre-connect banner (what we are about to use)
+            if (_lblDeviceBanner != null)
+            {
+                _lblDeviceBanner.Text = _devices.Count > 1
+                    ? $"Selected Device: {device.Name} ({device.Vendor}) — {probeStatus}".Trim()
+                    : $"Selected Device: {device.Name} ({device.Vendor})";
+            }
+
+var startTime = DateTime.Now;
 
             try
             {
-                var device = _devices[idx];
                 var result = await J2534Service.Instance.ConnectDeviceAsync(device);
                 
                 if (result.Success)
@@ -1784,7 +1971,20 @@ private void ApplyAuthHeader()
                     _isConnected = true;
                     _lblStatus.Text = "Status: Connected";
                     _lblStatus.ForeColor = SUCCESS;
+                    if (_lblDeviceBanner != null) _lblDeviceBanner.Text = $"Selected Device: {device.Name} ({device.Vendor}) — Connected";
                     Log("success", $"Connected to {device.Name}");
+
+                    // If the probe provided VIN/VBATT, surface it immediately (VIN may be unavailable).
+                    if (!string.IsNullOrWhiteSpace(probeVin))
+                    {
+                        _lblVin.Text = $"VIN: {probeVin}";
+                        _lblVin.ForeColor = SUCCESS;
+                    }
+                    else
+                    {
+                        _lblVin.Text = "VIN: —————————————————";
+                        _lblVin.ForeColor = TEXT_DIM;
+                    }
                     
                     ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
                     {
@@ -1794,13 +1994,14 @@ private void ApplyAuthHeader()
                         TokenChange = 0, // FREE
                         Details = $"Connected to {device.Name}",
                         ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds,
-                        Metadata = new { deviceName = device.Name, vendor = device.Vendor }
+                        Metadata = new { deviceName = device.Name, vendor = device.Vendor, probeVin = probeVin, probeVoltage = probeVoltage }
                     });
                 }
                 else
                 {
                     _lblStatus.Text = "Status: Connection Failed";
                     _lblStatus.ForeColor = DANGER;
+                    if (_lblDeviceBanner != null) _lblDeviceBanner.Text = $"Selected Device: {device.Name} ({device.Vendor}) — Connection Failed";
                     Log("error", $"Failed: {result.Error}");
                     
                     ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
