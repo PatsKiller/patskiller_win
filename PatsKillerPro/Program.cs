@@ -33,7 +33,7 @@ namespace PatsKillerPro
             {
                 // Initialize logging
                 Logger.Initialize();
-                Logger.Info("PatsKiller Pro v1.0.0 starting...");
+                Logger.Info($"PatsKiller Pro v{AppVersion.Display} starting...");
                 
                 // Configure application
                 Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);

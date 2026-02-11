@@ -9,7 +9,23 @@
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <AssemblyName>PatsKillerPro</AssemblyName>
     <RootNamespace>PatsKillerPro</RootNamespace>
-    <Version>2.1.0</Version>
+    <!--
+      Versioning
+      - VersionPrefix: human-readable semantic version (3-part)
+      - BuildNumber: auto-increments in CI (GitHub Actions run number), defaults to 0 locally
+      - FileVersion: 4-part Windows file version (supports n+1 on each CI run)
+      - InformationalVersion: used for UI header + logs
+    -->
+    <VersionPrefix>2.8.25</VersionPrefix>
+
+    <!-- CI run number (n+1). For GitHub Actions, this is available as env var GITHUB_RUN_NUMBER. -->
+    <BuildNumber Condition="'$(GITHUB_RUN_NUMBER)' != ''">$(GITHUB_RUN_NUMBER)</BuildNumber>
+    <BuildNumber Condition="'$(BuildNumber)' == ''">0</BuildNumber>
+
+    <Version>$(VersionPrefix)</Version>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).$(BuildNumber)</FileVersion>
+    <InformationalVersion>$(VersionPrefix)+$(BuildNumber)</InformationalVersion>
     <Company>PatsKiller</Company>
     <Product>PatsKiller Pro</Product>
     <Authors>PatsKiller</Authors>
