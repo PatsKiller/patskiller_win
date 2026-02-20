@@ -69,29 +69,38 @@ namespace PatsKillerPro
             MinimizeBox = false;
             ShowInTaskbar = false;
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new System.Drawing.Size(460, 210);
+
+            // DPI-safe layout: prevents overlapping/clipping at 125%/150% Windows scaling.
+            // Rendering/layout only — no auth/licensing functionality is changed.
+            AutoSize = true;
+            AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            Padding = new Padding(18);
+            MinimumSize = new System.Drawing.Size(520, 260);
 
             _lblTitle.Text = "Sign in to PatsKiller Pro";
             _lblTitle.AutoSize = true;
-            _lblTitle.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold);
-            _lblTitle.Location = new System.Drawing.Point(18, 16);
+            _lblTitle.Font = new System.Drawing.Font("Segoe UI", 18F, System.Drawing.FontStyle.Bold);
+            _lblTitle.Margin = new Padding(0, 0, 0, 8);
 
             _lblBody.Text = "Use Google to unlock Pro features. If you already have a license key, you can activate it instead.";
-            _lblBody.AutoSize = false;
-            _lblBody.Width = ClientSize.Width - 36;
-            _lblBody.Height = 40;
-            _lblBody.Location = new System.Drawing.Point(18, 44);
+            _lblBody.AutoSize = true;
+            _lblBody.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Regular);
+            _lblBody.Margin = new Padding(0, 0, 0, 14);
+            // Wrap instead of overlapping buttons.
+            _lblBody.MaximumSize = new System.Drawing.Size(640, 0);
 
             _btnGoogle.Text = "Continue with Google";
-            _btnGoogle.Width = ClientSize.Width - 36;
-            _btnGoogle.Height = 30;
-            _btnGoogle.Location = new System.Drawing.Point(18, 90);
+            _btnGoogle.AutoSize = true;
+            _btnGoogle.Height = 44;
+            _btnGoogle.Dock = DockStyle.Fill;
+            _btnGoogle.Margin = new Padding(0, 0, 0, 10);
             _btnGoogle.Click += async (_, __) => await StartGoogleAuthAsync();
 
             _btnLicenseKey.Text = "I have a license key";
-            _btnLicenseKey.Width = ClientSize.Width - 36;
-            _btnLicenseKey.Height = 30;
-            _btnLicenseKey.Location = new System.Drawing.Point(18, 126);
+            _btnLicenseKey.AutoSize = true;
+            _btnLicenseKey.Height = 44;
+            _btnLicenseKey.Dock = DockStyle.Fill;
+            _btnLicenseKey.Margin = new Padding(0, 0, 0, 14);
             _btnLicenseKey.Click += (_, __) =>
             {
                 DialogResult = DialogResult.Retry;
@@ -99,9 +108,9 @@ namespace PatsKillerPro
             };
 
             _btnCancel.Text = "Cancel";
-            _btnCancel.Width = 90;
-            _btnCancel.Height = 28;
-            _btnCancel.Location = new System.Drawing.Point(ClientSize.Width - 18 - 90, 166);
+            _btnCancel.Width = 100;
+            _btnCancel.Height = 34;
+            _btnCancel.Anchor = AnchorStyles.Right;
             _btnCancel.Click += (_, __) =>
             {
                 DialogResult = DialogResult.Cancel;
@@ -109,12 +118,48 @@ namespace PatsKillerPro
             };
 
             _lblStatus.Text = "";
-            _lblStatus.AutoSize = false;
-            _lblStatus.Width = ClientSize.Width - 18 - 18 - _btnCancel.Width - 8;
-            _lblStatus.Height = 40;
-            _lblStatus.Location = new System.Drawing.Point(18, 162);
+            _lblStatus.AutoSize = true;
+            _lblStatus.Font = new System.Drawing.Font("Segoe UI", 9.5F, System.Drawing.FontStyle.Regular);
+            _lblStatus.Margin = new Padding(0, 0, 10, 0);
 
-            Controls.AddRange(new Control[] { _lblTitle, _lblBody, _btnGoogle, _btnLicenseKey, _btnCancel, _lblStatus });
+            // Root layout container.
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 5,
+                Padding = new Padding(0),
+                Margin = new Padding(0)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+            // Footer: status (left) + cancel (right)
+            var footer = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0)
+            };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            footer.Controls.Add(_lblStatus, 0, 0);
+            footer.Controls.Add(_btnCancel, 1, 0);
+
+            root.Controls.Add(_lblTitle, 0, 0);
+            root.Controls.Add(_lblBody, 0, 1);
+            root.Controls.Add(_btnGoogle, 0, 2);
+            root.Controls.Add(_btnLicenseKey, 0, 3);
+            root.Controls.Add(footer, 0, 4);
+
+            Controls.Add(root);
+
+            AcceptButton = _btnGoogle;
+            CancelButton = _btnCancel;
 
             // Http defaults
             _http.Timeout = TimeSpan.FromSeconds(15);
