@@ -54,9 +54,20 @@ namespace PatsKillerPro.Utils
                     var parts = info.Split('+', 2, StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length == 2)
                     {
+                        // InformationalVersion can occasionally include extra suffixes (e.g. commit hash)
+                        // like: "2.8.25+200.a96c33286d". For operator-facing UI, keep it short and deterministic.
                         var build = parts[1]
                             .Replace("build.", "", StringComparison.OrdinalIgnoreCase)
                             .Trim();
+
+                        // If we have "200.<anything>" or "200-<anything>", keep just "200".
+                        // Also handle "200+<anything>" just in case a nested + appears.
+                        if (!string.IsNullOrWhiteSpace(build))
+                        {
+                            var cut = build.Split(new[] { '.', '-', '+', ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                            if (cut.Length > 0)
+                                build = cut[0];
+                        }
 
                         if (!string.IsNullOrWhiteSpace(build))
                             return $"{parts[0]} (build {build})";
