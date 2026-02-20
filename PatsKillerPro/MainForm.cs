@@ -1495,6 +1495,7 @@ if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
     TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
     IncodeService.Instance.SetAuthContext(_authToken, _userEmail);
     LicenseService.Instance.SetAuthContext(_authToken, _userEmail, _userDisplayName);
+    AdminApprovalService.Instance.SetAuthContext(_authToken, _userEmail);
     Logger.Info($"[MainForm] Session restored for: {_userEmail}");
 }
         }
@@ -1515,6 +1516,8 @@ if (!string.IsNullOrEmpty(_authToken) && !string.IsNullOrEmpty(_userEmail))
             _userEmail = "";
             _tokenBalance = 0;
             _userDisplayName = "";
+
+            try { AdminApprovalService.Instance.SetAuthContext(null, null); } catch { }
 
             Settings.SetString("auth_token", "");
             Settings.SetString("refresh_token", "");
@@ -1821,6 +1824,7 @@ private void ApplyAuthHeader()
             TokenBalanceService.Instance.SetAuthContext(_authToken, _userEmail);
             IncodeService.Instance.SetAuthContext(_authToken, _userEmail);
             LicenseService.Instance.SetAuthContext(_authToken, _userEmail, _userDisplayName);
+            AdminApprovalService.Instance.SetAuthContext(_authToken, _userEmail);
 
             // Strict license validation now has the Bearer token
             try { await LicenseService.Instance.ValidateAsync(); } catch { /* best effort */ }
@@ -2935,9 +2939,11 @@ private async void BtnErase_Click(object? s, EventArgs e)
         }
 
         // === PHASE 2: ADVANCED TOOLS HANDLERS ===
-        private void BtnTargets_Click(object? s, EventArgs e)
+        private async void BtnTargets_Click(object? s, EventArgs e)
         {
             if (!_isConnected) { MessageBox.Show("Connect to vehicle first"); return; }
+
+            if (!await EnsureAdminApprovedAsync("Target Blocks")) return;
             try
             {
                 var uds = J2534Service.Instance.GetUdsService();
@@ -2963,9 +2969,12 @@ private async void BtnErase_Click(object? s, EventArgs e)
             catch (Exception ex) { ShowError("Error", "Failed to open Key Counters form", ex); }
         }
 
-        private void BtnEngineering_Click(object? s, EventArgs e)
+        private async void BtnEngineering_Click(object? s, EventArgs e)
         {
             if (!_isConnected) { MessageBox.Show("Connect to vehicle first"); return; }
+
+            if (!await EnsureAdminApprovedAsync("Engineering Mode")) return;
+
             var result = MessageBox.Show(
                 "⚠️ ENGINEERING MODE WARNING ⚠️\n\n" +
                 "This mode provides direct access to vehicle modules.\n" +
@@ -2985,6 +2994,63 @@ private async void BtnErase_Click(object? s, EventArgs e)
                 form.ShowDialog(this);
             }
             catch (Exception ex) { ShowError("Error", "Failed to open Engineering form", ex); }
+        }
+
+        private async Task<bool> EnsureAdminApprovedAsync(string featureName)
+        {
+            if (!IsLoggedIn)
+            {
+                MessageBox.Show("Please sign in first.");
+                return false;
+            }
+
+            try
+            {
+                var record = await AdminApprovalService.Instance.GetApprovalAsync();
+
+                if (record != null && record.IsApproved)
+                    return true;
+
+                if (record != null && record.IsPending)
+                {
+                    var notes = string.IsNullOrWhiteSpace(record.Notes) ? "" : $"\n\nNotes: {record.Notes}";
+                    MessageBox.Show($"Admin approval is pending for {featureName}.\n\nStatus: PENDING{notes}", "Admin Approval", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return false;
+                }
+
+                if (record != null && record.IsRejected)
+                {
+                    var notes = string.IsNullOrWhiteSpace(record.Notes) ? "" : $"\n\nNotes: {record.Notes}";
+                    var resubmit = MessageBox.Show(
+                        $"Admin approval was rejected for {featureName}.\n\nStatus: REJECTED{notes}\n\nSubmit a new request?",
+                        "Admin Approval",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning);
+                    if (resubmit != DialogResult.Yes) return false;
+
+                    var (ok, msg) = await AdminApprovalService.Instance.RequestAccessAsync();
+                    MessageBox.Show(msg, ok ? "Request Submitted" : "Request Failed", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Error);
+                    return false;
+                }
+
+                // No row found (or could not parse). Offer to request access.
+                var ask = MessageBox.Show(
+                    $"{featureName} requires admin approval.\n\nRequest access now?",
+                    "Admin Approval",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (ask != DialogResult.Yes) return false;
+
+                var (success, message) = await AdminApprovalService.Instance.RequestAccessAsync();
+                MessageBox.Show(message, success ? "Request Submitted" : "Request Failed", MessageBoxButtons.OK, success ? MessageBoxIcon.Information : MessageBoxIcon.Error);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                ShowError("Admin Approval", $"Failed to validate admin approval for {featureName}", ex);
+                return false;
+            }
         }
         #endregion
 
