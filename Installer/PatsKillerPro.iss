@@ -2,16 +2,22 @@
 ; Inno Setup 6.x
 
 #define MyAppName "PatsKiller Pro"
-#define MyAppVersion "2.0.0"
 #define MyAppPublisher "PatsKiller"
 #define MyAppURL "https://patskiller.com"
 #define MyAppExeName "PatsKillerPro.exe"
 
+; ---- AUTO-VERSION FROM PUBLISHED EXE ----
+; Ensure your build runs: dotnet publish ... -o ..\publish
+#define MyAppVersionFull GetFileVersion("..\publish\" + MyAppExeName)   ; e.g. 2.8.25.203
+#define _lastDotPos RPos(".", MyAppVersionFull)
+#define MyAppBuild Copy(MyAppVersionFull, _lastDotPos + 1)
+#define MyAppVersionShort Copy(MyAppVersionFull, 1, _lastDotPos - 1)
+
 [Setup]
 AppId={{A7B8C9D0-1234-5678-ABCD-EF0123456789}
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} {#MyAppVersion}
+AppVersion={#MyAppVersionFull}
+AppVerName={#MyAppName} {#MyAppVersionShort} (build {#MyAppBuild})
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/support
@@ -21,7 +27,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 LicenseFile=license.txt
 OutputDir=Output
-OutputBaseFilename=PatsKillerPro_Setup_v{#MyAppVersion}
+OutputBaseFilename=PatsKillerPro_Setup_v{#MyAppVersionShort}_b{#MyAppBuild}
 SetupIconFile=..\PatsKillerPro\Resources\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -31,11 +37,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
-VersionInfoVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersionFull}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Ford & Lincoln PATS Key Programming Solution
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersionShort}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

@@ -55,6 +55,7 @@ namespace PatsKillerPro.Forms
             BackColor = BgColor;
             ForeColor = TextMain;
             Font = new Font("Segoe UI", 10F);
+            AutoScaleMode = AutoScaleMode.Dpi;
             MinimumSize = new Size(820, 620);
             ClientSize = new Size(860, 680);
 
@@ -403,6 +404,9 @@ namespace PatsKillerPro.Forms
             _btnActivate.Width = 260;
             _btnActivate.Click += async (_, __) => await ActivateAsync();
 
+            // UX: allow Enter to submit activation (routes to the same handler).
+            AcceptButton = _btnActivate;
+
             _btnPaste = SecondaryButton("Paste");
             _btnPaste.Width = 110;
             _btnPaste.Click += (_, __) =>
@@ -462,11 +466,12 @@ namespace PatsKillerPro.Forms
             // Footer buttons
             var footer = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 FlowDirection = FlowDirection.RightToLeft,
                 AutoSize = true,
                 WrapContents = false,
-                Margin = new Padding(0)
+                Margin = new Padding(0),
+                Padding = new Padding(0)
             };
 
             var btnClose = SecondaryButton("Close");
@@ -536,7 +541,11 @@ namespace PatsKillerPro.Forms
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Margin = new Padding(0, 0, 10, 0)
+                Margin = new Padding(0, 0, 10, 0),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(14, 0, 14, 0),
+                MinimumSize = new Size(160, 40)
             };
             b.FlatAppearance.BorderSize = 0;
             return b;
@@ -553,7 +562,11 @@ namespace PatsKillerPro.Forms
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Margin = new Padding(0, 0, 10, 0)
+                Margin = new Padding(0, 0, 10, 0),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(14, 0, 14, 0),
+                MinimumSize = new Size(110, 40)
             };
             b.FlatAppearance.BorderColor = Border;
             b.FlatAppearance.BorderSize = 1;
@@ -885,11 +898,14 @@ namespace PatsKillerPro.Forms
         private void SetBusy(bool busy)
         {
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
-            _btnActivate.Enabled = !busy && _btnActivate.Enabled;
+
+            // IMPORTANT: don't gate re-enabling on prior Enabled state.
+            // The prior pattern permanently disabled buttons after first click.
+            _btnActivate.Enabled = !busy;
             if (_btnPaste != null) _btnPaste.Enabled = !busy;
             if (_btnClear != null) _btnClear.Enabled = !busy;
-            _btnRevalidate.Enabled = !busy && _btnRevalidate.Enabled;
-            _btnDeactivate.Enabled = !busy && _btnDeactivate.Enabled;
+            _btnRevalidate.Enabled = !busy;
+            _btnDeactivate.Enabled = !busy;
         }
     }
 }
