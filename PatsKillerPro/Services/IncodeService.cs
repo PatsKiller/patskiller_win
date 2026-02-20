@@ -64,6 +64,55 @@ namespace PatsKillerPro.Services
 
         // ============ INCODE CALCULATION ============
 
+
+
+        private static string MapProviderRouterError(string? errorCode, string? error, string? message, int? cooldownRemaining, int? cooldownMinutes)
+        {
+            var ec = (errorCode ?? "").Trim();
+            var e = (error ?? "").Trim();
+            var msg = (message ?? "").Trim();
+
+            static string Lower(string s) => (s ?? string.Empty).ToLowerInvariant();
+
+            if (ec.Equals("rate_limited", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(msg))
+                {
+                    if (cooldownRemaining.HasValue && cooldownMinutes.HasValue)
+                        return $"{msg} Try again in {cooldownRemaining.Value} second(s).";
+                    return msg;
+                }
+                return "Rate limit exceeded. Please wait before trying again.";
+            }
+
+            if (ec.Equals("insufficient_tokens", StringComparison.OrdinalIgnoreCase))
+                return !string.IsNullOrWhiteSpace(msg) ? msg : "Insufficient tokens to complete this conversion. Please purchase more tokens.";
+
+            if (ec.Equals("conversion_in_progress", StringComparison.OrdinalIgnoreCase))
+                return !string.IsNullOrWhiteSpace(msg) ? msg : "This Out-Code is already being processed. Please wait for it to complete.";
+
+            if (ec.Equals("INVALID_OUTCODE", StringComparison.OrdinalIgnoreCase) || ec.Equals("invalid_outcode", StringComparison.OrdinalIgnoreCase))
+                return !string.IsNullOrWhiteSpace(msg) ? msg : "The Out-Code entered is invalid. Please verify and try again.";
+
+            if (ec.Equals("OUTCODE_ALREADY_USED", StringComparison.OrdinalIgnoreCase) || ec.Equals("outcode_already_used", StringComparison.OrdinalIgnoreCase))
+                return !string.IsNullOrWhiteSpace(msg) ? msg : "This Out-Code has already been used or is pending. Please generate a new Out-Code.";
+
+            if ((Lower(e).Contains("routing") && Lower(e).Contains("not configured")) ||
+                (Lower(msg).Contains("routing") && Lower(msg).Contains("not configured")))
+                return "Service configuration error. Please contact support.";
+
+            if (Lower(e).Contains("blocked") || Lower(msg).Contains("blocked") ||
+                Lower(e).Contains("flagged") || Lower(msg).Contains("flagged"))
+                return "This conversion request was flagged and cannot be processed. Please contact support.";
+
+            if (Lower(e).Contains("timeout") || Lower(msg).Contains("timeout"))
+                return "The request timed out. Please check your connection and try again.";
+
+            if (!string.IsNullOrWhiteSpace(msg)) return msg;
+            if (!string.IsNullOrWhiteSpace(e)) return e;
+            return "Unable to calculate InCode. Please try again or contact support.";
+        }
+
         /// <summary>
         /// Calculate incode from outcode using the provider-router edge function.
         /// API Format: { action: "calculate_incode", outcode, vehicleInfo }
@@ -123,14 +172,18 @@ try
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return new IncodeResult
+                    try
                     {
-                        Success = false,
-                        Error = $"API error: {response.StatusCode} - {responseBody}"
-                    };
+                        var errObj = JsonSerializer.Deserialize<ProviderRouterResponse>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        var friendly = MapProviderRouterError(errObj?.ErrorCode, errObj?.Error, errObj?.Message, errObj?.CooldownRemaining, errObj?.CooldownMinutes);
+                        return new IncodeResult { Success = false, Error = friendly, ProviderUsed = errObj?.Source };
+                    }
+                    catch
+                    {
+                        return new IncodeResult { Success = false, Error = $"API error: {response.StatusCode}. Please try again or contact support." };
+                    }
                 }
-
-                var result = JsonSerializer.Deserialize<ProviderRouterResponse>(responseBody, new JsonSerializerOptions
+var result = JsonSerializer.Deserialize<ProviderRouterResponse>(responseBody, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
@@ -142,15 +195,15 @@ try
 
                 if (!result.Success)
                 {
+                    var friendly = MapProviderRouterError(result.ErrorCode, result.Error, result.Message, result.CooldownRemaining, result.CooldownMinutes);
                     return new IncodeResult
                     {
                         Success = false,
-                        Error = result.Error ?? "Provider returned failure",
+                        Error = friendly,
                         ProviderUsed = result.Source
                     };
                 }
-
-                // Update token balance from response
+// Update token balance from response
                 if (result.TokensRemaining.HasValue)
                 {
                     TokenBalanceService.Instance.RefreshAfterOperation();
@@ -170,11 +223,11 @@ try
             }
             catch (TaskCanceledException)
             {
-                return new IncodeResult { Success = false, Error = "Request timed out" };
+                return new IncodeResult { Success = false, Error = "The request timed out. Please check your connection and try again." };
             }
             catch (HttpRequestException ex)
             {
-                return new IncodeResult { Success = false, Error = $"Network error: {ex.Message}" };
+                return new IncodeResult { Success = false, Error = $"Network error. Please check your connection and try again. ({ex.Message})" };
             }
             catch (Exception ex)
             {
@@ -278,6 +331,19 @@ try
 
         [JsonPropertyName("error")]
         public string? Error { get; set; }
+
+
+        [JsonPropertyName("error_code")]
+        public string? ErrorCode { get; set; }
+
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
+
+        [JsonPropertyName("cooldown_remaining")]
+        public int? CooldownRemaining { get; set; }
+
+        [JsonPropertyName("cooldown_minutes")]
+        public int? CooldownMinutes { get; set; }
 
         [JsonPropertyName("source")]
         public string? Source { get; set; }

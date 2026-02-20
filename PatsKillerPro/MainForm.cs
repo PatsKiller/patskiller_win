@@ -51,6 +51,7 @@ namespace PatsKillerPro
 
         private int _activeTab = 0;
         private bool _didAutoStart = false;
+        private bool _forcedLoginForZeroTokens = false;
 
         // Assets
         private Image? _logoImage;
@@ -74,6 +75,7 @@ namespace PatsKillerPro
         private Panel _bcmSessionPanel = null!;
         private Label _lblBcmStatus = null!, _lblSessionTimer = null!, _lblKeepAlive = null!;
         private Button _btnProgram = null!, _btnErase = null!, _btnKeyCounters = null!;
+        private Button _btnGetIncode = null!, _btnParamReset = null!, _btnEsclInit = null!, _btnManualBcmUnlock = null!;
         private System.Windows.Forms.Timer _sessionTimerUpdate = null!;
 
         // DPI helpers (keeps runtime-created controls scaling-friendly)
@@ -398,9 +400,12 @@ namespace PatsKillerPro
             _header = new Panel
             {
                 Dock = DockStyle.Top,
-                // Increased height so the two-line identity (Name + Email) is always visible
-                // alongside the token/license stack at common DPI scaling settings.
-                Height = Dpi(132),
+                // Auto-size header so the right-side meta stack (Tokens/Promo/License/Identity)
+                // never clips at common Windows scaling (125%/150%). Keep a minimum height
+                // for visual consistency.
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(0, Dpi(132)),
                 BackColor = SURFACE,
                 Padding = DpiPad(18, 12, 18, 12)
             };
@@ -509,6 +514,7 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleRight,
                 Margin = new Padding(0, 0, 0, 0)
+                Anchor = AnchorStyles.Right,
             };
 
             _lblTokensPromo = new Label
@@ -518,6 +524,7 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleRight,
                 Margin = new Padding(0, 2, 0, 0)
+                Anchor = AnchorStyles.Right,
             };
 
             _lblPromoExpiry = new Label
@@ -528,6 +535,7 @@ namespace PatsKillerPro
                 TextAlign = ContentAlignment.MiddleRight,
                 Margin = new Padding(0, 0, 0, 0),
                 Visible = false
+                Anchor = AnchorStyles.Right,
             };
 
             _lblLicense = new Label
@@ -537,7 +545,11 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 9, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleRight,
                 Margin = new Padding(0, 4, 0, 0),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                // Allow wrap instead of clipping in narrow headers.
+                MaximumSize = new Size(Dpi(520), 0),
+                AutoEllipsis = false
+                Anchor = AnchorStyles.Right,
             };
 
             // Identity (two-line: Name + Email)
@@ -550,6 +562,7 @@ namespace PatsKillerPro
                 Margin = new Padding(0, 6, 0, 0),
                 AutoEllipsis = true,
                 MaximumSize = new Size(Dpi(420), 0)
+                Anchor = AnchorStyles.Right,
             };
 
             _lblUserEmail = new Label
@@ -563,6 +576,7 @@ namespace PatsKillerPro
                 AutoEllipsis = true,
                 // Allow longer emails before ellipsis.
                 MaximumSize = new Size(Dpi(420), 0)
+                Anchor = AnchorStyles.Right,
             };
 
             _lblLicense.Click += (_, __) =>
@@ -589,7 +603,8 @@ namespace PatsKillerPro
                 Font = new Font("Segoe UI", 9),
                 ForeColor = TEXT_DIM,
                 AutoSize = true,
-                Margin = new Padding(0, 2, 0, 0)
+                Margin = new Padding(0, 2, 0, 0),
+                Anchor = AnchorStyles.Right
             };
             meta.Controls.Add(lblBuild, 0, 6);
             right.Controls.Add(meta);
@@ -845,6 +860,8 @@ _btnLogout = AutoBtn("Logout", BTN_BG);
             row3.Controls.Add(_txtIncode);
 
             var btnGetIncode = AutoBtn("Get Incode", ACCENT);
+            _btnGetIncode = btnGetIncode;
+            btnGetIncode.Enabled = false; // diagnostics-only: avoid token burn; Program/Erase auto-runs incode flow
             btnGetIncode.Click += BtnGetIncode_Click;
             row3.Controls.Add(btnGetIncode);
 
@@ -997,18 +1014,21 @@ _btnLogout = AutoBtn("Logout", BTN_BG);
             
             // Parameter Reset - does not require BCM session (uses its own incode flow)
             var btnParam = AutoBtn("⚙️ Parameter Reset", WARNING);
+            _btnParamReset = btnParam;
             btnParam.Click += BtnParam_Click;
             _toolTip.SetToolTip(btnParam, "Reset PATS parameters across modules\nRequires separate incode\n[1 TOKEN per module]");
             row4.Controls.Add(btnParam);
 
             // ESCL Initialize - standalone operation
             var btnEscl = AutoBtn("🔧 ESCL Initialize", BTN_BG);
+            _btnEsclInit = btnEscl;
             btnEscl.Click += BtnEscl_Click;
             _toolTip.SetToolTip(btnEscl, "Initialize Electronic Steering Column Lock\n[1 TOKEN]");
             row4.Controls.Add(btnEscl);
 
             // Disable BCM Security - manual unlock (alternative to Get Incode auto-unlock)
             var btnDisable = AutoBtn("🔓 Manual BCM Unlock", BTN_BG);
+            _btnManualBcmUnlock = btnDisable;
             btnDisable.Click += BtnDisable_Click;
             _toolTip.SetToolTip(btnDisable, "Manually unlock BCM with existing incode\nUse if auto-unlock failed");
             row4.Controls.Add(btnDisable);
@@ -1462,6 +1482,20 @@ private async void MainForm_Shown(object? sender, EventArgs e)
         try { await LicenseService.Instance.RefreshAccountLicensesAsync(); } catch { /* best effort */ }
 
         await RefreshTokenBalanceAsync();
+
+        // If tokens are 0, do not trust cached session. Force one interactive login per app launch.
+        if (!_forcedLoginForZeroTokens && TokenBalanceService.Instance.TotalTokens <= 0)
+        {
+            _forcedLoginForZeroTokens = true;
+            Log("warning", "No tokens available. Please sign in to refresh your account.");
+            ClearSession();
+            ApplyAuthHeader();
+            ShowLogin();
+            await PromptAuthModalAsync();
+            ApplyAuthHeader();
+            return;
+        }
+
         ShowMain();
         ApplyAuthHeader();
         return;
@@ -1618,6 +1652,8 @@ private void ApplyAuthHeader()
         _lblTokensTotal.Text = $"Tokens: {tbs.TotalTokens}";
         _lblTokensTotal.Visible = true;
 
+        _lblTokensTotal.ForeColor = tbs.TotalTokens > 0 ? SUCCESS : DANGER;
+
         // Promo token line is always shown for clarity ("Promo: 0" when none).
         _lblTokensPromo.Text = $"Promo: {tbs.PromoTokens}";
         _lblTokensPromo.Visible = true;
@@ -1673,6 +1709,7 @@ private void ApplyAuthHeader()
         _lblLicense.Visible = true;
 
         _btnLogout.Visible = true;
+        ApplyTokenGating();
         return;
     }
 
@@ -1685,9 +1722,42 @@ private void ApplyAuthHeader()
     _lblUser.Visible = false;
     _lblUserEmail.Visible = false;
     _btnLogout.Visible = false;
+
+    // Ensure privileged operations are disabled when logged out
+    OnUnlockOperationsEnabled(false);
+    if (_btnGetIncode != null) _btnGetIncode.Enabled = false;
+    if (_btnParamReset != null) _btnParamReset.Enabled = false;
+    if (_btnEsclInit != null) _btnEsclInit.Enabled = false;
+    if (_btnManualBcmUnlock != null) _btnManualBcmUnlock.Enabled = false;
+
 }
 
-        private void ShowTokenToast(string message, int milliseconds = 5000)
+    /// <summary>
+    /// Enforce token-based gating for paid/privileged operations.
+    /// Policy: when TotalTokens <= 0, disable paid actions. Does NOT force logout.
+    /// </summary>
+    private void ApplyTokenGating()
+    {
+        if (!IsLoggedIn) return;
+
+        var total = TokenBalanceService.Instance.TotalTokens;
+        var hasTokens = total > 0;
+
+        // Get Incode is diagnostics-only and stays disabled by default.
+        if (_btnGetIncode != null) _btnGetIncode.Enabled = false;
+
+        // Additional operations consume tokens.
+        if (_btnParamReset != null) _btnParamReset.Enabled = hasTokens;
+        if (_btnEsclInit != null) _btnEsclInit.Enabled = hasTokens;
+        if (_btnManualBcmUnlock != null) _btnManualBcmUnlock.Enabled = hasTokens;
+
+        // Session-dependent operations: require BOTH unlocked session and tokens.
+        var unlocked = BcmSessionManager.Instance.GetState().IsUnlocked;
+        OnUnlockOperationsEnabled(hasTokens && unlocked);
+    }
+
+
+private void ShowTokenToast(string message, int milliseconds = 5000)
         {
             if (_toastPanel == null || _lblToast == null) return;
             if (InvokeRequired)
@@ -3063,7 +3133,10 @@ private async void BtnErase_Click(object? s, EventArgs e)
                 return;
             }
 
-            _btnProgram.Enabled = enabled;
+                        // Token gating: if no tokens, keep paid actions disabled even if session is unlocked.
+            enabled = enabled && TokenBalanceService.Instance.TotalTokens > 0;
+
+_btnProgram.Enabled = enabled;
             _btnErase.Enabled = enabled;
             _btnKeyCounters.Enabled = enabled;
 
@@ -3131,3 +3204,4 @@ private async void BtnErase_Click(object? s, EventArgs e)
         #endregion
     }
 }
+
