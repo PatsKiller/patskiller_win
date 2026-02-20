@@ -40,6 +40,7 @@ namespace PatsKillerPro
         private Label _lblInstruction = null!;
         private Label _lblTokenCost = null!;
         private Button _btnCancel = null!;
+        private Button _btnRetry = null!;
 
         // State
         private readonly List<StepInfo> _steps = new();
@@ -48,6 +49,8 @@ namespace PatsKillerPro
         private bool _isComplete = false;
         private bool _canCancel = true;
         private CancellationTokenSource? _cts;
+        private readonly bool _allowRetry;
+        private readonly bool _autoCloseOnSuccess;
 
         /// <summary>Step information</summary>
         public class StepInfo
@@ -65,8 +68,10 @@ namespace PatsKillerPro
         /// <summary>Cancellation token for async operations</summary>
         public CancellationToken Token => _cts?.Token ?? CancellationToken.None;
 
-        public OperationProgressForm()
+        public OperationProgressForm(bool allowRetry = false, bool autoCloseOnSuccess = false)
         {
+            _allowRetry = allowRetry;
+            _autoCloseOnSuccess = autoCloseOnSuccess;
             _cts = new CancellationTokenSource();
             InitializeUI();
         }
@@ -229,7 +234,7 @@ namespace PatsKillerPro
             {
                 Text = "Cancel",
                 Size = new Size(140, 40),
-                Location = new Point((_centerPanel.Width - 140) / 2, y),
+                Location = new Point((_centerPanel.Width - 300) / 2, y),
                 BackColor = BTN_BG,
                 ForeColor = TEXT,
                 FlatStyle = FlatStyle.Flat,
@@ -239,6 +244,29 @@ namespace PatsKillerPro
             _btnCancel.FlatAppearance.BorderColor = BORDER;
             _btnCancel.Click += BtnCancel_Click;
             _centerPanel.Controls.Add(_btnCancel);
+
+            // Retry button (hidden until failure)
+            _btnRetry = new Button
+            {
+                Text = "Retry",
+                Size = new Size(140, 40),
+                Location = new Point((_centerPanel.Width - 300) / 2 + 160, y),
+                BackColor = BTN_BG,
+                ForeColor = TEXT,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Visible = false,
+                Enabled = false
+            };
+            _btnRetry.FlatAppearance.BorderColor = BORDER;
+            _btnRetry.Click += (s, e) =>
+            {
+                if (!_allowRetry) return;
+                DialogResult = DialogResult.Retry;
+                Close();
+            };
+            _centerPanel.Controls.Add(_btnRetry);
         }
 
         private void CenterPanel()
@@ -384,6 +412,27 @@ namespace PatsKillerPro
             _lblInstruction.Text = message ?? (success ? "Operation completed successfully!" : "Operation failed");
             _lblInstruction.ForeColor = success ? SUCCESS : DANGER;
             _btnCancel.Text = "Close";
+
+            if (success)
+            {
+                _btnRetry.Visible = false;
+                _btnRetry.Enabled = false;
+
+                if (_autoCloseOnSuccess)
+                {
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
+            }
+            else
+            {
+                if (_allowRetry)
+                {
+                    _btnRetry.Visible = true;
+                    _btnRetry.Enabled = true;
+                    _btnCancel.Location = new Point((_centerPanel.Width - 300) / 2, _btnCancel.Location.Y);
+                }
+            }
         }
 
         private void UpdateStepLabel(int index)

@@ -74,6 +74,13 @@ namespace PatsKillerPro
         private Panel _bcmSessionPanel = null!;
         private Label _lblBcmStatus = null!, _lblSessionTimer = null!, _lblKeepAlive = null!;
         private Button _btnProgram = null!, _btnErase = null!, _btnKeyCounters = null!;
+        private Button _btnGetIncode = null!;
+
+        // Cached InCode reuse (no token burn when OutCode unchanged)
+        private string? _cachedOutcode;
+        private string? _cachedIncode;
+        private DateTime _cachedIncodeAtUtc;
+        private static readonly TimeSpan IncodeCacheTtl = TimeSpan.FromHours(1);
         private System.Windows.Forms.Timer _sessionTimerUpdate = null!;
 
         // DPI helpers (keeps runtime-created controls scaling-friendly)
@@ -844,9 +851,11 @@ _btnLogout = AutoBtn("Logout", BTN_BG);
             _txtIncode.Margin = DpiPad(0, 6, 15, 0);
             row3.Controls.Add(_txtIncode);
 
-            var btnGetIncode = AutoBtn("Get Incode", ACCENT);
-            btnGetIncode.Click += BtnGetIncode_Click;
-            row3.Controls.Add(btnGetIncode);
+            _btnGetIncode = AutoBtn("Get Incode", ACCENT);
+            _btnGetIncode.Click += BtnGetIncode_Click;
+            _btnGetIncode.Enabled = false; // diagnostics-only; Program/Erase auto-run this flow
+            _toolTip.SetToolTip(_btnGetIncode, "Auto-run by Program / Erase\n(Disabled to prevent token waste)\nHold SHIFT while clicking to enable for diagnostics.");
+            row3.Controls.Add(_btnGetIncode);
 
             sec3.Controls.Add(row3);
 
@@ -2106,6 +2115,20 @@ var startTime = DateTime.Now;
 
 private async void BtnGetIncode_Click(object? s, EventArgs e)
         {
+            // Diagnostics-only. Primary workflow runs automatically from Program / Erase.
+            if (_btnGetIncode != null && !_btnGetIncode.Enabled)
+            {
+                var shift = (ModifierKeys & Keys.Shift) == Keys.Shift;
+                if (!shift)
+                {
+                    MessageBox.Show("Get Incode is now automated.\n\nUse Program or Erase and the app will run: Connect → OutCode → InCode → Unlock → Execute.\n\n(For diagnostics: hold SHIFT while clicking Get Incode.)");
+                    return;
+                }
+
+                // allow one diagnostic run
+                _btnGetIncode.Enabled = true;
+            }
+
             if (!_isConnected)
             {
                 MessageBox.Show("Connect to a device first");
@@ -2279,25 +2302,321 @@ private async void BtnGetIncode_Click(object? s, EventArgs e)
                 
                 ShowError("Incode Failed", "Could not calculate incode", ex);
             }
+            finally
+            {
+                // Return to safe default: button disabled.
+                if (_btnGetIncode != null)
+                    _btnGetIncode.Enabled = false;
+            }
         }
         #endregion
 
         #region PATS - Using J2534Service Singleton
+
+        #region Auto Workflow Helpers
+
+        private string GetVehicleInfoForOverlay()
+        {
+            var vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
+            if (string.IsNullOrWhiteSpace(vin)) vin = "VIN: (unknown)";
+            else vin = $"VIN: {vin}";
+
+            var vehicleModel = _cmbVehicles.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(vehicleModel))
+                return vin;
+
+            return $"{vehicleModel}  •  {vin}";
+        }
+
+        private async Task<bool> EnsureConnectedAsync(OperationProgressForm? progress = null)
+        {
+            if (_isConnected) return true;
+
+            progress?.SetInstruction("Connecting to J2534 device...");
+
+            // If no cached scan results, run a quick scan.
+            if (_devices.Count == 0)
+            {
+                try { _devices = J2534DeviceScanner.ScanForDevices(); } catch { /* ignore */ }
+            }
+
+            if (_devices.Count == 0)
+            {
+                MessageBox.Show("No J2534 devices detected. Click 'Scan Devices' and ensure your interface driver is installed.");
+                return false;
+            }
+
+            J2534DeviceInfo device;
+            string? probeVin = null;
+            double probeVoltage = 0;
+            string probeStatus = "";
+
+            if (_devices.Count == 1)
+            {
+                device = _devices[0];
+            }
+            else
+            {
+                using var dlg = new DeviceSelectForm(_devices, TimeSpan.FromSeconds(20));
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Selection == null)
+                    return false;
+
+                device = dlg.Selection.Device;
+                probeVin = dlg.Selection.Vin;
+                probeVoltage = dlg.Selection.Voltage;
+                probeStatus = dlg.Selection.Status;
+            }
+
+            var startTime = DateTime.Now;
+            var result = await J2534Service.Instance.ConnectDeviceAsync(device);
+            if (!result.Success)
+            {
+                _lblStatus.Text = "Status: Connection Failed";
+                _lblStatus.ForeColor = DANGER;
+                if (_lblDeviceBanner != null) _lblDeviceBanner.Text = $"Selected Device: {device.Name} ({device.Vendor}) — Connection Failed";
+                Log("error", $"Failed: {result.Error}");
+
+                ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                {
+                    Action = "device_connect",
+                    ActionCategory = "diagnostics",
+                    Success = false,
+                    TokenChange = 0,
+                    ErrorMessage = result.Error,
+                    Details = $"Failed to connect to {device.Name}",
+                    ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds
+                });
+                return false;
+            }
+
+            _isConnected = true;
+            _lblStatus.Text = "Status: Connected";
+            _lblStatus.ForeColor = SUCCESS;
+            if (_lblDeviceBanner != null) _lblDeviceBanner.Text = $"Selected Device: {device.Name} ({device.Vendor}) — Connected";
+            Log("success", $"Connected to {device.Name}");
+
+            // Surface probe VIN/VBATT if we have it
+            if (!string.IsNullOrWhiteSpace(probeVin))
+            {
+                _lblVin.Text = $"VIN: {probeVin}";
+                _lblVin.ForeColor = SUCCESS;
+            }
+
+            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+            {
+                Action = "device_connect",
+                ActionCategory = "diagnostics",
+                Success = true,
+                TokenChange = 0,
+                Details = $"Connected to {device.Name}",
+                ResponseTimeMs = (int)(DateTime.Now - startTime).TotalMilliseconds,
+                Metadata = new { deviceName = device.Name, vendor = device.Vendor, probeVin = probeVin, probeVoltage = probeVoltage, probeStatus = probeStatus }
+            });
+
+            return true;
+        }
+
+        private async Task<(bool Success, string? Outcode, string? Error)> EnsureOutcodeAsync(OperationProgressForm? progress = null)
+        {
+            if (!string.IsNullOrWhiteSpace(_txtOutcode.Text))
+                return (true, _txtOutcode.Text.Trim(), null);
+
+            progress?.SetInstruction("Reading OutCode from vehicle...");
+            var outcodeResult = await J2534Service.Instance.ReadOutcodeAsync();
+            if (!outcodeResult.Success || string.IsNullOrWhiteSpace(outcodeResult.Outcode))
+                return (false, null, outcodeResult.Error ?? "Failed to read outcode");
+
+            _txtOutcode.Text = outcodeResult.Outcode;
+            return (true, outcodeResult.Outcode, null);
+        }
+
+        private async Task<(bool Success, string? Incode, string? Provider, int TokensCharged, int TokensRemaining, bool FromCache, string? Error)>
+            CalculateIncodeCachedAsync(string outcode, string? vin, string module, OperationProgressForm? progress = null)
+        {
+            // Cache reuse rules: OutCode unchanged AND within TTL.
+            var now = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(_cachedOutcode) &&
+                string.Equals(_cachedOutcode, outcode, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(_cachedIncode) &&
+                (now - _cachedIncodeAtUtc) <= IncodeCacheTtl)
+            {
+                progress?.SetInstruction("Reusing cached InCode (OutCode unchanged)...");
+                _txtIncode.Text = _cachedIncode;
+                return (true, _cachedIncode, "cache", 0, TokenBalanceService.Instance.TotalTokens, true, null);
+            }
+
+            progress?.SetInstruction("Calculating InCode [1 TOKEN]...");
+            var incodeResult = await Services.IncodeService.Instance.CalculateIncodeAsync(outcode, vin, module);
+            if (!incodeResult.Success || string.IsNullOrWhiteSpace(incodeResult.Incode))
+                return (false, null, null, 0, TokenBalanceService.Instance.TotalTokens, false, incodeResult.Error ?? "Failed to calculate incode");
+
+            _txtIncode.Text = incodeResult.Incode;
+            _cachedOutcode = outcode;
+            _cachedIncode = incodeResult.Incode;
+            _cachedIncodeAtUtc = now;
+
+            return (true, incodeResult.Incode, incodeResult.ProviderUsed, incodeResult.TokensCharged, incodeResult.TokensRemaining, false, null);
+        }
+
+        private async Task<(bool Success, string? Error)> EnsureBcmUnlockedAsync(string outcode, string incode, OperationProgressForm? progress = null)
+        {
+            // Ensure session manager initialized
+            var uds = J2534Service.Instance.GetUdsService();
+            if (uds != null)
+                BcmSessionManager.Instance.Initialize(uds);
+
+            if (BcmSessionManager.Instance.GetState().IsUnlocked)
+                return (true, null);
+
+            progress?.SetInstruction("Unlocking BCM security...");
+            var unlockResult = await BcmSessionManager.Instance.UnlockBcmAsync(outcode, incode);
+            if (!unlockResult.IsSuccess)
+                return (false, unlockResult.Error ?? "BCM unlock failed");
+
+            return (true, null);
+        }
+
+        private async Task<(bool Success, string? Error)> RunAutoSessionChainAsync(OperationProgressForm progress, string moduleForIncode = "BCM")
+        {
+            // Step 0: Connect
+            progress.StartStep(0);
+            if (!await EnsureConnectedAsync(progress))
+            {
+                progress.CompleteStep(0, false);
+                return (false, "Not connected");
+            }
+            progress.CompleteStep(0, true);
+
+            // Step 1: OutCode
+            progress.StartStep(1);
+            var outcodeRes = await EnsureOutcodeAsync(progress);
+            if (!outcodeRes.Success)
+            {
+                progress.CompleteStep(1, false);
+                return (false, outcodeRes.Error);
+            }
+            progress.CompleteStep(1, true);
+
+            // Step 2: InCode (cached if possible)
+            progress.StartStep(2);
+            var vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
+            if (string.IsNullOrWhiteSpace(vin)) vin = null;
+            var incodeRes = await CalculateIncodeCachedAsync(outcodeRes.Outcode!, vin, moduleForIncode, progress);
+            if (!incodeRes.Success)
+            {
+                progress.CompleteStep(2, false);
+                return (false, incodeRes.Error);
+            }
+            progress.CompleteStep(2, true);
+
+            // Step 3: Unlock BCM
+            progress.StartStep(3);
+            var unlockRes = await EnsureBcmUnlockedAsync(outcodeRes.Outcode!, incodeRes.Incode!, progress);
+            if (!unlockRes.Success)
+            {
+                progress.CompleteStep(3, false);
+                return (false, unlockRes.Error);
+            }
+            progress.CompleteStep(3, true);
+
+            return (true, null);
+        }
+
+        private async Task<T?> RunWithProgressRetryAsync<T>(
+            string operationName,
+            int tokenCost,
+            string[] steps,
+            Func<OperationProgressForm, Task<T>> operation,
+            bool allowRetry = true,
+            bool autoCloseOnSuccess = true)
+        {
+            while (true)
+            {
+                using var form = new OperationProgressForm(allowRetry: allowRetry, autoCloseOnSuccess: autoCloseOnSuccess);
+                form.Configure(operationName, GetVehicleInfoForOverlay(), tokenCost, steps);
+
+                T result = default!;
+                Exception? error = null;
+
+                var task = Task.Run(async () =>
+                {
+                    try
+                    {
+                        result = await operation(form);
+                    }
+                    catch (Exception ex)
+                    {
+                        error = ex;
+                    }
+                });
+
+                form.ShowDialog(this);
+                await task;
+
+                if (form.DialogResult == DialogResult.Retry)
+                    continue;
+
+                if (error != null)
+                    throw error;
+
+                return result;
+            }
+        }
+
+        private async Task<bool> EnsureAdminApprovedAsync(string requestType)
+        {
+            // Fast paths: allowlist email or role claim.
+            var email = LicenseService.Instance.UserEmail;
+            if (AdminApprovalService.Instance.IsAdminByEmail(email))
+                return true;
+
+            // If auth token contains role claims, honor them.
+            // LicenseService does not currently expose token; use TokenBalanceService auth token if present.
+            var token = TokenBalanceService.Instance.AuthToken;
+            if (AdminApprovalService.Instance.IsAdminByRoleClaim(token))
+                return true;
+
+            // Cached approvals
+            if (AdminApprovalService.Instance.HasValidApproval(requestType, email))
+                return true;
+
+            // Request approval
+            var confirm = MessageBox.Show(
+                "This feature is restricted.\n\n" +
+                "You can request admin approval for this machine/session.\n\n" +
+                "Proceed with approval request?",
+                "Admin Approval Required",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+
+            if (confirm != DialogResult.Yes)
+                return false;
+
+            var res = await AdminApprovalService.Instance.RequestApprovalAsync(
+                requestType,
+                userEmail: email,
+                userId: null,
+                authToken: token);
+
+            if (!res.Success)
+            {
+                MessageBox.Show(res.Message);
+                return false;
+            }
+
+            if (!res.Approved)
+            {
+                MessageBox.Show("Approval request submitted.\n\nStatus: Pending\n\n" + res.Message);
+                return false;
+            }
+
+            MessageBox.Show("Approved. You may proceed.");
+            return true;
+        }
+
+        #endregion
 private async void BtnProgram_Click(object? s, EventArgs e)
 {
-    if (!_isConnected)
-    {
-        MessageBox.Show("Connect to a device first");
-        return;
-    }
-
-    var ic = _txtIncode.Text.Trim();
-    if (string.IsNullOrEmpty(ic))
-    {
-        MessageBox.Show("Enter incode first");
-        return;
-    }
-
     // Extract vehicle info
     var vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
     if (string.IsNullOrWhiteSpace(vin)) vin = null;
@@ -2308,84 +2627,84 @@ private async void BtnProgram_Click(object? s, EventArgs e)
 
     try
     {
-        Log("info", "Programming key...");
-
-        // 1) Unlock PATS security using the provided incode
-        var unlock = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
-        if (!unlock.Success)
-        {
-            var msg = unlock.Error ?? "Incode rejected";
-            Log("error", msg);
-            
-            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+        await RunWithProgressRetryAsync<object>(
+            operationName: "Program Key",
+            tokenCost: 1,
+            steps: new[] { "Connect", "Read OutCode", "Calculate InCode", "Unlock BCM", "Program Key" },
+            operation: async (progress) =>
             {
-                Action = "program_key",
-                ActionCategory = "key_programming",
-                Vin = vin,
-                VehicleModel = vehicleModel,
-                Success = false,
-                TokenChange = 0,
-                ErrorMessage = msg
+                // Connect → OutCode → InCode → Unlock
+                var chain = await RunAutoSessionChainAsync(progress, "BCM");
+                if (!chain.Success)
+                {
+                    progress.Complete(false, chain.Error ?? "Operation failed");
+                    return new object();
+                }
+
+                // Determine next slot
+                progress.StartStep(4);
+                progress.SetInstruction("Determining next key slot...");
+                var kc = await J2534Service.Instance.ReadKeyCountAsync();
+                int current = kc.Success ? kc.KeyCount : 0;
+                int max = kc.Success ? kc.MaxKeys : 8;
+                _lblKeys.Text = current.ToString();
+
+                if (current >= max)
+                {
+                    var msg = $"Max keys already programmed ({current}/{max}).";
+                    Log("warning", msg);
+                    progress.CompleteStep(4, false);
+                    progress.Complete(false, msg);
+                    MessageBox.Show(msg + "\n\nErase keys first if you need to add a new one.");
+                    return new object();
+                }
+
+                int nextSlot = current + 1;
+
+                // Program key
+                progress.SetInstruction("Programming key... (keep ignition stable)");
+                var ic = _txtIncode.Text.Trim();
+                var prog = await J2534Service.Instance.ProgramKeyAsync(ic, nextSlot);
+                if (!prog.Success)
+                {
+                    var msg = prog.Error ?? "Programming failed";
+                    Log("error", msg);
+                    progress.CompleteStep(4, false);
+                    progress.Complete(false, msg);
+                    MessageBox.Show($"Programming failed: {msg}");
+
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                    {
+                        Action = "program_key",
+                        ActionCategory = "key_programming",
+                        Vin = vin,
+                        VehicleModel = vehicleModel,
+                        Success = false,
+                        TokenChange = 0,
+                        ErrorMessage = msg
+                    });
+                    return new object();
+                }
+
+                _lblKeys.Text = prog.CurrentKeyCount.ToString();
+                progress.CompleteStep(4, true);
+                progress.Complete(true, "Key programmed successfully!");
+
+                ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                {
+                    Action = "program_key",
+                    ActionCategory = "key_programming",
+                    Vin = vin,
+                    VehicleModel = vehicleModel,
+                    Success = true,
+                    TokenChange = 0,
+                    Details = $"Key programmed to slot {nextSlot}, total keys: {prog.CurrentKeyCount}",
+                    Metadata = new { slot = nextSlot, totalKeys = prog.CurrentKeyCount }
+                });
+
+                MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\nRemove key, insert next key, and click Program again.");
+                return new object();
             });
-            
-            MessageBox.Show($"Incode rejected: {msg}");
-            return;
-        }
-
-        // 2) Determine next slot based on current key count
-        var kc = await J2534Service.Instance.ReadKeyCountAsync();
-        int current = kc.Success ? kc.KeyCount : 0;
-        int max = kc.Success ? kc.MaxKeys : 8;
-
-        if (current >= max)
-        {
-            var msg = $"Max keys already programmed ({current}/{max}). Erase keys first if you need to add a new one.";
-            Log("warning", msg);
-            MessageBox.Show(msg);
-            _lblKeys.Text = current.ToString();
-            return;
-        }
-
-        int nextSlot = current + 1;
-
-        // 3) Perform the actual key programming operation
-        var prog = await J2534Service.Instance.ProgramKeyAsync(ic, nextSlot);
-        if (prog.Success)
-        {
-            _lblKeys.Text = prog.CurrentKeyCount.ToString();
-            MessageBox.Show($"Key programmed successfully!\n\nKeys now: {prog.CurrentKeyCount}\n\nRemove key, insert next key, and click Program again.");
-            Log("success", $"Key programmed (slot {nextSlot}, total: {prog.CurrentKeyCount})");
-            
-            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
-            {
-                Action = "program_key",
-                ActionCategory = "key_programming",
-                Vin = vin,
-                VehicleModel = vehicleModel,
-                Success = true,
-                TokenChange = 0, // FREE - session already charged
-                Details = $"Key programmed to slot {nextSlot}, total keys: {prog.CurrentKeyCount}",
-                Metadata = new { slot = nextSlot, totalKeys = prog.CurrentKeyCount }
-            });
-        }
-        else
-        {
-            var msg = prog.Error ?? "Programming failed";
-            Log("error", msg);
-            
-            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
-            {
-                Action = "program_key",
-                ActionCategory = "key_programming",
-                Vin = vin,
-                VehicleModel = vehicleModel,
-                Success = false,
-                TokenChange = 0,
-                ErrorMessage = msg
-            });
-            
-            MessageBox.Show($"Programming failed: {msg}");
-        }
     }
     catch (Exception ex)
     {
@@ -2397,30 +2716,16 @@ private async void BtnProgram_Click(object? s, EventArgs e)
             Success = false,
             ErrorMessage = ex.Message
         });
-        
         ShowError("Program Failed", "Could not program key", ex);
     }
 }
 private async void BtnErase_Click(object? s, EventArgs e)
 {
-    if (!_isConnected)
-    {
-        MessageBox.Show("Connect to a device first");
-        return;
-    }
-
     if (!await ConfirmAsync(1, "Erase All Keys"))
         return;
 
     if (MessageBox.Show("WARNING: This will ERASE ALL KEYS!\n\nAre you absolutely sure?", "Confirm Erase", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
         return;
-
-    var ic = _txtIncode.Text.Trim();
-    if (string.IsNullOrEmpty(ic))
-    {
-        MessageBox.Show("Enter incode first");
-        return;
-    }
 
     // Extract vehicle info
     var vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
@@ -2429,68 +2734,64 @@ private async void BtnErase_Click(object? s, EventArgs e)
 
     try
     {
-        Log("info", "Erasing all keys...");
+        await RunWithProgressRetryAsync<object>(
+            operationName: "Erase Keys",
+            tokenCost: 1,
+            steps: new[] { "Connect", "Read OutCode", "Calculate InCode", "Unlock BCM", "Erase Keys" },
+            operation: async (progress) =>
+            {
+                var chain = await RunAutoSessionChainAsync(progress, "BCM");
+                if (!chain.Success)
+                {
+                    progress.Complete(false, chain.Error ?? "Operation failed");
+                    return new object();
+                }
 
-        // 1) Unlock PATS security using the provided incode
-        var unlock = await J2534Service.Instance.SubmitIncodeAsync("PCM", ic);
-        if (!unlock.Success)
-        {
-            var msg = unlock.Error ?? "Incode rejected";
-            Log("error", msg);
-            
-            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
-            {
-                Action = "erase_keys",
-                ActionCategory = "key_programming",
-                Vin = vin,
-                VehicleModel = vehicleModel,
-                Success = false,
-                TokenChange = 0,
-                ErrorMessage = msg
-            });
-            
-            MessageBox.Show($"Incode rejected: {msg}");
-            return;
-        }
+                progress.StartStep(4);
+                progress.SetInstruction("Erasing all keys... (do not disturb ignition)");
 
-        // 2) Perform the actual erase operation
-        var erase = await J2534Service.Instance.EraseAllKeysAsync(ic);
-        if (erase.Success)
-        {
-            _lblKeys.Text = erase.CurrentKeyCount.ToString();
-            MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}");
-            Log("success", $"Keys erased (remaining: {erase.CurrentKeyCount})");
-            
-            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
-            {
-                Action = "erase_keys",
-                ActionCategory = "key_programming",
-                Vin = vin,
-                VehicleModel = vehicleModel,
-                Success = true,
-                TokenChange = 0, // FREE - session already charged
-                Details = $"All keys erased, remaining: {erase.CurrentKeyCount}",
-                Metadata = new { keysRemaining = erase.CurrentKeyCount }
+                var ic = _txtIncode.Text.Trim();
+                var erase = await J2534Service.Instance.EraseAllKeysAsync(ic);
+                if (!erase.Success)
+                {
+                    var msg = erase.Error ?? "Erase failed";
+                    Log("error", msg);
+                    progress.CompleteStep(4, false);
+                    progress.Complete(false, msg);
+                    MessageBox.Show($"Erase failed: {msg}");
+
+                    ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                    {
+                        Action = "erase_keys",
+                        ActionCategory = "key_programming",
+                        Vin = vin,
+                        VehicleModel = vehicleModel,
+                        Success = false,
+                        TokenChange = 0,
+                        ErrorMessage = msg
+                    });
+                    return new object();
+                }
+
+                _lblKeys.Text = erase.CurrentKeyCount.ToString();
+                progress.CompleteStep(4, true);
+                progress.Complete(true, "Erase complete");
+
+                ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
+                {
+                    Action = "erase_keys",
+                    ActionCategory = "key_programming",
+                    Vin = vin,
+                    VehicleModel = vehicleModel,
+                    Success = true,
+                    TokenChange = 0,
+                    Details = $"All keys erased, remaining: {erase.CurrentKeyCount}",
+                    Metadata = new { keysRemaining = erase.CurrentKeyCount }
+                });
+
+                MessageBox.Show($"All keys erased!\n\nKeys remaining: {erase.CurrentKeyCount}");
+                return new object();
             });
-        }
-        else
-        {
-            var msg = erase.Error ?? "Erase failed";
-            Log("error", msg);
-            
-            ProActivityLogger.Instance.LogActivity(new ActivityLogEntry
-            {
-                Action = "erase_keys",
-                ActionCategory = "key_programming",
-                Vin = vin,
-                VehicleModel = vehicleModel,
-                Success = false,
-                TokenChange = 0,
-                ErrorMessage = msg
-            });
-            
-            MessageBox.Show($"Erase failed: {msg}");
-        }
     }
     catch (Exception ex)
     {
@@ -2502,32 +2803,72 @@ private async void BtnErase_Click(object? s, EventArgs e)
             Success = false,
             ErrorMessage = ex.Message
         });
-        
         ShowError("Erase Failed", "Could not erase keys", ex);
     }
 }
 
         private async void BtnParam_Click(object? s, EventArgs e)
         {
-            if (!_isConnected)
-            {
-                MessageBox.Show("Connect to a device first");
-                return;
-            }
-
             try
             {
-                Log("info", "Parameter reset...");
-                var result = await J2534Service.Instance.RestoreBcmDefaultsAsync();
-                if (result.Success)
-                {
-                    MessageBox.Show("Parameter reset complete!\n\nTurn ignition OFF and wait 15 seconds.");
-                    Log("success", "Parameter reset done");
-                }
-                else
-                {
-                    Log("error", result.Error ?? "Reset failed");
-                }
+                await RunWithProgressRetryAsync<object>(
+                    operationName: "Parameter Reset",
+                    tokenCost: 1,
+                    steps: new[] { "Connect", "Read OutCode", "Calculate InCode", "Execute Reset" },
+                    operation: async (progress) =>
+                    {
+                        // Step 0: Connect
+                        progress.StartStep(0);
+                        if (!await EnsureConnectedAsync(progress))
+                        {
+                            progress.CompleteStep(0, false);
+                            progress.Complete(false, "Not connected");
+                            return new object();
+                        }
+                        progress.CompleteStep(0, true);
+
+                        // Step 1: OutCode
+                        progress.StartStep(1);
+                        var outcodeRes = await EnsureOutcodeAsync(progress);
+                        if (!outcodeRes.Success)
+                        {
+                            progress.CompleteStep(1, false);
+                            progress.Complete(false, outcodeRes.Error);
+                            return new object();
+                        }
+                        progress.CompleteStep(1, true);
+
+                        // Step 2: InCode (cached)
+                        progress.StartStep(2);
+                        var vin = _lblVin.Text.Replace("VIN:", "").Replace("—", "").Trim();
+                        if (string.IsNullOrWhiteSpace(vin)) vin = null;
+                        var incodeRes = await CalculateIncodeCachedAsync(outcodeRes.Outcode!, vin, "BCM", progress);
+                        if (!incodeRes.Success)
+                        {
+                            progress.CompleteStep(2, false);
+                            progress.Complete(false, incodeRes.Error);
+                            return new object();
+                        }
+                        progress.CompleteStep(2, true);
+
+                        // Step 3: Execute (current logic unchanged)
+                        progress.StartStep(3);
+                        progress.SetInstruction("Executing parameter reset...");
+                        Log("info", "Parameter reset...");
+                        var result = await J2534Service.Instance.RestoreBcmDefaultsAsync();
+                        if (!result.Success)
+                        {
+                            progress.CompleteStep(3, false);
+                            progress.Complete(false, result.Error ?? "Reset failed");
+                            return new object();
+                        }
+
+                        progress.CompleteStep(3, true);
+                        progress.Complete(true, "Parameter reset complete");
+                        MessageBox.Show("Parameter reset complete!\n\nTurn ignition OFF and wait 15 seconds.");
+                        Log("success", "Parameter reset done");
+                        return new object();
+                    });
             }
             catch (Exception ex)
             {
@@ -2939,6 +3280,10 @@ private async void BtnErase_Click(object? s, EventArgs e)
             if (!_isConnected) { MessageBox.Show("Connect to vehicle first"); return; }
             try
             {
+                // Admin gating
+                if (!EnsureAdminApprovedAsync("targets").GetAwaiter().GetResult())
+                    return;
+
                 var uds = J2534Service.Instance.GetUdsService();
                 var vin = _lblVin.Text.Replace("VIN: ", "").Trim();
                 if (uds == null) { MessageBox.Show("UDS service not available"); return; }
@@ -2965,6 +3310,15 @@ private async void BtnErase_Click(object? s, EventArgs e)
         private void BtnEngineering_Click(object? s, EventArgs e)
         {
             if (!_isConnected) { MessageBox.Show("Connect to vehicle first"); return; }
+
+            // Admin gating
+            try
+            {
+                if (!EnsureAdminApprovedAsync("engineering_mode").GetAwaiter().GetResult())
+                    return;
+            }
+            catch { return; }
+
             var result = MessageBox.Show(
                 "⚠️ ENGINEERING MODE WARNING ⚠️\n\n" +
                 "This mode provides direct access to vehicle modules.\n" +
