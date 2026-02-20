@@ -845,6 +845,7 @@ _btnLogout = AutoBtn("Logout", BTN_BG);
             row3.Controls.Add(_txtIncode);
 
             var btnGetIncode = AutoBtn("Get Incode", ACCENT);
+            btnGetIncode.Enabled = false; // diagnostics-only: avoid token burn; Program/Erase auto-runs incode flow
             btnGetIncode.Click += BtnGetIncode_Click;
             row3.Controls.Add(btnGetIncode);
 
