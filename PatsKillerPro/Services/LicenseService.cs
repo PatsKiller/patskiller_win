@@ -305,7 +305,7 @@ if (!string.IsNullOrWhiteSpace(_cache.CustomerEmail) &&
     !string.Equals(_cache.CustomerEmail, _userEmail, StringComparison.OrdinalIgnoreCase))
 {
     LogUI("warning", "[License] Email mismatch – wrong Google account");
-    return Emit(LicenseValidationResult.Fail($"License is active for {_cache.CustomerEmail}, but you are signed in as {_userEmail}."));
+    return Emit(LicenseValidationResult.EmailMismatch(_cache.CustomerEmail, _userEmail));
 }
 
             // 2. Machine binding check
@@ -887,6 +887,12 @@ private HttpRequestMessage BuildHttpRequest(string jsonBody)
     {
         public bool IsValid { get; init; }
         public string Message { get; init; } = "";
+        /// <summary>Optional machine-readable failure code for UI handling.</summary>
+        public string? ErrorCode { get; init; }
+        /// <summary>When ErrorCode == EMAIL_MISMATCH, the email tied to the license.</summary>
+        public string? LicensedEmail { get; init; }
+        /// <summary>When ErrorCode == EMAIL_MISMATCH, the currently signed-in SSO email.</summary>
+        public string? SignedInEmail { get; init; }
         public string? LicensedTo { get; init; }
         public string? LicenseType { get; init; }
         public DateTime? ExpiresAt { get; init; }
@@ -939,6 +945,15 @@ private HttpRequestMessage BuildHttpRequest(string jsonBody)
         {
             IsValid = false, HasLicense = false,
             Message = "No license key found"
+        };
+
+        public static LicenseValidationResult EmailMismatch(string licensedEmail, string signedInEmail) => new()
+        {
+            IsValid = false,
+            ErrorCode = "EMAIL_MISMATCH",
+            LicensedEmail = licensedEmail,
+            SignedInEmail = signedInEmail,
+            Message = $"License is active for {licensedEmail}, but you are signed in as {signedInEmail}."
         };
 
         public static LicenseValidationResult Fail(string message) => new()
