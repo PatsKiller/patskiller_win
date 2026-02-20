@@ -1,226 +1,210 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using PatsKillerPro.Utils;
 
 namespace PatsKillerPro.Services
 {
     /// <summary>
-    /// Admin gating plumbing for high-risk tools (Engineering Mode, Target Blocks).
+    /// Admin approval workflow (Loveable/Supabase).
     ///
-    /// - Fast path: allow-list / role claim.
-    /// - Slow path: request approval via external endpoint (Loveable / Supabase function).
+    /// Read-only approval check:
+    ///   GET /rest/v1/access_requests?email=eq.{USER_EMAIL}&select=status,reviewed_at,notes
     ///
-    /// Endpoint is configurable via PATSKILLER_ADMIN_APPROVAL_API.
-    /// If not set, requests are stubbed (UI will prompt to configure).
+    /// Request access (direct insert):
+    ///   POST /rest/v1/access_requests { email, machine_id, requested_at, status:"pending" }
+    ///
+    /// Auth: uses the logged-in user's JWT in Authorization: Bearer {jwt}
+    /// plus Supabase 'apikey' header.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public sealed class AdminApprovalService
     {
-        private static readonly Lazy<AdminApprovalService> _lazy = new(() => new AdminApprovalService());
-        public static AdminApprovalService Instance => _lazy.Value;
-
-        private static readonly string ApprovalApi =
-            Environment.GetEnvironmentVariable("PATSKILLER_ADMIN_APPROVAL_API") ?? "";
-
-        // Optional allowlist shortcut: comma-separated emails
-        private static readonly HashSet<string> AdminEmails = new(
-            (Environment.GetEnvironmentVariable("PATSKILLER_ADMIN_EMAILS") ?? "")
-                .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries),
-            StringComparer.OrdinalIgnoreCase);
-
-        // Cache approvals to disk so a user doesn't need to re-request every restart
-        private static readonly string CachePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PatsKillerPro",
-            "admin_approvals.json");
-
-        private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
-        private readonly object _lock = new();
-        private Dictionary<string, ApprovalCacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
-
-        private AdminApprovalService()
+        private static AdminApprovalService? _instance;
+        private static readonly object _lock = new();
+        public static AdminApprovalService Instance
         {
-            LoadCache();
+            get
+            {
+                if (_instance == null)
+                    lock (_lock) { _instance ??= new AdminApprovalService(); }
+                return _instance;
+            }
         }
 
-        public bool IsAdminByEmail(string? email)
+        private static readonly string SUPABASE_URL =
+            Environment.GetEnvironmentVariable("PATSKILLER_ADMIN_SUPABASE_URL")
+            ?? Environment.GetEnvironmentVariable("PATSKILLER_SUPABASE_URL")
+            ?? "https://ljltukcvxisvxkugftkr.supabase.co";
+
+        private static readonly string SUPABASE_ANON_KEY =
+            Environment.GetEnvironmentVariable("PATSKILLER_ADMIN_SUPABASE_ANON_KEY")
+            ?? Environment.GetEnvironmentVariable("PATSKILLER_SUPABASE_ANON_KEY")
+            ?? "";
+
+        private static readonly string ACCESS_REQUESTS_API =
+            Environment.GetEnvironmentVariable("PATSKILLER_ADMIN_ACCESS_REQUESTS_API")
+            ?? $"{SUPABASE_URL}/rest/v1/access_requests";
+
+        private readonly HttpClient _http = new();
+        private string? _authToken;
+        private string? _userEmail;
+
+        // Light cache to avoid hammering Supabase on repeated clicks.
+        private ApprovalRecord? _last;
+        private DateTime _lastFetchedUtc;
+        private readonly TimeSpan _cacheTtl = TimeSpan.FromSeconds(20);
+
+        private AdminApprovalService() { }
+
+        public void SetAuthContext(string? authToken, string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(email)) return false;
-            return AdminEmails.Contains(email.Trim());
+            _authToken = authToken;
+            _userEmail = userEmail;
+            _last = null;
+            _lastFetchedUtc = DateTime.MinValue;
         }
 
-        public bool IsAdminByRoleClaim(string? authToken)
+        public bool HasAuth => !string.IsNullOrWhiteSpace(_authToken) && !string.IsNullOrWhiteSpace(_userEmail);
+
+        public async Task<ApprovalRecord?> GetApprovalAsync(CancellationToken ct = default)
         {
-            if (string.IsNullOrWhiteSpace(authToken)) return false;
+            if (!HasAuth) return null;
+
+            if (_last != null && (DateTime.UtcNow - _lastFetchedUtc) < _cacheTtl)
+                return _last;
+
+            var email = Uri.EscapeDataString(_userEmail!);
+            var url = $"{ACCESS_REQUESTS_API}?email=eq.{email}&select=status,reviewed_at,notes&limit=1";
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            ApplyHeaders(req);
+
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                Logger.Log(Logger.LogLevel.Warning, $"[AdminApproval] GET failed ({(int)resp.StatusCode}): {TrySummarize(body)}");
+                return null;
+            }
+
+            var record = TryParseFirstRecord(body);
+            _last = record;
+            _lastFetchedUtc = DateTime.UtcNow;
+            return record;
+        }
+
+        public async Task<(bool Success, string Message)> RequestAccessAsync(CancellationToken ct = default)
+        {
+            if (!HasAuth) return (false, "Not authenticated");
+
+            var payload = new
+            {
+                email = _userEmail,
+                machine_id = MachineIdentity.MachineId,
+                requested_at = DateTime.UtcNow.ToString("O"),
+                status = "pending"
+            };
+
+            var json = JsonSerializer.Serialize(payload);
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, ACCESS_REQUESTS_API)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            ApplyHeaders(req);
+            req.Headers.TryAddWithoutValidation("Prefer", "return=representation");
+
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            if (resp.IsSuccessStatusCode)
+            {
+                _last = null;
+                _lastFetchedUtc = DateTime.MinValue;
+                return (true, "Access request submitted");
+            }
+
+            if (resp.StatusCode == HttpStatusCode.Conflict)
+                return (false, "Request already exists (pending review)");
+
+            return (false, $"Request failed ({(int)resp.StatusCode}): {TrySummarize(body)}");
+        }
+
+        private void ApplyHeaders(HttpRequestMessage req)
+        {
+            if (!string.IsNullOrWhiteSpace(SUPABASE_ANON_KEY))
+                req.Headers.TryAddWithoutValidation("apikey", SUPABASE_ANON_KEY);
+
+            if (!string.IsNullOrWhiteSpace(_authToken))
+                req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_authToken}");
+
+            req.Headers.TryAddWithoutValidation("Accept", "application/json");
+        }
+
+        private static ApprovalRecord? TryParseFirstRecord(string json)
+        {
             try
             {
-                var claims = JwtClaims.TryReadPayload(authToken);
-                if (claims == null) return false;
-
-                // Common patterns: "role": "admin" OR "roles": ["admin", ...]
-                if (claims.TryGetValue("role", out var roleObj) && roleObj is string roleStr)
-                    return roleStr.Contains("admin", StringComparison.OrdinalIgnoreCase);
-
-                if (claims.TryGetValue("roles", out var rolesObj) && rolesObj is JsonElement el && el.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in el.EnumerateArray())
-                    {
-                        if (item.ValueKind == JsonValueKind.String && item.GetString()?.Contains("admin", StringComparison.OrdinalIgnoreCase) == true)
-                            return true;
-                    }
-                }
-
-                return false;
-            }
-            catch { return false; }
-        }
-
-        public bool HasValidApproval(string requestType, string? userEmail)
-        {
-            if (string.IsNullOrWhiteSpace(requestType)) return false;
-            var key = MakeKey(requestType, userEmail);
-            lock (_lock)
-            {
-                if (_cache.TryGetValue(key, out var entry))
-                {
-                    return entry.ExpiresAtUtc > DateTime.UtcNow;
-                }
-            }
-            return false;
-        }
-
-        public bool IsEndpointConfigured => !string.IsNullOrWhiteSpace(ApprovalApi);
-
-        public async Task<(bool Success, bool Approved, string Message, DateTime? ExpiresAtUtc)> RequestApprovalAsync(
-            string requestType,
-            string? userEmail,
-            string? userId,
-            string? authToken)
-        {
-            if (string.IsNullOrWhiteSpace(requestType))
-                return (false, false, "Invalid request type", null);
-
-            if (!IsEndpointConfigured)
-                return (false, false, "Admin approval endpoint not configured. Set PATSKILLER_ADMIN_APPROVAL_API.", null);
-
-            try
-            {
-                var payload = new
-                {
-                    requestType,
-                    userId,
-                    email = userEmail,
-                    machineId = MachineIdentity.CombinedId,
-                    requestedAtUtc = DateTime.UtcNow
-                };
-
-                var req = new HttpRequestMessage(HttpMethod.Post, ApprovalApi)
-                {
-                    Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-                };
-
-                if (!string.IsNullOrWhiteSpace(authToken))
-                    req.Headers.Add("Authorization", $"Bearer {authToken}");
-
-                var resp = await _http.SendAsync(req);
-                var json = await resp.Content.ReadAsStringAsync();
-
-                if (!resp.IsSuccessStatusCode)
-                {
-                    return (false, false, $"Approval request failed (HTTP {(int)resp.StatusCode}).", null);
-                }
-
-                // Expected: { approved: true/false, expiresAt: "..." , message: "..." }
-                using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+                using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
-                var approved = root.TryGetProperty("approved", out var a) && a.ValueKind == JsonValueKind.True;
 
-                DateTime? expiresAt = null;
-                if (root.TryGetProperty("expiresAt", out var exp) && exp.ValueKind == JsonValueKind.String)
+                if (root.ValueKind == JsonValueKind.Array)
                 {
-                    if (DateTime.TryParse(exp.GetString(), out var dt))
-                        expiresAt = dt.ToUniversalTime();
+                    if (root.GetArrayLength() == 0) return null;
+                    return ApprovalRecord.FromJson(root[0]);
                 }
-
-                var message = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
-                    ? m.GetString() ?? ""
-                    : (approved ? "Approved" : "Pending approval");
-
-                if (approved)
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    // Default expiry: 24h if not provided
-                    var effectiveExpiry = expiresAt ?? DateTime.UtcNow.AddHours(24);
-                    SaveApproval(requestType, userEmail, effectiveExpiry);
-                    return (true, true, message, effectiveExpiry);
-                }
-
-                return (true, false, message, expiresAt);
-            }
-            catch (Exception ex)
-            {
-                return (false, false, ex.Message, null);
-            }
-        }
-
-        private void SaveApproval(string requestType, string? userEmail, DateTime expiresAtUtc)
-        {
-            var key = MakeKey(requestType, userEmail);
-            lock (_lock)
-            {
-                _cache[key] = new ApprovalCacheEntry { ExpiresAtUtc = expiresAtUtc };
-                PersistCache();
-            }
-        }
-
-        private static string MakeKey(string requestType, string? userEmail)
-            => $"{requestType}|{(userEmail ?? "").Trim().ToLowerInvariant()}";
-
-        private void LoadCache()
-        {
-            try
-            {
-                if (!File.Exists(CachePath)) return;
-                var json = File.ReadAllText(CachePath);
-                var dict = JsonSerializer.Deserialize<Dictionary<string, ApprovalCacheEntry>>(json);
-                if (dict != null)
-                {
-                    lock (_lock)
-                        _cache = new Dictionary<string, ApprovalCacheEntry>(dict, StringComparer.OrdinalIgnoreCase);
+                    return ApprovalRecord.FromJson(root);
                 }
             }
-            catch { /* ignore */ }
+            catch { }
+
+            return null;
         }
 
-        private void PersistCache()
+        private static string TrySummarize(string? body)
         {
-            try
+            if (string.IsNullOrWhiteSpace(body)) return "(empty)";
+            body = body.Trim();
+            return body.Length <= 180 ? body : body.Substring(0, 180) + "…";
+        }
+
+        public sealed class ApprovalRecord
+        {
+            public string? Status { get; init; }
+            public DateTime? ReviewedAtUtc { get; init; }
+            public string? Notes { get; init; }
+
+            public bool IsApproved => string.Equals(Status, "approved", StringComparison.OrdinalIgnoreCase);
+            public bool IsPending => string.Equals(Status, "pending", StringComparison.OrdinalIgnoreCase);
+            public bool IsRejected => string.Equals(Status, "rejected", StringComparison.OrdinalIgnoreCase);
+
+            public static ApprovalRecord FromJson(JsonElement obj)
             {
-                var dir = Path.GetDirectoryName(CachePath);
-                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
+                string? status = null;
+                string? notes = null;
+                DateTime? reviewedAt = null;
 
-                // Trim expired entries
-                var now = DateTime.UtcNow;
-                var cleaned = new Dictionary<string, ApprovalCacheEntry>(StringComparer.OrdinalIgnoreCase);
-                foreach (var kv in _cache)
+                if (obj.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.String)
+                    status = s.GetString();
+                if (obj.TryGetProperty("notes", out var n) && n.ValueKind == JsonValueKind.String)
+                    notes = n.GetString();
+                if (obj.TryGetProperty("reviewed_at", out var r) && r.ValueKind == JsonValueKind.String)
                 {
-                    if (kv.Value.ExpiresAtUtc > now)
-                        cleaned[kv.Key] = kv.Value;
+                    if (DateTime.TryParse(r.GetString(), out var dt))
+                        reviewedAt = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
                 }
-                _cache = cleaned;
 
-                File.WriteAllText(CachePath, JsonSerializer.Serialize(_cache, new JsonSerializerOptions { WriteIndented = true }));
+                return new ApprovalRecord { Status = status, Notes = notes, ReviewedAtUtc = reviewedAt };
             }
-            catch { /* ignore */ }
-        }
-
-        private sealed class ApprovalCacheEntry
-        {
-            public DateTime ExpiresAtUtc { get; set; }
         }
     }
 }
