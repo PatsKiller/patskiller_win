@@ -55,6 +55,7 @@ namespace PatsKillerPro.Forms
             BackColor = BgColor;
             ForeColor = TextMain;
             Font = new Font("Segoe UI", 10F);
+            AutoScaleMode = AutoScaleMode.Dpi;
             MinimumSize = new Size(820, 620);
             ClientSize = new Size(860, 680);
 
@@ -462,11 +463,12 @@ namespace PatsKillerPro.Forms
             // Footer buttons
             var footer = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 FlowDirection = FlowDirection.RightToLeft,
                 AutoSize = true,
                 WrapContents = false,
-                Margin = new Padding(0)
+                Margin = new Padding(0),
+                Padding = new Padding(0)
             };
 
             var btnClose = SecondaryButton("Close");
